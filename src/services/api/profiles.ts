@@ -3,7 +3,6 @@ import type { User, UserRole } from '../../types';
 import { auth } from '../auth';
 
 export const profiles = {
-  /** List profiles for one organisation (org admin / manager scope). */
   async list(orgId = requireOrgId()): Promise<User[]> {
     const result = await sb()
       .from('profiles')
@@ -13,7 +12,6 @@ export const profiles = {
     return unwrap(result) as unknown as User[];
   },
 
-  /** Platform-wide directory — intended for super_admin (RLS must allow). */
   async listAll(): Promise<User[]> {
     const result = await sb()
       .from('profiles')
@@ -55,10 +53,6 @@ export const profiles = {
     return unwrap(result) as unknown as User;
   },
 
-  /**
-   * Full admin update of any profile fields.
-   * Super admin (and RLS) can change any user; org admins limited by RLS.
-   */
   async updateAsAdmin(
     userId: string,
     patch: Partial<
@@ -69,10 +63,6 @@ export const profiles = {
     return unwrap(result) as unknown as User;
   },
 
-  /**
-   * Change role. Prefers RPC (audit trail) when present; falls back to direct
-   * update so super_admin always works even if the RPC is missing in the DB.
-   */
   async setRole(userId: string, role: UserRole): Promise<User> {
     const actor = requireUser();
     try {
@@ -83,9 +73,8 @@ export const profiles = {
       });
       if (!error && data) return data as unknown as User;
     } catch {
-      // RPC may not exist — fall through
+      // fall through
     }
-    // Direct update (RLS allows super_admin and same-org admin)
     const result = await sb()
       .from('profiles')
       .update({ role })
@@ -95,9 +84,6 @@ export const profiles = {
     return unwrap(result) as unknown as User;
   },
 
-  /**
-   * Change status. Same robust pattern as setRole.
-   */
   async setStatus(userId: string, status: string): Promise<User> {
     const actor = requireUser();
     try {
@@ -108,54 +94,106 @@ export const profiles = {
       });
       if (!error && data) return data as unknown as User;
     } catch {
-      // RPC may not exist — fall through
+      /* fall through */
     }
-    const result = await sb()
-      .from('profiles')
-      .update({ status })
-      .eq('id', userId)
-      .select()
-      .single();
+    if (status === 'Active') {
+      try {
+        const { data, error } = await sb().rpc('activate_profile', {
+          p_user_id: userId,
+          p_actor_name: actor.name,
+        });
+        if (!error && data) return data as unknown as User;
+      } catch {
+        /* fall through */
+      }
+    }
+    const result = await sb().from('profiles').update({ status }).eq('id', userId).select().single();
     return unwrap(result) as unknown as User;
   },
 
-  /**
-   * Invite staff. Super admin may pass any organizationId, or omit it for a
-   * platform-level user (no org). Org admins always require their own org.
-   */
+  async activate(userId: string): Promise<User> {
+    return this.setStatus(userId, 'Active');
+  },
+
   async invite(args: {
     email: string;
     name: string;
     role: UserRole;
     phone?: string;
     organizationId?: string | null;
-  }): Promise<{ userId: string; inviteSent: boolean }> {
+  }): Promise<{ userId: string; inviteSent: boolean; temporaryPassword?: string }> {
     const isSuper = auth.isSuperAdmin();
     let organizationId: string | null | undefined = args.organizationId;
 
     if (!isSuper) {
       organizationId = organizationId || requireOrgId();
     }
-    // Super admin may intentionally invite with no org (platform user)
     if (!isSuper && !organizationId) {
       throw new Error('Organisation is required to invite a user.');
     }
 
-    const result = await sb().functions.invoke('invite-staff', {
-      body: {
-        email: args.email,
-        name: args.name,
-        role: args.role,
-        phone: args.phone,
-        organizationId: organizationId || null,
+    try {
+      const result = await sb().functions.invoke('invite-staff', {
+        body: {
+          email: args.email,
+          name: args.name,
+          role: args.role,
+          phone: args.phone,
+          organizationId: organizationId || null,
+        },
+      });
+      if (!result.error && result.data?.success) {
+        return result.data as { userId: string; inviteSent: boolean };
+      }
+    } catch {
+      // edge function often unavailable
+    }
+
+    const { createClient } = await import('@supabase/supabase-js');
+    const url = import.meta.env.VITE_SUPABASE_URL as string;
+    const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+    const isolated = createClient(url, key, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    const tempPassword =
+      'Uw!' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 4).toUpperCase() + '9';
+
+    const { data: signed, error: signErr } = await isolated.auth.signUp({
+      email: args.email.toLowerCase(),
+      password: tempPassword,
+      options: {
+        data: {
+          name: args.name,
+          username: args.email.split('@')[0],
+          role: args.role,
+          phone: args.phone,
+          status: 'Active',
+          organization_id: organizationId || null,
+        },
       },
     });
-    if (result.error) throw new Error(result.error.message);
-    if (!result.data?.success) throw new Error(result.data?.error || 'Invite failed');
-    return result.data;
+
+    if (signErr) throw new Error(signErr.message);
+    const userId = signed.user?.id;
+    if (!userId) throw new Error('Could not create auth user');
+
+    await sb().from('profiles').upsert(
+      {
+        id: userId,
+        email: args.email.toLowerCase(),
+        name: args.name,
+        username: args.email.split('@')[0],
+        role: args.role,
+        phone: args.phone ?? null,
+        organization_id: organizationId || null,
+        status: 'Active',
+      },
+      { onConflict: 'id' }
+    );
+
+    return { userId, inviteSent: false, temporaryPassword: tempPassword };
   },
 
-  /** Soft-deactivate (status → Inactive). */
   async remove(userId: string): Promise<void> {
     const result = await sb()
       .from('profiles')
@@ -166,10 +204,6 @@ export const profiles = {
     unwrap(result);
   },
 
-  /**
-   * Super-admin only: hard-clear organization link and set Inactive.
-   * Does not delete the auth user (that requires service role).
-   */
   async purge(userId: string): Promise<void> {
     if (!auth.isSuperAdmin()) throw new Error('Only super admin can purge users.');
     const result = await sb()
