@@ -1,5 +1,7 @@
+import { createClient } from '@supabase/supabase-js';
 import { sb, unwrap } from './_helpers';
 import type { Organization, SubscriptionTier } from '../../types';
+import { auth } from '../auth';
 
 export interface RegisterOrgInput {
   companyName: string;
@@ -12,6 +14,27 @@ export interface RegisterOrgInput {
   propertyCount?: number;
   tenantCount?: number;
   staffBreakdown?: Record<string, number>;
+}
+
+function generateOrgCode(companyName: string): string {
+  const prefix =
+    (companyName || 'ORG').replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || 'ORG';
+  const d = new Date();
+  const date =
+    String(d.getDate()).padStart(2, '0') +
+    String(d.getMonth() + 1).padStart(2, '0') +
+    String(d.getFullYear()).slice(-2);
+  const rand = String(Math.floor(Math.random() * 9000) + 1000);
+  return `${prefix}-${date}-${rand}`;
+}
+
+/** Isolated client so signUp does not steal the super-admin session. */
+function anonAuthClient() {
+  const url = import.meta.env.VITE_SUPABASE_URL as string;
+  const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
 }
 
 export const organizations = {
@@ -79,17 +102,24 @@ export const organizations = {
     return unwrap(result) as unknown as Organization;
   },
 
-  async setStatus(
-    id: string,
-    status: Organization['status']
-  ): Promise<Organization> {
+  async setStatus(id: string, status: Organization['status']): Promise<Organization> {
     return this.update(id, { status });
   },
 
   async setTier(id: string, tier: SubscriptionTier): Promise<Organization> {
-    // Dynamic limits from super-admin editable plan config
-    const { subscriptionPlans } = await import('../subscriptionPlans');
-    const limits = subscriptionPlans.limitsFor(tier);
+    let limits = { property_limit: 2, tenant_limit: 50, user_limit: 10, storage_limit: 5 };
+    try {
+      const { subscriptionTiersApi } = await import('./subscriptionTiers');
+      const rows = await subscriptionTiersApi.list();
+      limits = subscriptionTiersApi.limitsForKey(tier, rows);
+    } catch {
+      try {
+        const { subscriptionPlans } = await import('../subscriptionPlans');
+        limits = subscriptionPlans.limitsFor(tier);
+      } catch {
+        /* defaults */
+      }
+    }
     return this.update(id, { subscription_tier: tier, ...limits });
   },
 
@@ -105,27 +135,175 @@ export const organizations = {
     organizationCode: string;
     adminUserId: string;
     inviteSent: boolean;
+    temporaryPassword?: string;
   }> {
-    const result = await sb().functions.invoke('approve-organization', {
-      body: args,
-    });
-    if (result.error) {
-      const ctx = (result.error as { context?: { body?: string } }).context;
-      let detail = result.error.message;
-      try {
-        if (ctx?.body) {
-          const parsed = typeof ctx.body === 'string' ? JSON.parse(ctx.body) : ctx.body;
-          if (parsed?.error) detail = parsed.error;
-        }
-      } catch {
-        // keep default message
+    const { data: org, error: orgLoadErr } = await sb()
+      .from('organizations')
+      .select('*')
+      .eq('id', args.organizationId)
+      .single();
+    if (orgLoadErr || !org) throw new Error(orgLoadErr?.message || 'Organisation not found');
+    if (org.status === 'Active') throw new Error('Organisation already active');
+
+    let updatedOrg: Organization | null = null;
+
+    try {
+      const { data, error } = await sb().rpc('approve_organization', {
+        p_org_id: args.organizationId,
+        p_approver_name: args.approverName || 'Super Admin',
+        p_custom_code: args.customCode ?? null,
+      });
+      if (!error && data) {
+        updatedOrg = (Array.isArray(data) ? data[0] : data) as Organization;
       }
-      throw new Error(detail || 'Approval request failed');
+    } catch {
+      // RPC missing — fall through
     }
-    if (!result.data?.success) {
-      throw new Error(result.data?.error || 'Approval failed');
+
+    if (!updatedOrg) {
+      let code =
+        (args.customCode || '').trim().toUpperCase() ||
+        (org.organization_code && !String(org.organization_code).startsWith('PENDING')
+          ? org.organization_code
+          : generateOrgCode(org.company_name));
+
+      const { data: patched, error: patchErr } = await sb()
+        .from('organizations')
+        .update({
+          status: 'Active',
+          organization_code: code,
+          approved_at: new Date().toISOString(),
+          approved_by: auth.getCurrentUser()?.id ?? null,
+        })
+        .eq('id', args.organizationId)
+        .select('*')
+        .single();
+
+      if (patchErr || !patched) {
+        throw new Error(
+          patchErr?.message ||
+            'Could not activate organisation. Ensure you are signed in as super_admin and RLS allows updates.'
+        );
+      }
+      updatedOrg = patched as unknown as Organization;
     }
-    return result.data;
+
+    const adminEmail = (args.adminEmail || org.email).toLowerCase().trim();
+    const adminName = args.adminName || org.owner_name || 'Org Admin';
+    const tempPassword =
+      args.temporaryPassword ||
+      'Uw!' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 4).toUpperCase() + '9';
+
+    let adminUserId: string | null = null;
+    let inviteSent = false;
+
+    try {
+      const inv = await sb().functions.invoke('invite-staff', {
+        body: {
+          email: adminEmail,
+          name: adminName,
+          role: 'admin',
+          organizationId: updatedOrg.id,
+        },
+      });
+      if (!inv.error && inv.data?.userId) {
+        adminUserId = inv.data.userId;
+        inviteSent = !!inv.data.inviteSent;
+      }
+    } catch {
+      // ignore
+    }
+
+    if (!adminUserId) {
+      const isolated = anonAuthClient();
+      const { data: signed, error: signErr } = await isolated.auth.signUp({
+        email: adminEmail,
+        password: tempPassword,
+        options: {
+          data: {
+            name: adminName,
+            username: adminEmail.split('@')[0],
+            role: 'admin',
+            status: 'Active',
+            organization_id: updatedOrg.id,
+          },
+        },
+      });
+
+      if (signErr) {
+        const { data: existing } = await sb()
+          .from('profiles')
+          .select('id')
+          .eq('email', adminEmail)
+          .maybeSingle();
+        if (existing?.id) {
+          adminUserId = existing.id;
+        } else {
+          throw new Error(
+            `Organisation approved (code ${updatedOrg.organization_code}), but admin user could not be created: ${signErr.message}. Create the user from User Directory or ask them to register with ${adminEmail}.`
+          );
+        }
+      } else {
+        adminUserId = signed.user?.id ?? null;
+      }
+    }
+
+    if (!adminUserId) {
+      return {
+        organizationId: updatedOrg.id,
+        organizationCode: updatedOrg.organization_code,
+        adminUserId: '',
+        inviteSent: false,
+        temporaryPassword: tempPassword,
+      };
+    }
+
+    const { error: profileErr } = await sb().from('profiles').upsert(
+      {
+        id: adminUserId,
+        organization_id: updatedOrg.id,
+        role: 'admin',
+        name: adminName,
+        email: adminEmail,
+        username: adminEmail.split('@')[0],
+        status: 'Active',
+      },
+      { onConflict: 'id' }
+    );
+
+    if (profileErr) {
+      await sb()
+        .from('profiles')
+        .update({
+          organization_id: updatedOrg.id,
+          role: 'admin',
+          status: 'Active',
+          name: adminName,
+        })
+        .eq('id', adminUserId);
+    }
+
+    try {
+      await sb().from('notifications').insert({
+        user_id: adminUserId,
+        role: 'admin',
+        organization_id: updatedOrg.id,
+        type: 'approval',
+        title: 'Welcome to Umhlaba Wami',
+        message: `Your organisation ${updatedOrg.company_name} is approved. Org code: ${updatedOrg.organization_code}.`,
+        read: false,
+      });
+    } catch {
+      // ignore
+    }
+
+    return {
+      organizationId: updatedOrg.id,
+      organizationCode: updatedOrg.organization_code,
+      adminUserId,
+      inviteSent,
+      temporaryPassword: inviteSent ? undefined : tempPassword,
+    };
   },
 
   async reject(args: {
@@ -133,11 +311,17 @@ export const organizations = {
     approverName: string;
     reason: string;
   }): Promise<void> {
-    const result = await sb().rpc('reject_organization', {
+    const rpc = await sb().rpc('reject_organization', {
       p_org_id: args.organizationId,
       p_approver_name: args.approverName,
       p_reason: args.reason,
     });
-    if (result.error) throw new Error(result.error.message);
+    if (!rpc.error) return;
+
+    const { error } = await sb()
+      .from('organizations')
+      .update({ status: 'Rejected' })
+      .eq('id', args.organizationId);
+    if (error) throw new Error(error.message);
   },
 };
