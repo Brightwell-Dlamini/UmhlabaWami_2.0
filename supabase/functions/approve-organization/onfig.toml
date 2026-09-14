@@ -1,3 +1,0 @@
-# Verify JWT so only authenticated users can hit the function.
-# The function itself additionally checks role = super_admin.
-verify_jwt = true
