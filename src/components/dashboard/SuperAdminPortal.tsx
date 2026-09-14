@@ -63,17 +63,20 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
     invalidateKeys: ['super_orgs'],
     onSuccess: (res) => {
       setActionError('');
+      const pw = (res as { temporaryPassword?: string }).temporaryPassword;
       setActionNotice(
-        `Approved — code ${res.organizationCode}${res.inviteSent ? ' · invite email sent' : ''}.`
+        `Approved — code ${res.organizationCode}` +
+          (res.inviteSent ? ' · invite email sent' : '') +
+          (pw ? ` · temporary password: ${pw} (share with the org admin once)` : '')
       );
-      setTimeout(() => setActionNotice(''), 6000);
+      setTimeout(() => setActionNotice(''), 25000);
       setCustomCode('');
       setAdminEmail('');
     },
     onError: (err: Error) => {
       setActionNotice('');
       setActionError(err?.message || 'Approval failed');
-      setTimeout(() => setActionError(''), 8000);
+      setTimeout(() => setActionError(''), 10000);
     },
   });
 
@@ -262,8 +265,8 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
       {activeTab === 'subscriptions' && (
         <div className="grid md:grid-cols-3 gap-4">
           {([
-            { tier: 'Starter' as SubscriptionTier, price: 'E999', limits: '2 centres · 50 tenants · 10 users' },
-            { tier: 'Professional' as SubscriptionTier, price: 'E2,999', limits: '10 centres · 250 tenants · 40 users' },
+            { tier: 'Starter' as SubscriptionTier, price: 'E999 / mo', limits: '2 centres · 50 tenants · 10 users' },
+            { tier: 'Professional' as SubscriptionTier, price: 'E2,999 / mo', limits: '10 centres · 250 tenants · 40 users' },
             { tier: 'Enterprise' as SubscriptionTier, price: 'Custom', limits: 'Unlimited centres · priority support' },
           ] as const).map((card) => {
             const count = orgs.filter((o) => o.subscription_tier === card.tier).length;
@@ -276,7 +279,9 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
               </div>
             );
           })}
-          <p className="md:col-span-3 text-xs text-slate-500">Edit limits via Subscription Tiers config. Change an organisation's tier from the Organisations tab — limits update automatically.</p>
+          <p className="md:col-span-3 text-xs text-slate-500">
+            Run SQL migration <code className="font-mono">005_approval_tiers_users.sql</code> in Supabase to enable full tier CRUD (edit price wording, limits, add/remove plans). Until then, assign tiers from Organisations — limits still apply.
+          </p>
         </div>
       )}
 
@@ -307,7 +312,6 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
           <h2 className="text-sm font-bold flex items-center gap-2"><Database className="w-4 h-4 text-blue-600" /> Database backup</h2>
           <p className="text-xs text-slate-500 leading-relaxed">
             Logical backups are managed in the Supabase project (Dashboard → Database → Backups) or via the Supabase CLI.
-            Export organisation CSVs from this console for operational recovery copies.
           </p>
           <button type="button" onClick={exportOrgs} className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">Download organisations CSV</button>
         </div>
