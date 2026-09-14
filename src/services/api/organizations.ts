@@ -87,15 +87,10 @@ export const organizations = {
   },
 
   async setTier(id: string, tier: SubscriptionTier): Promise<Organization> {
-    const limits: Record<
-      SubscriptionTier,
-      Pick<Organization, 'property_limit' | 'tenant_limit' | 'user_limit' | 'storage_limit'>
-    > = {
-      Starter: { property_limit: 2, tenant_limit: 50, user_limit: 10, storage_limit: 5 },
-      Professional: { property_limit: 10, tenant_limit: 250, user_limit: 40, storage_limit: 25 },
-      Enterprise: { property_limit: 999, tenant_limit: 9999, user_limit: 500, storage_limit: 200 },
-    };
-    return this.update(id, { subscription_tier: tier, ...limits[tier] });
+    // Dynamic limits from super-admin editable plan config
+    const { subscriptionPlans } = await import('../subscriptionPlans');
+    const limits = subscriptionPlans.limitsFor(tier);
+    return this.update(id, { subscription_tier: tier, ...limits });
   },
 
   async approve(args: {
@@ -114,7 +109,19 @@ export const organizations = {
     const result = await sb().functions.invoke('approve-organization', {
       body: args,
     });
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) {
+      const ctx = (result.error as { context?: { body?: string } }).context;
+      let detail = result.error.message;
+      try {
+        if (ctx?.body) {
+          const parsed = typeof ctx.body === 'string' ? JSON.parse(ctx.body) : ctx.body;
+          if (parsed?.error) detail = parsed.error;
+        }
+      } catch {
+        // keep default message
+      }
+      throw new Error(detail || 'Approval request failed');
+    }
     if (!result.data?.success) {
       throw new Error(result.data?.error || 'Approval failed');
     }
