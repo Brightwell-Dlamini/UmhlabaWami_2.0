@@ -1,7 +1,9 @@
 import { sb, unwrap, requireOrgId, requireUser } from './_helpers';
 import type { User, UserRole } from '../../types';
+import { auth } from '../auth';
 
 export const profiles = {
+  /** List profiles for one organisation (org admin / manager scope). */
   async list(orgId = requireOrgId()): Promise<User[]> {
     const result = await sb()
       .from('profiles')
@@ -11,49 +13,53 @@ export const profiles = {
     return unwrap(result) as unknown as User[];
   },
 
-  async get(id: string): Promise<User> {
+  /** Platform-wide directory — intended for super_admin (RLS must allow). */
+  async listAll(): Promise<User[]> {
     const result = await sb()
       .from('profiles')
       .select('*')
-      .eq('id', id)
-      .single();
+      .order('created_at', { ascending: false });
+    return unwrap(result) as unknown as User[];
+  },
+
+  async listByOrg(orgId: string): Promise<User[]> {
+    const result = await sb()
+      .from('profiles')
+      .select('*')
+      .eq('organization_id', orgId)
+      .order('created_at', { ascending: false });
+    return unwrap(result) as unknown as User[];
+  },
+
+  async get(id: string): Promise<User> {
+    const result = await sb().from('profiles').select('*').eq('id', id).single();
     return unwrap(result) as unknown as User;
   },
 
   async me(): Promise<User | null> {
-    const { data: { user } } = await sb().auth.getUser();
+    const {
+      data: { user },
+    } = await sb().auth.getUser();
     if (!user) return null;
-    const result = await sb()
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .maybeSingle();
+    const result = await sb().from('profiles').select('*').eq('id', user.id).maybeSingle();
     if (result.error) throw new Error(result.error.message);
     return result.data as unknown as User | null;
   },
 
   async updateSelf(patch: Partial<Pick<User, 'name' | 'phone' | 'avatar_url'>>) {
-    const { data: { user } } = await sb().auth.getUser();
+    const {
+      data: { user },
+    } = await sb().auth.getUser();
     if (!user) throw new Error('Not authenticated.');
-    const result = await sb()
-      .from('profiles')
-      .update(patch)
-      .eq('id', user.id)
-      .select()
-      .single();
+    const result = await sb().from('profiles').update(patch).eq('id', user.id).select().single();
     return unwrap(result) as unknown as User;
   },
 
   async updateAsAdmin(
     userId: string,
-    patch: Partial<Pick<User, 'name' | 'email' | 'phone' | 'role' | 'status'>>
+    patch: Partial<Pick<User, 'name' | 'email' | 'phone' | 'role' | 'status' | 'organization_id'>>
   ): Promise<User> {
-    const result = await sb()
-      .from('profiles')
-      .update(patch)
-      .eq('id', userId)
-      .select()
-      .single();
+    const result = await sb().from('profiles').update(patch).eq('id', userId).select().single();
     return unwrap(result) as unknown as User;
   },
 
@@ -79,15 +85,28 @@ export const profiles = {
     return data as unknown as User;
   },
 
-  /** Invite a new staff member via Edge Function (creates auth user + profile). */
+  /** Invite staff. Super admin may pass any organizationId. */
   async invite(args: {
     email: string;
     name: string;
     role: UserRole;
     phone?: string;
+    organizationId?: string;
   }): Promise<{ userId: string; inviteSent: boolean }> {
+    const organizationId =
+      args.organizationId ||
+      (auth.isSuperAdmin() ? args.organizationId : undefined) ||
+      requireOrgId();
+    if (!organizationId) throw new Error('Organisation is required to invite a user.');
+
     const result = await sb().functions.invoke('invite-staff', {
-      body: { ...args, organizationId: requireOrgId() },
+      body: {
+        email: args.email,
+        name: args.name,
+        role: args.role,
+        phone: args.phone,
+        organizationId,
+      },
     });
     if (result.error) throw new Error(result.error.message);
     if (!result.data?.success) throw new Error(result.data?.error || 'Invite failed');
@@ -95,9 +114,6 @@ export const profiles = {
   },
 
   async remove(userId: string): Promise<void> {
-    // Deleting the auth user requires the Edge Function; for now we just
-    // detach the profile from the org (soft removal). Full deletion is
-    // handled by a `delete-staff` Edge Function (add when needed).
     const result = await sb()
       .from('profiles')
       .update({ status: 'Inactive' })
@@ -105,5 +121,15 @@ export const profiles = {
       .select()
       .single();
     unwrap(result);
+  },
+
+  async assignOrganization(userId: string, organizationId: string | null): Promise<User> {
+    const result = await sb()
+      .from('profiles')
+      .update({ organization_id: organizationId })
+      .eq('id', userId)
+      .select()
+      .single();
+    return unwrap(result) as unknown as User;
   },
 };

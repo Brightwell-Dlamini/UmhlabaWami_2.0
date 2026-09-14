@@ -15,7 +15,6 @@ export interface RegisterOrgInput {
 }
 
 export const organizations = {
-  /** List all organisations the caller can see (super admin sees all). */
   async list(): Promise<Organization[]> {
     const result = await sb()
       .from('organizations')
@@ -34,15 +33,10 @@ export const organizations = {
   },
 
   async get(id: string): Promise<Organization> {
-    const result = await sb()
-      .from('organizations')
-      .select('*')
-      .eq('id', id)
-      .single();
+    const result = await sb().from('organizations').select('*').eq('id', id).single();
     return unwrap(result) as unknown as Organization;
   },
 
-  /** Public — anyone can register. Returns the newly created org. */
   async register(input: RegisterOrgInput): Promise<Organization> {
     const result = await sb().rpc('register_organization', {
       p_company_name: input.companyName,
@@ -59,27 +53,51 @@ export const organizations = {
     return unwrap(result) as unknown as Organization;
   },
 
-  /** Update editable fields (RLS restricts to admin-of-own-org or super_admin). */
   async update(
     id: string,
-    patch: Partial<Pick<Organization,
-      'company_name' | 'owner_name' | 'email' | 'phone' | 'address' |
-      'logo_url' | 'custom_branding_color' | 'monthly_fee_estimate'
-    >>
+    patch: Partial<
+      Pick<
+        Organization,
+        | 'company_name'
+        | 'owner_name'
+        | 'email'
+        | 'phone'
+        | 'address'
+        | 'logo_url'
+        | 'custom_branding_color'
+        | 'monthly_fee_estimate'
+        | 'subscription_tier'
+        | 'status'
+        | 'property_limit'
+        | 'tenant_limit'
+        | 'user_limit'
+        | 'storage_limit'
+      >
+    >
   ): Promise<Organization> {
-    const result = await sb()
-      .from('organizations')
-      .update(patch)
-      .eq('id', id)
-      .select()
-      .single();
+    const result = await sb().from('organizations').update(patch).eq('id', id).select().single();
     return unwrap(result) as unknown as Organization;
   },
 
-  /**
-   * Approve a pending org via the Edge Function.
-   * Requires the caller to be a super admin.
-   */
+  async setStatus(
+    id: string,
+    status: Organization['status']
+  ): Promise<Organization> {
+    return this.update(id, { status });
+  },
+
+  async setTier(id: string, tier: SubscriptionTier): Promise<Organization> {
+    const limits: Record<
+      SubscriptionTier,
+      Pick<Organization, 'property_limit' | 'tenant_limit' | 'user_limit' | 'storage_limit'>
+    > = {
+      Starter: { property_limit: 2, tenant_limit: 50, user_limit: 10, storage_limit: 5 },
+      Professional: { property_limit: 10, tenant_limit: 250, user_limit: 40, storage_limit: 25 },
+      Enterprise: { property_limit: 999, tenant_limit: 9999, user_limit: 500, storage_limit: 200 },
+    };
+    return this.update(id, { subscription_tier: tier, ...limits[tier] });
+  },
+
   async approve(args: {
     organizationId: string;
     approverName: string;

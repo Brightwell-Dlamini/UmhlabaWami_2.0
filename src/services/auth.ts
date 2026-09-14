@@ -14,7 +14,6 @@ class AuthService {
     void this.bootstrap();
   }
 
-  /** Resolves once the initial session + profile load finishes (or is skipped). */
   public whenReady(): Promise<void> {
     return this.readyPromise;
   }
@@ -49,7 +48,6 @@ class AuthService {
     } catch (e) {
       console.warn('[auth] bootstrap failed', e);
     } finally {
-      // Always unblock the UI, even when Supabase env is missing or network fails.
       this.resolveReady();
     }
   }
@@ -119,10 +117,6 @@ class AuthService {
     return { ok: true as const, sb: getSupabase() };
   }
 
-  /**
-   * Login with organisation code + username + password.
-   * The username may be either a username or an email.
-   */
   public async login(
     organizationCode: string,
     username: string,
@@ -134,6 +128,24 @@ class AuthService {
 
     const code = organizationCode.trim().toUpperCase();
     const identifier = username.trim().toLowerCase();
+
+    // Platform super-admin path: code SUPER / PLATFORM / ADMIN
+    if (['SUPER', 'PLATFORM', 'ADMIN'].includes(code)) {
+      const emailGuess = identifier.includes('@') ? identifier : null;
+      if (emailGuess) {
+        const { error: signErr } = await sb.auth.signInWithPassword({
+          email: emailGuess,
+          password,
+        });
+        if (signErr) return { success: false, error: signErr.message };
+        await new Promise((r) => setTimeout(r, 250));
+        if (this.currentUser?.role === 'super_admin') {
+          return { success: true, user: this.currentUser };
+        }
+        // If signed in but not super_admin, still return success — profile load is source of truth
+        return { success: true, user: this.currentUser || undefined };
+      }
+    }
 
     const { data: org, error: orgErr } = await sb.rpc('lookup_organization', { p_code: code });
     if (orgErr) return { success: false, error: orgErr.message };
@@ -174,30 +186,50 @@ class AuthService {
     this.notify();
   }
 
-  // ----- role helpers -----
+  // ----- role helpers (super_admin has every capability) -----
+  public isSuperAdmin(u = this.currentUser): boolean {
+    return u?.role === 'super_admin';
+  }
+
   public canCreateTicket(u = this.currentUser) {
-    return !!u && ['tenant', 'property_manager', 'admin', 'super_admin'].includes(u.role);
+    if (this.isSuperAdmin(u)) return true;
+    return !!u && ['tenant', 'property_manager', 'admin'].includes(u.role);
   }
   public canAssignTicket(u = this.currentUser) {
-    return !!u && ['property_manager', 'admin', 'super_admin'].includes(u.role);
+    if (this.isSuperAdmin(u)) return true;
+    return !!u && ['property_manager', 'admin'].includes(u.role);
   }
   public canManageProperties(u = this.currentUser) {
-    return !!u && ['property_manager', 'admin', 'super_admin'].includes(u.role);
+    if (this.isSuperAdmin(u)) return true;
+    return !!u && ['property_manager', 'admin'].includes(u.role);
   }
   public canManageUsers(u = this.currentUser) {
-    return !!u && ['admin', 'super_admin'].includes(u.role);
+    if (this.isSuperAdmin(u)) return true;
+    return !!u && u.role === 'admin';
   }
   public canAccessFinancials(u = this.currentUser) {
-    return !!u && ['property_manager', 'finance', 'admin', 'super_admin'].includes(u.role);
+    if (this.isSuperAdmin(u)) return true;
+    return !!u && ['property_manager', 'finance', 'admin'].includes(u.role);
   }
   public canApproveOrganizations(u = this.currentUser) {
-    return u?.role === 'super_admin';
+    return this.isSuperAdmin(u);
   }
   public canManageSubscriptions(u = this.currentUser) {
-    return u?.role === 'super_admin';
+    return this.isSuperAdmin(u);
   }
   public canManagePublicListings(u = this.currentUser) {
-    return !!u && ['admin', 'super_admin'].includes(u.role);
+    if (this.isSuperAdmin(u)) return true;
+    return !!u && u.role === 'admin';
+  }
+  /** Super admin may act across any organisation and any module. */
+  public canAccessEverything(u = this.currentUser) {
+    return this.isSuperAdmin(u);
+  }
+  public canManageAnyUser(u = this.currentUser) {
+    return this.isSuperAdmin(u);
+  }
+  public canChangeAnyRole(u = this.currentUser) {
+    return this.isSuperAdmin(u);
   }
 }
 
