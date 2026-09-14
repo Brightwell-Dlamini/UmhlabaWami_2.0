@@ -4,7 +4,6 @@ import {
 } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { organizations as orgApi } from '../../services/api/organizations';
-import { shops as shopsApi } from '../../services/api/shops';
 import { auditLogs as auditApi } from '../../services/api/auditLogs';
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
@@ -16,12 +15,11 @@ interface Props {
   initialTab?: string;
 }
 
-type Tab = 'approvals' | 'organizations' | 'listings' | 'audit' | 'subscriptions' | 'backup';
+type Tab = 'approvals' | 'organizations' | 'audit' | 'subscriptions' | 'backup';
 
 export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
   const mapTab = (t?: string): Tab => {
     if (t === 'super_organizations') return 'organizations';
-    if (t === 'super_listings') return 'listings';
     if (t === 'audit_logs') return 'audit';
     if (t === 'super_subscriptions') return 'subscriptions';
     if (t === 'db_backup') return 'backup';
@@ -35,11 +33,11 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
   }, [initialTab]);
 
   const [actionNotice, setActionNotice] = useState('');
+  const [actionError, setActionError] = useState('');
   const [customCode, setCustomCode] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
 
   const { data: orgs = [] } = useSupabaseQuery(['super_orgs'], () => orgApi.list());
-  const { data: shops = [] } = useSupabaseQuery(['super_shops'], () => shopsApi.publicAvailable());
   const { data: logs = [] } = useSupabaseQuery(
     ['super_audit'],
     () => auditApi.list(undefined as never, 200),
@@ -64,12 +62,18 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
       }),
     invalidateKeys: ['super_orgs'],
     onSuccess: (res) => {
+      setActionError('');
       setActionNotice(
         `Approved — code ${res.organizationCode}${res.inviteSent ? ' · invite email sent' : ''}.`
       );
-      setTimeout(() => setActionNotice(''), 5000);
+      setTimeout(() => setActionNotice(''), 6000);
       setCustomCode('');
       setAdminEmail('');
+    },
+    onError: (err: Error) => {
+      setActionNotice('');
+      setActionError(err?.message || 'Approval failed');
+      setTimeout(() => setActionError(''), 8000);
     },
   });
 
@@ -128,7 +132,6 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
     { id: 'approvals', label: `Approvals (${pending.length})`, icon: Shield },
     { id: 'organizations', label: 'Organisations', icon: Layers },
     { id: 'subscriptions', label: 'Tiers', icon: Sliders },
-    { id: 'listings', label: 'Listings', icon: Store },
     { id: 'audit', label: 'Audit', icon: History },
     { id: 'backup', label: 'Backup', icon: Database },
   ];
@@ -151,6 +154,9 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
 
       {actionNotice && (
         <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium">{actionNotice}</div>
+      )}
+      {actionError && (
+        <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-medium">{actionError}</div>
       )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -197,7 +203,7 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
               </div>
               <div className="flex items-center gap-2 justify-end">
                 <button type="button" onClick={() => reject.mutate({ orgId: org.id })} className="px-3.5 py-2 rounded-xl text-xs font-semibold text-red-600 hover:bg-red-50 flex items-center gap-1"><XCircle className="w-4 h-4" /> Reject</button>
-                <button type="button" onClick={() => approve.mutate({ orgId: org.id })} disabled={approve.loading} className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4" /> Approve & issue code</button>
+                <button type="button" onClick={() => approve.mutate({ orgId: org.id })} disabled={approve.loading} className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4" /> {approve.loading ? 'Approving…' : 'Approve & issue code'}</button>
               </div>
             </div>
           ))}
@@ -270,24 +276,7 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
               </div>
             );
           })}
-          <p className="md:col-span-3 text-xs text-slate-500">Change an organisation&apos;s tier from the Organisations tab — limits update automatically.</p>
-        </div>
-      )}
-
-      {activeTab === 'listings' && (
-        <div className="bg-white dark:bg-slate-800 rounded-2xl border p-5">
-          <h2 className="text-sm font-bold mb-3">Public marketplace — currently listed</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {shops.length === 0 ? (
-              <div className="col-span-full p-8 text-center text-xs text-slate-400">No public listings.</div>
-            ) : shops.map((s) => (
-              <div key={s.id} className="p-4 rounded-xl border bg-slate-50 dark:bg-slate-900/50">
-                <div className="text-xs font-bold">Unit {s.shop_number}</div>
-                <div className="text-[11px] text-slate-500">{s.property_type} · {s.size_sqm} m²</div>
-                <div className="text-xs font-bold text-blue-600 mt-1">E{s.rental_amount.toLocaleString()}/mo</div>
-              </div>
-            ))}
-          </div>
+          <p className="md:col-span-3 text-xs text-slate-500">Edit limits via Subscription Tiers config. Change an organisation's tier from the Organisations tab — limits update automatically.</p>
         </div>
       )}
 
