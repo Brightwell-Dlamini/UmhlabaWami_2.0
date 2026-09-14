@@ -8,7 +8,7 @@ const CORS_HEADERS = {
 };
 
 interface Body {
-  organizationId: string;
+  organizationId?: string | null;
   email: string;
   name: string;
   role: string;
@@ -43,8 +43,18 @@ Deno.serve(async (req) => {
     }
 
     const body = (await req.json()) as Body;
-    if (!body.email || !body.name || !body.role || !body.organizationId) {
-      return json({ error: 'Missing required fields' }, 400);
+    if (!body.email || !body.name || !body.role) {
+      return json({ error: 'Missing required fields (email, name, role)' }, 400);
+    }
+
+    const isSuper = caller.role === 'super_admin';
+    // Org admins must supply (or inherit) an organisation; super admin may create platform users
+    let organizationId: string | null = body.organizationId ?? null;
+    if (!isSuper) {
+      organizationId = organizationId || caller.organization_id || null;
+      if (!organizationId) {
+        return json({ error: 'Organisation is required for non-super-admin invites' }, 400);
+      }
     }
 
     // ---- Service-role client ----
@@ -85,7 +95,7 @@ Deno.serve(async (req) => {
       .from('profiles')
       .upsert({
         id: authUserId,
-        organization_id: body.organizationId,
+        organization_id: organizationId,
         email: body.email.toLowerCase(),
         name: body.name,
         username: body.email.split('@')[0],
