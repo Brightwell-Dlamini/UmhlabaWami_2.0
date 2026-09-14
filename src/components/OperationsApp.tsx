@@ -60,7 +60,6 @@ export function OperationsApp({ currentUser, showToast }: Props) {
     setSidebarActiveTab(defaultTab(currentUser.role));
   }, [currentUser.role, currentUser.id]);
 
-  // Periodic SLA escalation call — no-op if not permitted
   useEffect(() => {
     if (!currentUser.organization_id) return;
     const run = () => ticketsApi.runEscalation().catch(() => {});
@@ -69,7 +68,6 @@ export function OperationsApp({ currentUser, showToast }: Props) {
     return () => clearInterval(id);
   }, [currentUser.organization_id]);
 
-  // Live emergency alert banner
   const { data: activeEmergency } = useSupabaseQuery(
     ['emergency_broadcasts', 'active', currentUser.organization_id ?? ''],
     () => annApi.activeEmergencyList?.() ?? Promise.resolve([]),
@@ -184,8 +182,7 @@ export function OperationsApp({ currentUser, showToast }: Props) {
             sidebarActiveTab === 'overview') &&
             currentUser.role !== 'tenant' &&
             currentUser.role !== 'maintenance' &&
-            currentUser.role !== 'finance' &&
-            currentUser.role !== 'super_admin' && (
+            currentUser.role !== 'finance' && (
               <ManagerDashboard
                 onViewTicket={(id) => setSelectedTicketId(id)}
                 onOpenCreateTicket={() => setIsCreateTicketOpen(true)}
