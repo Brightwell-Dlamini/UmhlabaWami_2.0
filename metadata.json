@@ -1,0 +1,6 @@
+{
+  "name": "Umhlaba Wami",
+  "description": "Manage Better. Respond Faster. Know More. Commercial property management & vacant space marketplace for shopping centers and commercial properties in Eswatini.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
