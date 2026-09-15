@@ -78,6 +78,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'preventive_maintenance', label: 'Preventive Maintenance', icon: CalendarClock },
           { id: 'maintenance_ops', label: 'Maintenance Ops', icon: Wrench },
           { id: 'tenants_list', label: 'Tenants', icon: Users },
+          { id: 'leases', label: 'Leases & SLAs', icon: FileBadge },
           { id: 'staff_schedule', label: 'Roster & Shifts', icon: Calendar },
           { id: 'vendors', label: 'Vendors', icon: Truck },
           { id: 'announcements', label: 'Announcements', icon: Megaphone },
@@ -123,6 +124,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'analytics_reports', label: 'Export Reports', icon: BarChart3 },
           { id: 'org_settings', label: 'Org Settings', icon: Settings },
           { id: 'profile_settings', label: 'My Profile', icon: User },
+          { id: 'leases', label: 'Leases & SLAs', icon: FileBadge },
         ];
       case 'super_admin':
         return [
