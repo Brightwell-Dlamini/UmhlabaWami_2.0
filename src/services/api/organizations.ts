@@ -178,17 +178,23 @@ export const organizations = {
   }> {
     if (isMemoryMode()) {
       const db = await getMemoryDb();
+
+      // db.approveOrganization signature:
+      //   (orgId, superAdminIdOrOptions?, superAdminName?, overrides?)
+      // We pass the options object as the 2nd arg (so organization_code is
+      // honoured) and the approver name as the 3rd arg. The 4th overrides
+      // slot is unused here.
       const code = db.approveOrganization(
         args.organizationId,
-        args.approverName,
-        undefined,
-        args.customCode ? { organization_code: args.customCode } : undefined
+        args.customCode ? { organization_code: args.customCode } : undefined,
+        args.approverName
       );
-      // db.approveOrganization also provisions the admin user
+
       const org = db.organizations.find((o) => o.id === args.organizationId);
       const admin = db.users.find(
         (u) => u.organization_id === args.organizationId && u.role === 'admin'
       );
+
       return {
         organizationId: args.organizationId,
         organizationCode: code || org?.organization_code || '',
@@ -203,8 +209,9 @@ export const organizations = {
     });
 
     if (!rpcResult.error && rpcResult.data) {
-      const org = (Array.isArray(rpcResult.data) ? rpcResult.data[0] : rpcResult.data) as
-        Organization & { owner_auth_user_id?: string };
+      const org = (Array.isArray(rpcResult.data)
+        ? rpcResult.data[0]
+        : rpcResult.data) as Organization & { owner_auth_user_id?: string };
       return {
         organizationId: org.id,
         organizationCode: org.organization_code,
@@ -230,7 +237,8 @@ export const organizations = {
     }
 
     const code =
-      (args.customCode || '').trim().toUpperCase() || generateOrgCode(org.company_name);
+      (args.customCode || '').trim().toUpperCase() ||
+      generateOrgCode(org.company_name);
 
     const { data: patched, error: patchErr } = await sb()
       .from('organizations')
@@ -287,7 +295,11 @@ export const organizations = {
   }): Promise<void> {
     if (isMemoryMode()) {
       const db = await getMemoryDb();
-      db.rejectOrganization(args.organizationId, args.approverName, args.reason);
+      // db.rejectOrganization signature:
+      //   (orgId, superAdminIdOrReason?, superAdminName?, reasonText?)
+      // Passing reason as 2nd arg and name as 3rd arg is the correct
+      // positional call.
+      db.rejectOrganization(args.organizationId, args.reason, args.approverName);
       return;
     }
     const result = await sb().rpc('reject_organization', {
