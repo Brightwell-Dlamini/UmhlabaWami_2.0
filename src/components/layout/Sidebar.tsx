@@ -66,7 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'announcements', label: 'Announcements', icon: Megaphone },
           { id: 'profile_settings', label: 'My Profile', icon: User },
         ];
-      case 'property_manager':
+      case 'property_manager':return[{ id: 'finance_overview', label: 'Finances', icon: DollarSign },   // NEW]
       case 'landlord':
         return [
           { id: 'manager_overview', label: 'Dashboard', icon: LayoutDashboard },
