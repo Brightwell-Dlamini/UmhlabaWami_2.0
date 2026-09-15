@@ -1,9 +1,9 @@
 /**
  * Ultra-light query layer.
  * - fetch-on-mount
- * - in-memory cache keyed by string
- * - invalidation via `invalidate(keyPrefix)`
- * - subscribers get notified on invalidation
+ * - in-memory cache keyed by JSON.stringify(keyArray)
+ * - invalidation via `invalidate(prefix)` matching array keys like ["tenants", orgId]
+ * - subscribers get notified on invalidation and refetch
  */
 
 type Listener = () => void;
@@ -29,9 +29,33 @@ export function subscribe(key: string, listener: Listener): () => void {
   };
 }
 
-function notifyPrefix(prefix: string) {
+/** True if a cache key belongs to the invalidate prefix. */
+function keyMatchesPrefix(key: string, prefix: string): boolean {
+  if (!prefix) return false;
+  if (key === prefix) return true;
+  // Legacy colon prefixes: "tickets:orgId"
+  if (key.startsWith(prefix + ':') || key.startsWith(prefix + ',')) return true;
+  // JSON.stringify(['tenants', orgId]) → '["tenants","uuid"]'
+  try {
+    const parsed = JSON.parse(key) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed.some(
+        (part) =>
+          part === prefix ||
+          (typeof part === 'string' && (part === prefix || part.startsWith(prefix + ':')))
+      );
+    }
+  } catch {
+    /* not JSON */
+  }
+  // Fallback: quoted segment inside the stringified array
+  if (key.includes(`"${prefix}"`) || key.includes(`"${prefix}:`)) return true;
+  return false;
+}
+
+function notifyMatching(prefix: string) {
   for (const [key, set] of listeners) {
-    if (key === prefix || key.startsWith(prefix + ':') || key.startsWith(prefix)) {
+    if (keyMatchesPrefix(key, prefix)) {
       set.forEach((l) => l());
     }
   }
@@ -54,13 +78,19 @@ export function setEntry<T>(key: string, entry: Partial<CacheEntry<T>>) {
   notifyExact(key);
 }
 
+/**
+ * Drop cached data for every key that matches the prefix and notify subscribers.
+ * Subscribers (useSupabaseQuery) will refetch when they see data === undefined.
+ */
 export function invalidate(prefix: string) {
+  const toDelete: string[] = [];
   for (const key of cache.keys()) {
-    if (key === prefix || key.startsWith(prefix + ':') || key.startsWith(prefix)) {
-      cache.delete(key);
-    }
+    if (keyMatchesPrefix(key, prefix)) toDelete.push(key);
   }
-  notifyPrefix(prefix);
+  for (const key of toDelete) {
+    cache.delete(key);
+  }
+  notifyMatching(prefix);
 }
 
 export function clearAll() {

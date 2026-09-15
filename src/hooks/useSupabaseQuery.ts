@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { getEntry, setEntry, subscribe } from '../lib/queryClient';
 
 interface Options {
@@ -14,6 +14,8 @@ interface Options {
  *     ['tickets', orgId],
  *     () => api.tickets.list(orgId)
  *   );
+ *
+ * After a mutation calls invalidate('tickets'), this hook refetches automatically.
  */
 export function useSupabaseQuery<T>(
   key: readonly unknown[],
@@ -28,12 +30,14 @@ export function useSupabaseQuery<T>(
   const keyStr = JSON.stringify(key);
   const [entry, setLocal] = useState(() => getEntry<T>(keyStr));
   const enabled = options.enabled ?? true;
+  const fetcherRef = useRef(fetcher);
+  fetcherRef.current = fetcher;
 
   const run = useCallback(async () => {
     if (!enabled) return;
     setEntry<T>(keyStr, { loading: true, error: null });
     try {
-      const data = await fetcher();
+      const data = await fetcherRef.current();
       setEntry<T>(keyStr, { data, loading: false, error: null, promise: null });
       return data;
     } catch (e) {
@@ -41,10 +45,17 @@ export function useSupabaseQuery<T>(
       setEntry<T>(keyStr, { error: err, loading: false, promise: null });
       return undefined;
     }
-  }, [keyStr, enabled, fetcher]);
+  }, [keyStr, enabled]);
 
   useEffect(() => {
-    const unsub = subscribe(keyStr, () => setLocal({ ...getEntry<T>(keyStr) }));
+    const unsub = subscribe(keyStr, () => {
+      const next = getEntry<T>(keyStr);
+      setLocal({ ...next });
+      // Cache was cleared by invalidate() — refetch so UI updates without hard refresh
+      if (enabled && next.data === undefined && !next.loading) {
+        void run();
+      }
+    });
     setLocal({ ...getEntry<T>(keyStr) });
 
     if (enabled && getEntry<T>(keyStr).data === undefined && !getEntry<T>(keyStr).loading) {
