@@ -3,22 +3,28 @@ import type { User, UserRole } from '../../types';
 import { auth } from '../auth';
 
 export const profiles = {
-  /** Org-scoped staff list. */
-  async list(orgId?: string): Promise<User[]> {
-    const oid = orgId || requireOrgId();
+  async list(orgId = requireOrgId()): Promise<User[]> {
     const result = await sb()
       .from('profiles')
       .select('*')
-      .eq('organization_id', oid)
+      .eq('organization_id', orgId)
       .order('created_at', { ascending: false });
     return unwrap(result) as unknown as User[];
   },
 
-  /** Platform-wide directory — super_admin only (RLS enforced). */
   async listAll(): Promise<User[]> {
     const result = await sb()
       .from('profiles')
       .select('*')
+      .order('created_at', { ascending: false });
+    return unwrap(result) as unknown as User[];
+  },
+
+  async listByOrg(orgId: string): Promise<User[]> {
+    const result = await sb()
+      .from('profiles')
+      .select('*')
+      .eq('organization_id', orgId)
       .order('created_at', { ascending: false });
     return unwrap(result) as unknown as User[];
   },
@@ -28,44 +34,47 @@ export const profiles = {
     return unwrap(result) as unknown as User;
   },
 
-  async updateSelf(patch: Partial<Pick<User, 'name' | 'phone' | 'avatar_url'>>): Promise<User> {
-    const me = requireUser();
-    const result = await sb()
-      .from('profiles')
-      .update(patch)
-      .eq('id', me.id)
-      .select()
-      .single();
+  async me(): Promise<User | null> {
+    const {
+      data: { user },
+    } = await sb().auth.getUser();
+    if (!user) return null;
+    const result = await sb().from('profiles').select('*').eq('id', user.id).maybeSingle();
+    if (result.error) throw new Error(result.error.message);
+    return result.data as unknown as User | null;
+  },
+
+  async updateSelf(patch: Partial<Pick<User, 'name' | 'phone' | 'avatar_url'>>) {
+    const {
+      data: { user },
+    } = await sb().auth.getUser();
+    if (!user) throw new Error('Not authenticated.');
+    const result = await sb().from('profiles').update(patch).eq('id', user.id).select().single();
     return unwrap(result) as unknown as User;
   },
 
-  /**
-   * Full admin edit — any field including role, status, organisation.
-   * Super admin can edit anyone; org admin limited by RLS.
-   */
   async updateAsAdmin(
     userId: string,
     patch: Partial<
-      Pick<User, 'name' | 'phone' | 'email' | 'username' | 'role' | 'status' | 'organization_id' | 'avatar_url'>
+      Pick<User, 'name' | 'email' | 'phone' | 'role' | 'status' | 'organization_id' | 'username'>
     >
   ): Promise<User> {
-    const result = await sb()
-      .from('profiles')
-      .update(patch)
-      .eq('id', userId)
-      .select()
-      .single();
+    const result = await sb().from('profiles').update(patch).eq('id', userId).select().single();
     return unwrap(result) as unknown as User;
   },
 
   async setRole(userId: string, role: UserRole): Promise<User> {
-    // Prefer RPC if present; fall back to direct update (super_admin RLS allows it)
-    const { data, error } = await sb().rpc('set_profile_role', {
-      p_user_id: userId,
-      p_role: role,
-    });
-    if (!error && data) return data as unknown as User;
-
+    const actor = requireUser();
+    try {
+      const { data, error } = await sb().rpc('set_profile_role', {
+        p_user_id: userId,
+        p_new_role: role,
+        p_actor_name: actor.name,
+      });
+      if (!error && data) return data as unknown as User;
+    } catch {
+      // fall through
+    }
     const result = await sb()
       .from('profiles')
       .update({ role })
@@ -75,64 +84,144 @@ export const profiles = {
     return unwrap(result) as unknown as User;
   },
 
-  async setStatus(userId: string, status: User['status']): Promise<User> {
-    const { data, error } = await sb().rpc('set_profile_status', {
-      p_user_id: userId,
-      p_status: status,
-    });
-    if (!error && data) return data as unknown as User;
-
-    const result = await sb()
-      .from('profiles')
-      .update({ status })
-      .eq('id', userId)
-      .select()
-      .single();
+  async setStatus(userId: string, status: string): Promise<User> {
+    const actor = requireUser();
+    try {
+      const { data, error } = await sb().rpc('set_profile_status', {
+        p_user_id: userId,
+        p_new_status: status,
+        p_actor_name: actor.name,
+      });
+      if (!error && data) return data as unknown as User;
+    } catch {
+      /* fall through */
+    }
+    if (status === 'Active') {
+      try {
+        const { data, error } = await sb().rpc('activate_profile', {
+          p_user_id: userId,
+          p_actor_name: actor.name,
+        });
+        if (!error && data) return data as unknown as User;
+      } catch {
+        /* fall through */
+      }
+    }
+    const result = await sb().from('profiles').update({ status }).eq('id', userId).select().single();
     return unwrap(result) as unknown as User;
   },
 
-  /**
-   * Invite a user.
-   * - Org staff: pass organizationId (or omit to use current org).
-   * - Platform user (super_admin only): pass organizationId: null.
-   */
+  async activate(userId: string): Promise<User> {
+    return this.setStatus(userId, 'Active');
+  },
+
   async invite(args: {
     email: string;
     name: string;
     role: UserRole;
+    phone?: string;
     organizationId?: string | null;
-  }): Promise<{ userId: string; temporaryPassword?: string }> {
-    const body: Record<string, unknown> = {
-      email: args.email,
-      name: args.name,
-      role: args.role,
-    };
-    if (args.organizationId === null) {
-      body.organizationId = null;
-    } else if (args.organizationId) {
-      body.organizationId = args.organizationId;
-    } else {
-      body.organizationId = requireOrgId();
+  }): Promise<{ userId: string; inviteSent: boolean; temporaryPassword?: string }> {
+    const isSuper = auth.isSuperAdmin();
+    let organizationId: string | null | undefined = args.organizationId;
+
+    if (!isSuper) {
+      organizationId = organizationId || requireOrgId();
+    }
+    if (!isSuper && !organizationId) {
+      throw new Error('Organisation is required to invite a user.');
     }
 
-    const result = await sb().functions.invoke('invite-staff', { body });
-    if (result.error) throw new Error(result.error.message);
-    if (result.data?.error) throw new Error(result.data.error);
-    return result.data;
+    try {
+      const result = await sb().functions.invoke('invite-staff', {
+        body: {
+          email: args.email,
+          name: args.name,
+          role: args.role,
+          phone: args.phone,
+          organizationId: organizationId || null,
+        },
+      });
+      if (!result.error && result.data?.success) {
+        return result.data as { userId: string; inviteSent: boolean };
+      }
+    } catch {
+      // edge function often unavailable
+    }
+
+    const { createClient } = await import('@supabase/supabase-js');
+    const url = import.meta.env.VITE_SUPABASE_URL as string;
+    const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+    const isolated = createClient(url, key, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    const tempPassword =
+      'Uw!' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 4).toUpperCase() + '9';
+
+    const { data: signed, error: signErr } = await isolated.auth.signUp({
+      email: args.email.toLowerCase(),
+      password: tempPassword,
+      options: {
+        data: {
+          name: args.name,
+          username: args.email.split('@')[0],
+          role: args.role,
+          phone: args.phone,
+          status: 'Active',
+          organization_id: organizationId || null,
+        },
+      },
+    });
+
+    if (signErr) throw new Error(signErr.message);
+    const userId = signed.user?.id;
+    if (!userId) throw new Error('Could not create auth user');
+
+    await sb().from('profiles').upsert(
+      {
+        id: userId,
+        email: args.email.toLowerCase(),
+        name: args.name,
+        username: args.email.split('@')[0],
+        role: args.role,
+        phone: args.phone ?? null,
+        organization_id: organizationId || null,
+        status: 'Active',
+      },
+      { onConflict: 'id' }
+    );
+
+    return { userId, inviteSent: false, temporaryPassword: tempPassword };
   },
 
-  /** Soft-remove from org (clears organization_id, keeps auth account). */
-  async removeFromOrg(userId: string): Promise<void> {
-    const { error } = await sb()
+  async remove(userId: string): Promise<void> {
+    const result = await sb()
       .from('profiles')
-      .update({ organization_id: null, status: 'Inactive' })
-      .eq('id', userId);
-    if (error) throw new Error(error.message);
+      .update({ status: 'Inactive' })
+      .eq('id', userId)
+      .select()
+      .single();
+    unwrap(result);
   },
 
-  /** Hard-delete profile row (super_admin). Auth user may remain. */
   async purge(userId: string): Promise<void> {
-    const { error } = await sb().from('profiles').delete().eq('id', userId);
-    if (error) throw new Error(error.message);
+    if (!auth.isSuperAdmin()) throw new Error('Only super admin can purge users.');
+    const result = await sb()
+      .from('profiles')
+      .update({ status: 'Inactive', organization_id: null })
+      .eq('id', userId)
+      .select()
+      .single();
+    unwrap(result);
+  },
+
+  async assignOrganization(userId: string, organizationId: string | null): Promise<User> {
+    const result = await sb()
+      .from('profiles')
+      .update({ organization_id: organizationId })
+      .eq('id', userId)
+      .select()
+      .single();
+    return unwrap(result) as unknown as User;
   },
 };
