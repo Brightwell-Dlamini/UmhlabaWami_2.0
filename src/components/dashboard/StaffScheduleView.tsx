@@ -17,11 +17,31 @@ export const StaffScheduleView: React.FC = () => {
   const { data: shifts = [] } = useSupabaseQuery(['staff_shifts', orgId], () => shiftsApi.list(), { enabled: !!orgId });
   useRealtime({ table: 'staff_shifts', filter: `organization_id=eq.${orgId}`, invalidateKeys: ['staff_shifts'], enabled: !!orgId });
 
-  const create = useSupabaseMutation({
-    mutationFn: (input: Omit<StaffShift, 'id' | 'organization_id'>) => shiftsApi.create(input),
-    invalidateKeys: ['staff_shifts'],
-    onSuccess: () => { setFeedback('Shift scheduled.'); setTimeout(() => setFeedback(''), 3000); setShowModal(false); },
-  });
+ const create = useSupabaseMutation({
+  mutationFn: (input: {
+    staff_name: string;
+    staff_role: StaffShift['staff_role'];
+    date: string;
+    shift_type: StaffShift['shift_type'];
+    status: StaffShift['status'];
+    notes?: string;
+    property_id?: string | null;
+    staff_id?: string | null;
+  }) =>
+    shiftsApi.create({
+      staff_name: input.staff_name,
+      staff_role: input.staff_role,
+      date: input.date,
+      shift_type: input.shift_type,
+      status: input.status,
+      notes: input.notes ?? null,
+      property_id: input.property_id ?? null,
+      // Deliberately omit staff_id unless a real profile uuid is provided
+      staff_id: input.staff_id ?? null,
+    } as never),
+  invalidateKeys: ['staff_shifts'],
+  onSuccess: () => { ... },
+});
   const update = useSupabaseMutation({
     mutationFn: ({ id, patch }: { id: string; patch: Partial<StaffShift> }) => shiftsApi.update(id, patch),
     invalidateKeys: ['staff_shifts'],
