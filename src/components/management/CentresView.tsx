@@ -9,21 +9,33 @@ import { useRealtime } from '../../hooks/useRealtime';
 import type { ShoppingCenter, Property } from '../../types';
 
 export const CentresView: React.FC = () => {
-  const orgId = auth.getCurrentOrganization()?.id ?? '';
+  const orgId =
+    auth.getCurrentOrganization()?.id ||
+    auth.getCurrentUser()?.organization_id ||
+    '';
   const [showCentreModal, setShowCentreModal] = useState(false);
   const [showPropertyModal, setShowPropertyModal] = useState(false);
   const [editingCentre, setEditingCentre] = useState<ShoppingCenter | null>(null);
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const [selectedCentreForProperty, setSelectedCentreForProperty] = useState<string>('');
 
-  const { data: centres = [] } = useSupabaseQuery(
+  const {
+    data: centres = [],
+    loading: centresLoading,
+    error: centresError,
+    refetch: refetchCentres,
+  } = useSupabaseQuery(
     ['centers', orgId],
-    () => centresApi.list(),
+    () => centresApi.list(orgId),
     { enabled: !!orgId }
   );
-  const { data: properties = [] } = useSupabaseQuery(
+  const {
+    data: properties = [],
+    loading: propertiesLoading,
+    error: propertiesError,
+  } = useSupabaseQuery(
     ['properties', orgId],
-    () => propertiesApi.list(),
+    () => propertiesApi.list(orgId),
     { enabled: !!orgId }
   );
 
@@ -60,13 +72,25 @@ export const CentresView: React.FC = () => {
     invalidateKeys: ['properties'],
   });
 
-  if (!orgId) return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
+  if (!orgId) {
+    return (
+      <div className="p-8 max-w-lg mx-auto text-center space-y-3">
+        <Building2 className="w-10 h-10 text-slate-300 mx-auto" />
+        <h2 className="font-bold text-slate-900 dark:text-white">No organisation linked</h2>
+        <p className="text-sm text-slate-500">
+          Your account is not linked to an organisation yet. Sign out and sign back in.
+          If it still fails, ask the super admin to re-approve the organisation so your
+          profile gets an organisation_id.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-12">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Centres &amp; properties</h1>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Centres & properties</h1>
           <p className="text-xs text-slate-500 mt-1">
             Shopping centres you manage and the buildings or wings inside them
           </p>
@@ -88,7 +112,20 @@ export const CentresView: React.FC = () => {
         </div>
       </div>
 
-      {centres.length === 0 ? (
+      {(centresError || propertiesError) && (
+        <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+          {centresError?.message || propertiesError?.message}
+          <button type="button" onClick={() => void refetchCentres()} className="ml-3 underline font-semibold">
+            Retry
+          </button>
+        </div>
+      )}
+
+      {(centresLoading || propertiesLoading) && centres.length === 0 && (
+        <div className="p-8 text-center text-sm text-slate-500">Loading centres…</div>
+      )}
+
+      {!centresLoading && centres.length === 0 ? (
         <div className="p-12 text-center rounded-2xl border border-dashed border-slate-300 dark:border-slate-700">
           <Building2 className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
           <h3 className="font-bold text-sm text-slate-900 dark:text-white">No centres yet</h3>
@@ -102,7 +139,7 @@ export const CentresView: React.FC = () => {
             Add your first centre
           </button>
         </div>
-      ) : (
+      ) : centres.length > 0 ? (
         <div className="space-y-4">
           {centres.map((c) => {
             const cProps = properties.filter((p) => p.shopping_center_id === c.id);
@@ -179,7 +216,7 @@ export const CentresView: React.FC = () => {
             );
           })}
         </div>
-      )}
+      ) : null}
 
       {showCentreModal && (
         <CentreForm
@@ -207,8 +244,6 @@ export const CentresView: React.FC = () => {
     </div>
   );
 };
-
-// ---------- Centre form ----------
 
 function CentreForm({
   initial, onCancel, onSubmit,
@@ -359,8 +394,6 @@ function CentreForm({
   );
 }
 
-// ---------- Property form ----------
-
 function PropertyForm({
   centres, initial, preselectedCentreId, onCancel, onSubmit,
 }: {
@@ -371,7 +404,7 @@ function PropertyForm({
   onSubmit: (input: Record<string, unknown>) => void;
 }) {
   const [form, setForm] = useState({
-    shopping_center_id: initial?.shopping_center_id ?? preselectedCentreId || centres[0]?.id ?? '',
+    shopping_center_id: initial?.shopping_center_id ?? (preselectedCentreId || centres[0]?.id || ''),
     name: initial?.name ?? '',
     type: (initial?.type ?? 'Retail shop') as Property['type'],
     address: initial?.address ?? '',
@@ -418,28 +451,31 @@ function PropertyForm({
                 required
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="e.g. Retail Wing A"
+                placeholder="e.g. Wing A"
                 className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
               />
             </div>
             <div>
               <label className="block font-semibold mb-1">Type *</label>
               <select
+                required
                 value={form.type}
                 onChange={(e) => setForm({ ...form, type: e.target.value as Property['type'] })}
                 className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
               >
-                {propertyTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+                {propertyTypes.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
               </select>
             </div>
           </div>
 
           <div>
-            <label className="block font-semibold mb-1">Address</label>
+            <label className="block font-semibold mb-1">Address *</label>
             <input
+              required
               value={form.address}
               onChange={(e) => setForm({ ...form, address: e.target.value })}
-              placeholder="Optional"
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
             />
           </div>
@@ -447,7 +483,7 @@ function PropertyForm({
           <div>
             <label className="block font-semibold mb-1">Description</label>
             <textarea
-              rows={2}
+              rows={3}
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
