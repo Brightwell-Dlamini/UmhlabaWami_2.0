@@ -84,6 +84,42 @@ class AuthService {
         .maybeSingle();
       this.currentOrg = (org as unknown as Organization) || null;
     }
+
+    // Recover org context if profile was left unlinked after approval
+    if (!this.currentOrg && profile.email) {
+      const { data: byOwner } = await sb
+        .from('organizations')
+        .select('*')
+        .eq('owner_auth_user_id', userId)
+        .maybeSingle();
+      if (byOwner) {
+        this.currentOrg = byOwner as unknown as Organization;
+      } else {
+        const { data: byEmail } = await sb
+          .from('organizations')
+          .select('*')
+          .ilike('email', String(profile.email))
+          .eq('status', 'Active')
+          .maybeSingle();
+        if (byEmail) this.currentOrg = byEmail as unknown as Organization;
+      }
+      // Heal profile.organization_id so RLS current_org_id() works
+      if (this.currentOrg) {
+        const orgId = this.currentOrg.id;
+        await sb
+          .from('profiles')
+          .update({
+            organization_id: orgId,
+            role: profile.role === 'super_admin' ? profile.role : (profile.role || 'admin'),
+            status: 'Active',
+          })
+          .eq('id', userId);
+        this.currentUser = {
+          ...(this.currentUser as User),
+          organization_id: orgId,
+        };
+      }
+    }
     this.notify();
   }
 
