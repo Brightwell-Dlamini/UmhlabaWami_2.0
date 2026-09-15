@@ -174,13 +174,12 @@ export const OrgUsersView: React.FC = () => {
               : 'Manage admins, managers, technicians, finance'}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowInvite(true)}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
-        >
-          <PlusCircle className="w-4 h-4" /> {isSuper ? 'Invite user' : 'Invite staff'}
-        </button>
+       <button
+  onClick={() => setShowInvite(true)}
+  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+>
+  <PlusCircle className="w-4 h-4" /> Invite staff
+</button>
       </div>
 
       {feedback && (
