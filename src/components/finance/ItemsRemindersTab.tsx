@@ -11,9 +11,11 @@ import {
 } from '../../services/api/accounting';
 import type { InvoiceItem } from '../../services/api/accounting';
 import { tenants as tenantsApi } from '../../services/api/tenants';
-import { shops as shopsApi } from '../../services/api/shops';
 import { shoppingCenters as centersApi } from '../../services/api/shoppingCenters';
-import { invoices as invoiceApi, payments as paymentsApi } from '../../services/api/invoices';
+import {
+  invoices as invoiceApi,
+  payments as paymentsApi,
+} from '../../services/api/invoices';
 import { financeTransactions as txApi } from '../../services/api/financeTransactions';
 import { financialRequests as reqApi } from '../../services/api/financialRequests';
 import { generateStatementPdf } from '../../services/pdf';
@@ -34,7 +36,9 @@ export function ItemsRemindersTab() {
     d.setDate(1);
     return d.toISOString().slice(0, 10);
   });
-  const [periodEnd, setPeriodEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  const [periodEnd, setPeriodEnd] = useState(() =>
+    new Date().toISOString().slice(0, 10)
+  );
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [reminderSearch, setReminderSearch] = useState('');
   const [showItemModal, setShowItemModal] = useState(false);
@@ -93,7 +97,8 @@ export function ItemsRemindersTab() {
   });
 
   const createItem = useSupabaseMutation({
-    mutationFn: (input: Parameters<typeof itemsApi.create>[0]) => itemsApi.create(input),
+    mutationFn: (input: Parameters<typeof itemsApi.create>[0]) =>
+      itemsApi.create(input),
     invalidateKeys: ['invoice_items'],
     onSuccess: () => {
       setFeedback('Item created.');
@@ -156,7 +161,8 @@ export function ItemsRemindersTab() {
   });
 
   const createRequest = useSupabaseMutation({
-    mutationFn: (input: Parameters<typeof reqApi.create>[0]) => reqApi.create(input),
+    mutationFn: (input: Parameters<typeof reqApi.create>[0]) =>
+      reqApi.create(input),
     invalidateKeys: ['financial_requests'],
     onSuccess: () => {
       setFeedback('Requisition submitted.');
@@ -206,15 +212,25 @@ export function ItemsRemindersTab() {
       })
     : overdue;
 
-  const expenseTransactions = transactions.filter((t) => t.direction === 'expense');
+  const expenseTransactions = transactions.filter(
+    (t) => t.direction === 'expense'
+  );
 
   const handleGenerateStatement = async (tenant: Tenant) => {
     const org = auth.getCurrentOrganization();
     if (!org) return;
     setGeneratingId(tenant.id);
     try {
-      const statement = await statementsApi.generate(tenant.id, periodStart, periodEnd);
-      const payments = await paymentsApi.listForTenant(tenant.id, periodStart, periodEnd);
+      const statement = await statementsApi.generate(
+        tenant.id,
+        periodStart,
+        periodEnd
+      );
+      const payments = await paymentsApi.listForTenant(
+        tenant.id,
+        periodStart,
+        periodEnd
+      );
       generateStatementPdf(statement, tenant, invoices, payments, org);
       setFeedback(`Statement generated for ${tenant.business_name}.`);
       setTimeout(() => setFeedback(''), 3500);
@@ -228,7 +244,10 @@ export function ItemsRemindersTab() {
     }
   };
 
-  if (!orgId) return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
+  if (!orgId)
+    return (
+      <div className="p-6 text-slate-500 text-sm">No organisation context.</div>
+    );
 
   return (
     <div className="space-y-6">
@@ -239,30 +258,42 @@ export function ItemsRemindersTab() {
       )}
 
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 pb-2 flex-wrap">
-        {([
-          { id: 'items', label: `Items catalog (${catalog.length})`, icon: Package },
-          { id: 'statements', label: 'Statements', icon: FileText },
-          { id: 'reminders', label: `Overdue (${overdue.length})`, icon: Bell },
-          { id: 'expenses', label: `Expenses (${expenseTransactions.length})`, icon: Receipt },
-          { id: 'requisitions', label: `Requisitions (${requests.length})`, icon: CreditCard },
-        ] as { id: SubTab; label: string; icon: React.ComponentType<{ className?: string }> }[]).map(
-          (t) => {
-            const Icon = t.icon;
-            return (
-              <button
-                key={t.id}
-                onClick={() => setSubTab(t.id)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                  subTab === t.id
-                    ? 'bg-blue-600 text-white'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" /> {t.label}
-              </button>
-            );
-          }
-        )}
+        {(
+          [
+            { id: 'items', label: `Items catalog (${catalog.length})`, icon: Package },
+            { id: 'statements', label: 'Statements', icon: FileText },
+            { id: 'reminders', label: `Overdue (${overdue.length})`, icon: Bell },
+            {
+              id: 'expenses',
+              label: `Expenses (${expenseTransactions.length})`,
+              icon: Receipt,
+            },
+            {
+              id: 'requisitions',
+              label: `Requisitions (${requests.length})`,
+              icon: CreditCard,
+            },
+          ] as {
+            id: SubTab;
+            label: string;
+            icon: React.ComponentType<{ className?: string }>;
+          }[]
+        ).map((t) => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setSubTab(t.id)}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                subTab === t.id
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" /> {t.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* ITEMS */}
@@ -310,7 +341,9 @@ export function ItemsRemindersTab() {
                     <tr key={it.id}>
                       <td className="px-3 py-3 font-mono">{it.code ?? '—'}</td>
                       <td className="px-3 py-3 font-bold">{it.name}</td>
-                      <td className="px-3 py-3 text-slate-500">{it.category ?? '—'}</td>
+                      <td className="px-3 py-3 text-slate-500">
+                        {it.category ?? '—'}
+                      </td>
                       <td className="px-3 py-3 text-right font-bold">
                         E{it.unit_price.toLocaleString()}
                       </td>
@@ -329,7 +362,8 @@ export function ItemsRemindersTab() {
                         </button>
                         <button
                           onClick={() => {
-                            if (confirm(`Delete "${it.name}"?`)) removeItem.mutate(it.id);
+                            if (confirm(`Delete "${it.name}"?`))
+                              removeItem.mutate(it.id);
                           }}
                           className="p-1 text-slate-400 hover:text-red-500"
                         >
@@ -388,7 +422,9 @@ export function ItemsRemindersTab() {
                   className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 space-y-2"
                 >
                   <div className="font-bold text-xs">{t.business_name}</div>
-                  <div className="text-[11px] text-slate-500">{t.contact_person}</div>
+                  <div className="text-[11px] text-slate-500">
+                    {t.contact_person}
+                  </div>
                   <div className="pt-2 border-t">
                     <button
                       onClick={() => handleGenerateStatement(t)}
@@ -453,14 +489,20 @@ export function ItemsRemindersTab() {
                       (Date.now() - new Date(inv.due_date).getTime()) / 86400000
                     );
                     const type =
-                      days > 30 ? 'Final Notice' : days > 7 ? 'Firm' : 'Friendly';
+                      days > 30
+                        ? 'Final Notice'
+                        : days > 7
+                        ? 'Firm'
+                        : 'Friendly';
                     return (
                       <tr key={inv.id}>
                         <td className="px-3 py-3 font-mono font-bold">
                           {inv.invoice_number}
                         </td>
                         <td className="px-3 py-3">{inv.tenant_name}</td>
-                        <td className="px-3 py-3 text-slate-500">{inv.due_date}</td>
+                        <td className="px-3 py-3 text-slate-500">
+                          {inv.due_date}
+                        </td>
                         <td className="px-3 py-3 text-right font-bold text-red-600">
                           {days}
                         </td>
@@ -546,7 +588,8 @@ export function ItemsRemindersTab() {
                         <td className="px-3 py-3 text-right">
                           <button
                             onClick={() => {
-                              if (confirm('Delete expense?')) deleteExpense.mutate(tx.id);
+                              if (confirm('Delete expense?'))
+                                deleteExpense.mutate(tx.id);
                             }}
                             className="p-1 text-slate-400 hover:text-red-500"
                           >
@@ -650,7 +693,8 @@ export function ItemsRemindersTab() {
             setEditingItem(null);
           }}
           onSubmit={(input) => {
-            if (editingItem) updateItem.mutate({ id: editingItem.id, patch: input });
+            if (editingItem)
+              updateItem.mutate({ id: editingItem.id, patch: input });
             else createItem.mutate(input as never);
           }}
         />
@@ -674,9 +718,10 @@ export function ItemsRemindersTab() {
   );
 }
 
-// --- Item modal ---
 function ItemForm({
-  initial, onCancel, onSubmit,
+  initial,
+  onCancel,
+  onSubmit,
 }: {
   initial: InvoiceItem | null;
   onCancel: () => void;
@@ -694,55 +739,99 @@ function ItemForm({
     <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border border-slate-200 dark:border-slate-700 p-6 shadow-2xl space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="font-bold text-base">{initial ? 'Edit item' : 'New billing item'}</h3>
-          <button onClick={onCancel}><X className="w-5 h-5 text-slate-400" /></button>
+          <h3 className="font-bold text-base">
+            {initial ? 'Edit item' : 'New billing item'}
+          </h3>
+          <button onClick={onCancel}>
+            <X className="w-5 h-5 text-slate-400" />
+          </button>
         </div>
-        <form onSubmit={(e) => {
-          e.preventDefault();
-          onSubmit({
-            code: code.trim() || undefined,
-            name: name.trim(),
-            description: description.trim() || undefined,
-            unit_price: unitPrice,
-            tax_rate: taxRate,
-            default_quantity: defaultQty,
-            category: category || undefined,
-          });
-        }} className="space-y-3 text-xs">
-          <input placeholder="Code (optional)" value={code}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSubmit({
+              code: code.trim() || undefined,
+              name: name.trim(),
+              description: description.trim() || undefined,
+              unit_price: unitPrice,
+              tax_rate: taxRate,
+              default_quantity: defaultQty,
+              category: category || undefined,
+            });
+          }}
+          className="space-y-3 text-xs"
+        >
+          <input
+            placeholder="Code (optional)"
+            value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-mono" />
-          <input required placeholder="Name *" value={name}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-mono"
+          />
+          <input
+            required
+            placeholder="Name *"
+            value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700" />
-          <input placeholder="Description" value={description}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          />
+          <input
+            placeholder="Description"
+            value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700" />
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          />
           <div className="grid grid-cols-3 gap-3">
-            <input type="number" placeholder="Unit price" value={unitPrice}
+            <input
+              type="number"
+              placeholder="Unit price"
+              value={unitPrice}
               onChange={(e) => setUnitPrice(Number(e.target.value) || 0)}
-              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold" />
-            <select value={taxRate} onChange={(e) => setTaxRate(Number(e.target.value))}
-              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold"
+            />
+            <select
+              value={taxRate}
+              onChange={(e) => setTaxRate(Number(e.target.value))}
+              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+            >
               <option value={0}>0%</option>
               <option value={0.15}>15%</option>
               <option value={0.14}>14%</option>
             </select>
-            <input type="number" placeholder="Default qty" value={defaultQty}
+            <input
+              type="number"
+              placeholder="Default qty"
+              value={defaultQty}
               onChange={(e) => setDefaultQty(Number(e.target.value) || 0)}
-              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700" />
+              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+            />
           </div>
-          <select value={category} onChange={(e) => setCategory(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
-            <option>Rent</option><option>Service Charge</option><option>Utility</option>
-            <option>Parking</option><option>Signage</option><option>Penalty</option>
-            <option>Deposit</option><option>Fitout</option><option>Other</option>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          >
+            <option>Rent</option>
+            <option>Service Charge</option>
+            <option>Utility</option>
+            <option>Parking</option>
+            <option>Signage</option>
+            <option>Penalty</option>
+            <option>Deposit</option>
+            <option>Fitout</option>
+            <option>Other</option>
           </select>
           <div className="pt-3 border-t flex justify-end gap-2">
-            <button type="button" onClick={onCancel}
-              className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700">Cancel</button>
-            <button type="submit"
-              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold"
+            >
               {initial ? 'Save' : 'Create'}
             </button>
           </div>
@@ -752,13 +841,19 @@ function ItemForm({
   );
 }
 
-// --- Expense modal ---
 function ExpenseForm({
-  centers, onCancel, onSubmit,
+  centers,
+  onCancel,
+  onSubmit,
 }: {
   centers: { id: string; name: string }[];
   onCancel: () => void;
-  onSubmit: (input: { description: string; category: string; amount: number; shopping_center_id: string }) => void;
+  onSubmit: (input: {
+    description: string;
+    category: string;
+    amount: number;
+    shopping_center_id: string;
+  }) => void;
 }) {
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('Maintenance');
@@ -772,35 +867,75 @@ function ExpenseForm({
           <h3 className="font-bold text-base flex items-center gap-2">
             <Receipt className="w-5 h-5 text-blue-600" /> Record expense
           </h3>
-          <button onClick={onCancel}><X className="w-5 h-5 text-slate-400" /></button>
+          <button onClick={onCancel}>
+            <X className="w-5 h-5 text-slate-400" />
+          </button>
         </div>
-        <form onSubmit={(e) => {
-          e.preventDefault();
-          onSubmit({ description, category, amount, shopping_center_id: centerId });
-        }} className="space-y-3 text-xs">
-          <input required placeholder="Description" value={description}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSubmit({
+              description,
+              category,
+              amount,
+              shopping_center_id: centerId,
+            });
+          }}
+          className="space-y-3 text-xs"
+        >
+          <input
+            required
+            placeholder="Description"
+            value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700" />
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          />
           <div className="grid grid-cols-2 gap-3">
-            <select value={category} onChange={(e) => setCategory(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
-              <option>Maintenance</option><option>Utilities</option>
-              <option>Security</option><option>Other</option>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+            >
+              <option>Maintenance</option>
+              <option>Utilities</option>
+              <option>Security</option>
+              <option>Other</option>
             </select>
-            <select value={centerId} onChange={(e) => setCenterId(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+            <select
+              value={centerId}
+              onChange={(e) => setCenterId(e.target.value)}
+              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+            >
               {centers.length === 0 && <option value="">No centres</option>}
-              {centers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {centers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
             </select>
           </div>
-          <input type="number" required placeholder="Amount (E)" value={amount || ''}
+          <input
+            type="number"
+            required
+            placeholder="Amount (E)"
+            value={amount || ''}
             onChange={(e) => setAmount(Number(e.target.value) || 0)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold" />
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold"
+          />
           <div className="pt-3 border-t flex justify-end gap-2">
-            <button type="button" onClick={onCancel}
-              className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700">Cancel</button>
-            <button type="submit"
-              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold">Save</button>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold"
+            >
+              Save
+            </button>
           </div>
         </form>
       </div>
@@ -808,12 +943,17 @@ function ExpenseForm({
   );
 }
 
-// --- Requisition modal ---
 function RequisitionForm({
-  onCancel, onSubmit,
+  onCancel,
+  onSubmit,
 }: {
   onCancel: () => void;
-  onSubmit: (input: { requested_by_name: string; type: string; amount: number; purpose: string }) => void;
+  onSubmit: (input: {
+    requested_by_name: string;
+    type: string;
+    amount: number;
+    purpose: string;
+  }) => void;
 }) {
   const user = auth.getCurrentUser();
   const [requestedBy, setRequestedBy] = useState(user?.name ?? '');
@@ -826,31 +966,64 @@ function RequisitionForm({
       <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border border-slate-200 dark:border-slate-700 p-6 shadow-2xl space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-base">New requisition</h3>
-          <button onClick={onCancel}><X className="w-5 h-5 text-slate-400" /></button>
+          <button onClick={onCancel}>
+            <X className="w-5 h-5 text-slate-400" />
+          </button>
         </div>
-        <form onSubmit={(e) => {
-          e.preventDefault();
-          onSubmit({ requested_by_name: requestedBy, type, amount, purpose });
-        }} className="space-y-3 text-xs">
-          <input required placeholder="Requested by" value={requestedBy}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSubmit({ requested_by_name: requestedBy, type, amount, purpose });
+          }}
+          className="space-y-3 text-xs"
+        >
+          <input
+            required
+            placeholder="Requested by"
+            value={requestedBy}
             onChange={(e) => setRequestedBy(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700" />
-          <select value={type} onChange={(e) => setType(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
-            <option>Petty Cash</option><option>Purchase Request</option>
-            <option>Maintenance Funding</option><option>Vendor Payment</option>
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          />
+          <select
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          >
+            <option>Petty Cash</option>
+            <option>Purchase Request</option>
+            <option>Maintenance Funding</option>
+            <option>Vendor Payment</option>
           </select>
-          <textarea required rows={2} placeholder="Purpose" value={purpose}
+          <textarea
+            required
+            rows={2}
+            placeholder="Purpose"
+            value={purpose}
             onChange={(e) => setPurpose(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700" />
-          <input type="number" required placeholder="Amount (E)" value={amount || ''}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          />
+          <input
+            type="number"
+            required
+            placeholder="Amount (E)"
+            value={amount || ''}
             onChange={(e) => setAmount(Number(e.target.value) || 0)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold" />
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold"
+          />
           <div className="pt-3 border-t flex justify-end gap-2">
-            <button type="button" onClick={onCancel}
-              className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700">Cancel</button>
-            <button type="submit"
-              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold">Submit</button>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold"
+            >
+              Submit
+            </button>
           </div>
         </form>
       </div>
