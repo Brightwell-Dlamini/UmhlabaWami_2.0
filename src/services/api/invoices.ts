@@ -83,20 +83,6 @@ export const invoices = {
     const { error } = await sb().from('invoices').delete().eq('id', id);
     if (error) throw new Error(error.message);
   },
-  async listForTenant(
-  tenantId: string,
-  from: string,
-  to: string
-): Promise<PaymentRecord[]> {
-  const result = await sb()
-    .from('payment_records')
-    .select('*')
-    .eq('tenant_id', tenantId)
-    .gte('paid_at', from)
-    .lte('paid_at', `${to}T23:59:59`)
-    .order('paid_at', { ascending: true });
-  return unwrap(result) as unknown as PaymentRecord[];
-},
 
   async paymentsForInvoice(invoiceId: string): Promise<PaymentRecord[]> {
     const result = await sb()
@@ -106,9 +92,18 @@ export const invoices = {
       .order('paid_at', { ascending: false });
     return unwrap(result) as unknown as PaymentRecord[];
   },
-  
-  export const payments = {
-  listForTenant: (tenantId: string, from: string, to: string) =>
-    invoices.listForTenant(tenantId, from, to),
 };
+
+/** Payment helpers used by finance tabs */
+export const payments = {
+  async listForTenant(tenantId: string, from: string, to: string): Promise<PaymentRecord[]> {
+    const result = await sb()
+      .from('payment_records')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .gte('paid_at', from)
+      .lte('paid_at', `${to}T23:59:59`)
+      .order('paid_at', { ascending: true });
+    return unwrap(result) as unknown as PaymentRecord[];
+  },
 };
