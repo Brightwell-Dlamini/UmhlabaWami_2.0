@@ -5,6 +5,7 @@ import { clearAll } from '../lib/queryClient';
 class AuthService {
   private currentUser: User | null = null;
   private currentOrg: Organization | null = null;
+  private lastNotifiedKey: string | null = null;
   private listeners = new Set<(u: User | null) => void>();
   private readyPromise: Promise<void>;
   private resolveReady!: () => void;
@@ -34,15 +35,17 @@ class AuthService {
       if (session?.user) await this.loadProfile(session.user.id);
 
       sb.auth.onAuthStateChange(async (event, session) => {
+        // TOKEN_REFRESHED / INITIAL_SESSION fire when switching browser tabs —
+        // do NOT reload profile or they remount the whole UI and wipe form state.
         if (event === 'SIGNED_OUT') {
           this.currentUser = null;
           this.currentOrg = null;
           clearAll();
-          this.notify();
+          this.notify(true);
           return;
         }
-        if (session?.user) {
-          await this.loadProfile(session.user.id);
+        if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+          if (session?.user) await this.loadProfile(session.user.id);
         }
       });
     } catch (e) {
@@ -128,7 +131,12 @@ class AuthService {
     return () => this.listeners.delete(listener);
   }
 
-  private notify() {
+  private notify(force = false) {
+    const key = this.currentUser
+      ? `${this.currentUser.id}|${this.currentUser.role}|${this.currentUser.organization_id || ''}|${this.currentUser.status || ''}`
+      : 'null';
+    if (!force && key === this.lastNotifiedKey) return;
+    this.lastNotifiedKey = key;
     this.listeners.forEach((l) => l(this.currentUser));
   }
 
@@ -219,7 +227,7 @@ class AuthService {
     this.currentUser = null;
     this.currentOrg = null;
     clearAll();
-    this.notify();
+    this.notify(true);
   }
 
   // ----- role helpers (super_admin has every capability) -----
