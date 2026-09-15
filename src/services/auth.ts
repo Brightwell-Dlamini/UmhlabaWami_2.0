@@ -1,6 +1,50 @@
-import type { User, UserRole, Organization } from '../types';
+import type { User, Organization } from '../types';
 import { getSupabase, isSupabaseConfigured, tryGetSupabase } from '../lib/supabase';
 import { clearAll } from '../lib/queryClient';
+
+/**
+ * All login/auth failures surface as one of these messages. They never reveal
+ * whether an account, org, or user exists. This makes client-side
+ * enumeration attacks useless regardless of server behaviour.
+ */
+const AUTH_ERRORS = {
+  backendMissing:
+    'Backend is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel project settings and redeploy.',
+  invalidCredentials: 'Invalid organisation code, username, or password.',
+  orgInactive: 'This organisation is not currently active. Contact your administrator.',
+  platformEmailRequired:
+    'Platform admin sign-in requires your email address. Use the email, not the username.',
+  sessionExpired: 'Your session has expired. Please sign in again.',
+  network:
+    'Could not reach the server. Check your connection and try again.',
+} as const;
+
+function normaliseAuthError(raw: string): string {
+  const low = raw.toLowerCase();
+  // Never leak "user not found", "no rows", "organisation not found"
+  if (
+    low.includes('invalid login') ||
+    low.includes('invalid credentials') ||
+    low.includes('user not found') ||
+    low.includes('no rows') ||
+    low.includes('not found')
+  ) {
+    return AUTH_ERRORS.invalidCredentials;
+  }
+  if (low.includes('email not confirmed')) {
+    return 'Please confirm your email before signing in.';
+  }
+  if (low.includes('too many requests') || low.includes('rate limit')) {
+    return 'Too many attempts. Please wait a moment and try again.';
+  }
+  if (low.includes('fetch') || low.includes('network')) {
+    return AUTH_ERRORS.network;
+  }
+  // Default — do not return the raw message to the UI.
+  return AUTH_ERRORS.invalidCredentials;
+}
+
+const SIGNOUT_TIMEOUT_MS = 2000;
 
 class AuthService {
   private currentUser: User | null = null;
@@ -35,10 +79,9 @@ class AuthService {
       if (session?.user) await this.loadProfile(session.user.id);
 
       sb.auth.onAuthStateChange(async (event, session) => {
-        // TOKEN_REFRESHED / INITIAL_SESSION fire when switching browser tabs —
-        // do NOT reload profile or they remount the whole UI and wipe form state.
+        // TOKEN_REFRESHED / INITIAL_SESSION fire on tab focus — do NOT reload
+        // profile or the UI remounts and loses form state.
         if (event === 'SIGNED_OUT') {
-          // logout() already cleared state; only finish up if still signed in
           if (this.currentUser !== null) {
             this.currentUser = null;
             this.currentOrg = null;
@@ -93,7 +136,7 @@ class AuthService {
       this.currentOrg = (org as unknown as Organization) || null;
     }
 
-    // Recover org context if profile was left unlinked after approval
+    // Recover org context if profile was left unlinked after approval.
     if (!this.currentOrg && profile.email) {
       const { data: byOwner } = await sb
         .from('organizations')
@@ -117,7 +160,10 @@ class AuthService {
           .from('profiles')
           .update({
             organization_id: orgId,
-            role: profile.role === 'super_admin' ? profile.role : (profile.role || 'admin'),
+            role:
+              profile.role === 'super_admin'
+                ? profile.role
+                : profile.role || 'admin',
             status: 'Active',
           })
           .eq('id', userId);
@@ -135,10 +181,19 @@ class AuthService {
     return () => this.listeners.delete(listener);
   }
 
+  private computeNotifyKey(): string {
+    if (!this.currentUser) return 'null';
+    return [
+      this.currentUser.id,
+      this.currentUser.role,
+      this.currentUser.organization_id || '',
+      this.currentUser.status || '',
+      this.currentUser.name || '',
+    ].join('|');
+  }
+
   private notify(force = false) {
-    const key = this.currentUser
-      ? `${this.currentUser.id}|${this.currentUser.role}|${this.currentUser.organization_id || ''}|${this.currentUser.status || ''}`
-      : 'null';
+    const key = this.computeNotifyKey();
     if (!force && key === this.lastNotifiedKey) return;
     this.lastNotifiedKey = key;
     this.listeners.forEach((l) => l(this.currentUser));
@@ -156,11 +211,7 @@ class AuthService {
 
   private requireSupabase() {
     if (!isSupabaseConfigured()) {
-      return {
-        ok: false as const,
-        error:
-          'Backend is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel project settings and redeploy.',
-      };
+      return { ok: false as const, error: AUTH_ERRORS.backendMissing };
     }
     return { ok: true as const, sb: getSupabase() };
   }
@@ -178,65 +229,109 @@ class AuthService {
     const identifier = username.trim().toLowerCase();
 
     if (['SUPER', 'PLATFORM', 'ADMIN'].includes(code)) {
-      const emailGuess = identifier.includes('@') ? identifier : null;
-      if (emailGuess) {
-        const { error: signErr } = await sb.auth.signInWithPassword({
-          email: emailGuess,
-          password,
-        });
-        if (signErr) return { success: false, error: signErr.message };
-        await new Promise((r) => setTimeout(r, 250));
-        if (this.currentUser?.role === 'super_admin') {
-          return { success: true, user: this.currentUser };
-        }
-        return { success: true, user: this.currentUser || undefined };
-      }
+      return this.loginPlatformAdmin(identifier, password);
     }
 
-    const { data: org, error: orgErr } = await sb.rpc('lookup_organization', { p_code: code });
-    if (orgErr) return { success: false, error: orgErr.message };
-    if (!org) return { success: false, error: 'Organisation code not found.' };
-
-    const orgRow = Array.isArray(org) ? org[0] : org;
-    if (orgRow.status !== 'Active') {
-      return { success: false, error: `Organisation is ${orgRow.status}.` };
-    }
-
-    const { data: emailResult, error: resolveErr } = await sb.rpc('resolve_login_email', {
-      p_org_code: code,
-      p_identifier: identifier,
+    // Standard org login.
+    const { data: orgRow, error: orgErr } = await sb.rpc('lookup_organization', {
+      p_code: code,
     });
-    if (resolveErr) return { success: false, error: resolveErr.message };
-    const email = emailResult as string | null;
-    if (!email) return { success: false, error: 'User not found for this organisation.' };
+    if (orgErr) {
+      return { success: false, error: normaliseAuthError(orgErr.message) };
+    }
+    if (!orgRow) return { success: false, error: AUTH_ERRORS.invalidCredentials };
 
-    const { error: signErr } = await sb.auth.signInWithPassword({ email, password });
-    if (signErr) return { success: false, error: signErr.message };
+    const org = Array.isArray(orgRow) ? orgRow[0] : orgRow;
+    if (org.status !== 'Active') {
+      return { success: false, error: AUTH_ERRORS.orgInactive };
+    }
+
+    const { data: emailResult, error: resolveErr } = await sb.rpc(
+      'resolve_login_email',
+      { p_org_code: code, p_identifier: identifier }
+    );
+    if (resolveErr) {
+      return { success: false, error: normaliseAuthError(resolveErr.message) };
+    }
+    const email = emailResult as string | null;
+    if (!email) {
+      // Deliberately indistinct from wrong password.
+      return { success: false, error: AUTH_ERRORS.invalidCredentials };
+    }
+
+    const { error: signErr } = await sb.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (signErr) {
+      return { success: false, error: normaliseAuthError(signErr.message) };
+    }
 
     await new Promise((r) => setTimeout(r, 200));
     return { success: true, user: this.currentUser || undefined };
   }
 
+  /**
+   * Platform (super admin) sign-in. Requires an email because usernames are
+   * scoped to organisations and are not globally unique.
+   */
+  private async loginPlatformAdmin(
+    identifier: string,
+    password: string
+  ): Promise<{ success: boolean; error?: string; user?: User }> {
+    if (!identifier.includes('@')) {
+      return { success: false, error: AUTH_ERRORS.platformEmailRequired };
+    }
+
+    const sb = getSupabase();
+    const { error: signErr } = await sb.auth.signInWithPassword({
+      email: identifier,
+      password,
+    });
+    if (signErr) {
+      return { success: false, error: normaliseAuthError(signErr.message) };
+    }
+
+    await new Promise((r) => setTimeout(r, 250));
+
+    if (this.currentUser?.role !== 'super_admin') {
+      // Signed in successfully but the account is not a platform admin.
+      // Sign back out so the user doesn't sit in a broken state.
+      await sb.auth.signOut({ scope: 'local' });
+      return { success: false, error: AUTH_ERRORS.invalidCredentials };
+    }
+    return { success: true, user: this.currentUser };
+  }
+
   public async logout() {
-    // 1) Drop UI session immediately so dashboard unmounts before network work
+    // 1) Drop UI session immediately so dashboard unmounts before network work.
     this.currentUser = null;
     this.currentOrg = null;
     clearAll();
     this.notify(true);
 
-    // 2) End Supabase session (local scope first — does not hang on network)
+    // 2) End Supabase session (local scope first — does not hang on network).
     const sb = tryGetSupabase();
-    if (sb) {
-      try {
-        await sb.auth.signOut({ scope: 'local' });
-      } catch (e) {
-        console.warn('[auth] signOut failed', e);
-      }
+    if (!sb) return;
+
+    try {
+      await Promise.race([
+        sb.auth.signOut({ scope: 'local' }),
+        new Promise((resolve) => setTimeout(resolve, SIGNOUT_TIMEOUT_MS)),
+      ]);
+    } catch (e) {
+      console.warn('[auth] signOut failed', e);
     }
   }
 
   public isSuperAdmin(u = this.currentUser): boolean {
     return u?.role === 'super_admin';
+  }
+
+  /** Admin of own org OR super admin. */
+  public isAdminOrAbove(u = this.currentUser): boolean {
+    if (!u) return false;
+    return u.role === 'admin' || u.role === 'super_admin';
   }
 
   public canCreateTicket(u = this.currentUser) {
@@ -281,3 +376,4 @@ class AuthService {
 }
 
 export const auth = new AuthService();
+export { AUTH_ERRORS };
