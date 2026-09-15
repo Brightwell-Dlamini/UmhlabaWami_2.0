@@ -6,32 +6,59 @@ interface Options {
   refreshInterval?: number;
 }
 
-export function useSupabaseQuery<T>(
-  key: readonly unknown[],
-  fetcher: () => Promise<T>,
-  options: Options = {}
-): {
+interface QueryResult<T> {
   data: T | undefined;
   loading: boolean;
   error: Error | null;
   refetch: () => Promise<T | undefined>;
-} {
+}
+
+/**
+ * Subscribe to a cache key. Fetches when:
+ *  - data is undefined
+ *  - entry.needsRefetch is true and no fetch is in flight
+ *  - refetch() is called manually
+ *  - refreshInterval elapses (if enabled)
+ *
+ * Never blanks data during a refetch — stale values remain visible.
+ * Safe against StrictMode double-mount.
+ */
+export function useSupabaseQuery<T>(
+  key: readonly unknown[],
+  fetcher: () => Promise<T>,
+  options: Options = {}
+): QueryResult<T> {
   const keyStr = JSON.stringify(key);
-  const [entry, setLocal] = useState(() => getEntry<T>(keyStr));
   const enabled = options.enabled ?? true;
+
+  const [snapshot, setSnapshot] = useState(() => getEntry<T>(keyStr));
+
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
-  const inFlight = useRef(false);
-  const mounted = useRef(true);
 
-  const run = useCallback(async () => {
-    if (!enabled || inFlight.current) return;
-    inFlight.current = true;
-    setEntry<T>(keyStr, { loading: true, error: null, needsRefetch: false });
+  const mountedRef = useRef(true);
+  const inFlightRef = useRef(false);
+  const keyRef = useRef(keyStr);
+  keyRef.current = keyStr;
+
+  const run = useCallback(async (): Promise<T | undefined> => {
+    if (!enabled) return undefined;
+    if (inFlightRef.current) return undefined;
+    inFlightRef.current = true;
+
+    const thisKey = keyRef.current;
+    // Only flip loading if we have no data yet — otherwise keep stale visible.
+    const current = getEntry<T>(thisKey);
+    if (current.data === undefined) {
+      setEntry<T>(thisKey, { loading: true, error: null, needsRefetch: false });
+    } else {
+      setEntry<T>(thisKey, { needsRefetch: false, error: null });
+    }
+
     try {
       const data = await fetcherRef.current();
-      if (!mounted.current) return data;
-      setEntry<T>(keyStr, {
+      if (!mountedRef.current || keyRef.current !== thisKey) return data;
+      setEntry<T>(thisKey, {
         data,
         loading: false,
         error: null,
@@ -41,8 +68,8 @@ export function useSupabaseQuery<T>(
       return data;
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
-      if (mounted.current) {
-        setEntry<T>(keyStr, {
+      if (mountedRef.current && keyRef.current === thisKey) {
+        setEntry<T>(thisKey, {
           error: err,
           loading: false,
           promise: null,
@@ -51,46 +78,56 @@ export function useSupabaseQuery<T>(
       }
       return undefined;
     } finally {
-      inFlight.current = false;
+      inFlightRef.current = false;
     }
-  }, [keyStr, enabled]);
+  }, [enabled]);
+
+  // Reset local snapshot immediately when key changes (avoids stale-key render).
+  useEffect(() => {
+    setSnapshot({ ...getEntry<T>(keyStr) });
+  }, [keyStr]);
 
   useEffect(() => {
-    mounted.current = true;
+    mountedRef.current = true;
+    inFlightRef.current = false;
+
     const unsub = subscribe(keyStr, () => {
-      if (!mounted.current) return;
+      if (!mountedRef.current) return;
       const next = getEntry<T>(keyStr);
-      setLocal({ ...next });
-      if (enabled && next.needsRefetch && !next.loading && !inFlight.current) {
+      setSnapshot({ ...next });
+      if (enabled && next.needsRefetch && !next.loading && !inFlightRef.current) {
         void run();
       }
     });
-
-    setLocal({ ...getEntry<T>(keyStr) });
 
     const current = getEntry<T>(keyStr);
     if (
       enabled &&
       !current.loading &&
-      !inFlight.current &&
+      !inFlightRef.current &&
       (current.data === undefined || current.needsRefetch)
     ) {
       void run();
     }
 
     let interval: ReturnType<typeof setInterval> | undefined;
-    if (options.refreshInterval && options.refreshInterval > 0) {
+    if (enabled && options.refreshInterval && options.refreshInterval > 0) {
       interval = setInterval(() => {
-        if (mounted.current) void run();
+        if (mountedRef.current && enabled) void run();
       }, options.refreshInterval);
     }
 
     return () => {
-      mounted.current = false;
+      mountedRef.current = false;
       unsub();
       if (interval) clearInterval(interval);
     };
   }, [keyStr, enabled, run, options.refreshInterval]);
 
-  return { ...entry, refetch: run };
+  return {
+    data: snapshot.data,
+    loading: snapshot.loading,
+    error: snapshot.error,
+    refetch: run,
+  };
 }
