@@ -145,7 +145,9 @@ export function OperationsApp({ currentUser, showToast }: Props) {
               filterRole={sidebarActiveTab}
             />
           )}
-          {sidebarActiveTab === 'tenant_lease' && <LeaseManagementView />}
+         {(sidebarActiveTab === 'tenant_lease' || sidebarActiveTab === 'leases') && (
+  <LeaseManagementView />
+)}
           {sidebarActiveTab === 'tenant_documents' && <TenantDocumentsView />}
 
           {/* ---- Manager flow ---- */}
