@@ -50,7 +50,7 @@ export const organizations = {
     const result = await sb()
       .from('organizations')
       .select('*')
-      .eq('status', 'Pending')
+      .eq('status', 'Pending Approval')
       .order('created_at', { ascending: false });
     return unwrap(result) as unknown as Organization[];
   },
@@ -61,25 +61,22 @@ export const organizations = {
   },
 
   async register(input: RegisterOrgInput): Promise<Organization> {
-    const result = await sb()
-      .from('organizations')
-      .insert({
-        company_name: input.companyName,
-        owner_name: input.ownerName,
-        email: input.email,
-        phone: input.phone,
-        address: input.address,
-        subscription_tier: input.tier,
-        status: 'Pending',
-        organization_code: 'PENDING',
-        estimated_monthly_rent: input.estimatedMonthlyRent ?? null,
-        property_count: input.propertyCount ?? null,
-        tenant_count: input.tenantCount ?? null,
-        staff_breakdown: input.staffBreakdown ?? null,
-      })
-      .select('*')
-      .single();
-    return unwrap(result) as unknown as Organization;
+    const { data, error } = await sb().rpc('register_organization', {
+      p_company_name: input.companyName,
+      p_owner_name: input.ownerName,
+      p_email: input.email,
+      p_phone: input.phone,
+      p_address: input.address,
+      p_subscription_tier: input.tier,
+      p_estimated_monthly_rent: input.estimatedMonthlyRent ?? 0,
+      p_property_count: input.propertyCount ?? 1,
+      p_tenant_count: input.tenantCount ?? 0,
+      p_staff_breakdown: input.staffBreakdown ?? {},
+    });
+    if (error) throw new Error(error.message);
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) throw new Error('Registration returned no data.');
+    return row as unknown as Organization;
   },
 
   async update(
@@ -96,32 +93,37 @@ export const organizations = {
       property_limit: number;
       tenant_limit: number;
       user_limit: number;
-      storage_limit_gb: number;
+      storage_limit: number;
+      monthly_fee_estimate: number;
+      logo_url: string;
+      custom_branding_color: string;
     }>
   ): Promise<Organization> {
-    const result = await sb().from('organizations').update(patch).eq('id', id).select('*').single();
+    const result = await sb()
+      .from('organizations')
+      .update(patch)
+      .eq('id', id)
+      .select('*')
+      .single();
     return unwrap(result) as unknown as Organization;
   },
 
   async setTier(id: string, tier: SubscriptionTier): Promise<Organization> {
-    let limits: Partial<Organization> = {};
-    try {
-      const { data } = await sb()
-        .from('subscription_tiers')
-        .select('*')
-        .eq('tier_key', tier)
-        .maybeSingle();
-      if (data) {
-        limits = {
-          property_limit: data.property_limit,
-          tenant_limit: data.tenant_limit,
-          user_limit: data.user_limit,
-          storage_limit_gb: data.storage_limit_gb,
-        };
+    // Tier limits are hard-coded here to match the SQL `register_organization` function
+    // and `approve_organization` overrides. Adjust in one place if pricing changes.
+    const limits: Partial<Organization> = (() => {
+      switch (tier) {
+        case 'Starter':
+          return { property_limit: 3, tenant_limit: 100, user_limit: 10, storage_limit: 10 };
+        case 'Professional':
+          return { property_limit: 10, tenant_limit: 500, user_limit: 50, storage_limit: 50 };
+        case 'Enterprise':
+          return { property_limit: 999, tenant_limit: 9999, user_limit: 999, storage_limit: 500 };
+        default:
+          return {};
       }
-    } catch {
-      /* defaults */
-    }
+    })();
+
     return this.update(id, { subscription_tier: tier, ...limits });
   },
 
@@ -167,7 +169,6 @@ export const organizations = {
           temporaryPassword: d.temporaryPassword || args.temporaryPassword,
         };
       }
-      // Edge returned an application error or transport error — fall through to local path
       if (error) {
         console.warn('[approve] edge function failed, using fallback:', error.message);
       } else if ((data as { error?: string })?.error) {
@@ -177,7 +178,7 @@ export const organizations = {
       console.warn('[approve] edge function invoke threw, using fallback:', e);
     }
 
-    // 2) Fallback: RPC or direct update + isolated signUp (works without edge function)
+    // 2) Fallback: RPC + isolated signUp (works without edge function)
     const { data: org, error: orgLoadErr } = await sb()
       .from('organizations')
       .select('*')
@@ -198,11 +199,11 @@ export const organizations = {
         updatedOrg = (Array.isArray(data) ? data[0] : data) as Organization;
       }
     } catch {
-      // RPC missing — fall through
+      // RPC missing — fall through to direct update
     }
 
     if (!updatedOrg) {
-      let code =
+      const code =
         (args.customCode || '').trim().toUpperCase() ||
         (org.organization_code && !String(org.organization_code).startsWith('PENDING')
           ? org.organization_code
@@ -233,7 +234,10 @@ export const organizations = {
     const adminName = args.adminName || org.owner_name || 'Org Admin';
     const tempPassword =
       args.temporaryPassword ||
-      'Uw!' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 4).toUpperCase() + '9';
+      'Uw!' +
+        Math.random().toString(36).slice(2, 10) +
+        Math.random().toString(36).slice(2, 4).toUpperCase() +
+        '9';
 
     let adminUserId: string | null = null;
     let inviteSent = false;
