@@ -1,6 +1,17 @@
 import { sb, unwrap, requireOrgId } from './_helpers';
 import type { StaffShift } from '../../types';
 
+interface CreateShiftInput {
+  staff_name: string;
+  staff_role: string;
+  date: string;
+  shift_type: string;
+  status: string;
+  notes?: string | null;
+  property_id?: string | null;
+  staff_id?: string | null;
+}
+
 export const staffShifts = {
   async list(orgId = requireOrgId()): Promise<StaffShift[]> {
     const result = await sb()
@@ -11,10 +22,20 @@ export const staffShifts = {
     return unwrap(result) as unknown as StaffShift[];
   },
 
-  async create(input: Omit<StaffShift, 'id' | 'organization_id'>): Promise<StaffShift> {
+  async create(input: CreateShiftInput): Promise<StaffShift> {
     const result = await sb()
       .from('staff_shifts')
-      .insert({ ...input, organization_id: requireOrgId() })
+      .insert({
+        organization_id: requireOrgId(),
+        staff_name: input.staff_name,
+        staff_role: input.staff_role,
+        date: input.date,
+        shift_type: input.shift_type,
+        status: input.status,
+        notes: input.notes ?? null,
+        property_id: input.property_id ?? null,
+        staff_id: input.staff_id ?? null,
+      })
       .select()
       .single();
     return unwrap(result) as unknown as StaffShift;
