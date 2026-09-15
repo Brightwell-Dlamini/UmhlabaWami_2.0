@@ -4,9 +4,11 @@ import { auth } from '../auth';
 
 /** Returns the current org id or throws. */
 export function requireOrgId(): string {
-  const id = auth.getCurrentOrganization()?.id;
-  if (!id) throw new Error('No organisation context.');
-  return id;
+  const fromOrg = auth.getCurrentOrganization()?.id;
+  if (fromOrg) return fromOrg;
+  const fromUser = auth.getCurrentUser()?.organization_id;
+  if (fromUser) return fromUser;
+  throw new Error('No organisation context. Sign out and sign in again, or ask super admin to re-approve the organisation.');
 }
 
 export function requireUser(): User {
