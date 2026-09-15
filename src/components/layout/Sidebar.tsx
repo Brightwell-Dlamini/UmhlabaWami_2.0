@@ -66,7 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'announcements', label: 'Announcements', icon: Megaphone },
           { id: 'profile_settings', label: 'My Profile', icon: User },
         ];
-      case 'property_manager':return[{ id: 'finance_overview', label: 'Finances', icon: DollarSign },   // NEW]
+      case 'property_manager':
       case 'landlord':
         return [
           { id: 'manager_overview', label: 'Dashboard', icon: LayoutDashboard },
@@ -81,6 +81,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'leases', label: 'Leases & SLAs', icon: FileBadge },
           { id: 'staff_schedule', label: 'Roster & Shifts', icon: Calendar },
           { id: 'vendors', label: 'Vendors', icon: Truck },
+          { id: 'finance_overview', label: 'Finances', icon: DollarSign },
           { id: 'announcements', label: 'Announcements', icon: Megaphone },
           { id: 'analytics_reports', label: 'Analytics & Reports', icon: BarChart3 },
           { id: 'messages', label: 'Messages', icon: MessageSquare },
@@ -106,28 +107,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'analytics_reports', label: 'Financial Reports', icon: BarChart3 },
           { id: 'profile_settings', label: 'My Profile', icon: User },
         ];
-     case 'admin':
-  return [
-    { id: 'admin_overview', label: 'Org Dashboard', icon: LayoutDashboard },
-    { id: 'centre_pulse', label: 'Centre Pulse', icon: Activity },
-    { id: 'centres', label: 'Centres & Properties', icon: Building2 },
-    { id: 'units', label: 'Units & Rent Roll', icon: Building },
-    { id: 'tenants_list', label: 'Tenants Directory', icon: Users },
-    { id: 'leases', label: 'Leases & SLAs', icon: FileBadge },
-    { id: 'org_users', label: 'Staff & Roles', icon: Users },
-    { id: 'manager_tickets', label: 'All Tickets', icon: Ticket },
-    { id: 'sla_matrix', label: 'SLA Matrix', icon: Shield },
-    { id: 'preventive_maintenance', label: 'Preventive Maintenance', icon: CalendarClock },
-    { id: 'staff_schedule', label: 'Staff Rostering', icon: Calendar },
-    { id: 'vendors', label: 'Vendors', icon: Truck },                          // NEW
-    { id: 'finance_overview', label: 'Finances', icon: DollarSign },           // NEW
-    { id: 'commercial_engine', label: 'Commercial Engine', icon: FileText },
-    { id: 'announcements', label: 'Announcements', icon: Megaphone },
-    { id: 'analytics_reports', label: 'Export Reports', icon: BarChart3 },
-    { id: 'messages', label: 'Messages', icon: MessageSquare },                // NEW
-    { id: 'org_settings', label: 'Org Settings', icon: Settings },
-    { id: 'profile_settings', label: 'My Profile', icon: User },
-  ];      case 'super_admin':
+      case 'admin':
+        return [
+          { id: 'admin_overview', label: 'Org Dashboard', icon: LayoutDashboard },
+          { id: 'centre_pulse', label: 'Centre Pulse', icon: Activity },
+          { id: 'centres', label: 'Centres & Properties', icon: Building2 },
+          { id: 'units', label: 'Units & Rent Roll', icon: Building },
+          { id: 'tenants_list', label: 'Tenants Directory', icon: Users },
+          { id: 'leases', label: 'Leases & SLAs', icon: FileBadge },
+          { id: 'org_users', label: 'Staff & Roles', icon: Users },
+          { id: 'manager_tickets', label: 'All Tickets', icon: Ticket },
+          { id: 'sla_matrix', label: 'SLA Matrix', icon: Shield },
+          { id: 'preventive_maintenance', label: 'Preventive Maintenance', icon: CalendarClock },
+          { id: 'staff_schedule', label: 'Staff Rostering', icon: Calendar },
+          { id: 'vendors', label: 'Vendors', icon: Truck },
+          { id: 'finance_overview', label: 'Finances', icon: DollarSign },
+          { id: 'commercial_engine', label: 'Commercial Engine', icon: FileText },
+          { id: 'announcements', label: 'Announcements', icon: Megaphone },
+          { id: 'analytics_reports', label: 'Export Reports', icon: BarChart3 },
+          { id: 'messages', label: 'Messages', icon: MessageSquare },
+          { id: 'org_settings', label: 'Org Settings', icon: Settings },
+          { id: 'profile_settings', label: 'My Profile', icon: User },
+        ];
+      case 'super_admin':
         return [
           { id: 'super_overview', label: 'Platform Dashboard', icon: LayoutDashboard },
           { id: 'super_approvals', label: 'Org Approvals', icon: ShieldCheck, badgeCount: 'Pending' },
