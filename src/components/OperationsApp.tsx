@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Sidebar } from './layout/Sidebar';
 import { TenantDashboard } from './dashboard/TenantDashboard';
 import { ManagerDashboard } from './dashboard/ManagerDashboard';
@@ -39,6 +39,8 @@ interface Props {
   showToast: (title: string, message: string) => void;
 }
 
+const TAB_STORAGE_KEY = 'uw_sidebar_tab';
+
 function defaultTab(role?: UserRole): string {
   switch (role) {
     case 'tenant': return 'tenant_overview';
@@ -51,15 +53,61 @@ function defaultTab(role?: UserRole): string {
   }
 }
 
+/** Restore last tab from URL hash (#tab=…) or sessionStorage so refresh keeps place. */
+function readInitialTab(role?: UserRole): string {
+  try {
+    const hash = window.location.hash.replace(/^#/, '');
+    if (hash.startsWith('tab=')) {
+      const tab = decodeURIComponent(hash.slice(4));
+      if (tab) return tab;
+    }
+    const params = new URLSearchParams(hash);
+    const fromParams = params.get('tab');
+    if (fromParams) return fromParams;
+    const stored = sessionStorage.getItem(TAB_STORAGE_KEY);
+    if (stored) return stored;
+  } catch {
+    /* ignore */
+  }
+  return defaultTab(role);
+}
+
+function persistTab(tab: string) {
+  try {
+    sessionStorage.setItem(TAB_STORAGE_KEY, tab);
+  } catch {
+    /* ignore */
+  }
+  try {
+    const next = `#tab=${encodeURIComponent(tab)}`;
+    if (window.location.hash !== next) {
+      // replaceState avoids an extra history entry and does not reload
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${next}`);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 export function OperationsApp({ currentUser, showToast }: Props) {
-  const [sidebarActiveTab, setSidebarActiveTab] = useState(defaultTab(currentUser.role));
+  const [sidebarActiveTab, setSidebarActiveTab] = useState(() => readInitialTab(currentUser.role));
   const [isCreateTicketOpen, setIsCreateTicketOpen] = useState(false);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [isBroadcastOpen, setIsBroadcastOpen] = useState(false);
 
+  // Persist tab so refresh / tab-return keeps the same screen
   useEffect(() => {
-    setSidebarActiveTab(defaultTab(currentUser.role));
-  }, [currentUser.role, currentUser.id]);
+    persistTab(sidebarActiveTab);
+  }, [sidebarActiveTab]);
+
+  // Only jump to role default when the *role* actually changes (e.g. promote), not on every profile refresh
+  const roleRef = useRef(currentUser.role);
+  useEffect(() => {
+    if (roleRef.current !== currentUser.role) {
+      roleRef.current = currentUser.role;
+      setSidebarActiveTab(defaultTab(currentUser.role));
+    }
+  }, [currentUser.role]);
 
   // Periodic SLA escalation
   useEffect(() => {
@@ -145,9 +193,9 @@ export function OperationsApp({ currentUser, showToast }: Props) {
               filterRole={sidebarActiveTab}
             />
           )}
-         {(sidebarActiveTab === 'tenant_lease' || sidebarActiveTab === 'leases') && (
-  <LeaseManagementView />
-)}
+          {(sidebarActiveTab === 'tenant_lease' || sidebarActiveTab === 'leases') && (
+            <LeaseManagementView />
+          )}
           {sidebarActiveTab === 'tenant_documents' && <TenantDocumentsView />}
 
           {/* ---- Manager flow ---- */}
