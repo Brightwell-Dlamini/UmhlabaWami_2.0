@@ -1,29 +1,25 @@
 import { sb, unwrap, requireOrgId, requireUser } from './_helpers';
 import type { User, UserRole } from '../../types';
-
-export interface InviteUserInput {
-  email: string;
-  name: string;
-  role: UserRole;
-  phone?: string;
-  organizationId?: string | null;
-}
+import { auth } from '../auth';
 
 export const profiles = {
-  async list(orgId = requireOrgId()): Promise<User[]> {
+  /** Org-scoped staff list. */
+  async list(orgId?: string): Promise<User[]> {
+    const oid = orgId || requireOrgId();
     const result = await sb()
       .from('profiles')
       .select('*')
-      .eq('organization_id', orgId)
-      .order('name', { ascending: true });
+      .eq('organization_id', oid)
+      .order('created_at', { ascending: false });
     return unwrap(result) as unknown as User[];
   },
 
+  /** Platform-wide directory — super_admin only (RLS enforced). */
   async listAll(): Promise<User[]> {
     const result = await sb()
       .from('profiles')
       .select('*')
-      .order('name', { ascending: true });
+      .order('created_at', { ascending: false });
     return unwrap(result) as unknown as User[];
   },
 
@@ -32,103 +28,111 @@ export const profiles = {
     return unwrap(result) as unknown as User;
   },
 
+  async updateSelf(patch: Partial<Pick<User, 'name' | 'phone' | 'avatar_url'>>): Promise<User> {
+    const me = requireUser();
+    const result = await sb()
+      .from('profiles')
+      .update(patch)
+      .eq('id', me.id)
+      .select()
+      .single();
+    return unwrap(result) as unknown as User;
+  },
+
+  /**
+   * Full admin edit — any field including role, status, organisation.
+   * Super admin can edit anyone; org admin limited by RLS.
+   */
   async updateAsAdmin(
     userId: string,
-    patch: Partial<{
-      name: string;
-      email: string;
-      phone: string;
-      role: UserRole;
-      status: string;
-      organization_id: string | null;
-      username: string;
-    }>
+    patch: Partial<
+      Pick<User, 'name' | 'phone' | 'email' | 'username' | 'role' | 'status' | 'organization_id' | 'avatar_url'>
+    >
   ): Promise<User> {
     const result = await sb()
       .from('profiles')
       .update(patch)
       .eq('id', userId)
-      .select('*')
+      .select()
       .single();
     return unwrap(result) as unknown as User;
   },
 
   async setRole(userId: string, role: UserRole): Promise<User> {
+    // Prefer RPC if present; fall back to direct update (super_admin RLS allows it)
     const { data, error } = await sb().rpc('set_profile_role', {
       p_user_id: userId,
       p_role: role,
     });
-    if (error) {
-      // fallback for super_admin when RPC missing
-      const result = await sb()
-        .from('profiles')
-        .update({ role })
-        .eq('id', userId)
-        .select('*')
-        .single();
-      return unwrap(result) as unknown as User;
-    }
-    return (Array.isArray(data) ? data[0] : data) as unknown as User;
+    if (!error && data) return data as unknown as User;
+
+    const result = await sb()
+      .from('profiles')
+      .update({ role })
+      .eq('id', userId)
+      .select()
+      .single();
+    return unwrap(result) as unknown as User;
   },
 
-  async setStatus(userId: string, status: string): Promise<User> {
+  async setStatus(userId: string, status: User['status']): Promise<User> {
     const { data, error } = await sb().rpc('set_profile_status', {
       p_user_id: userId,
       p_status: status,
     });
-    if (error) {
-      const result = await sb()
-        .from('profiles')
-        .update({ status })
-        .eq('id', userId)
-        .select('*')
-        .single();
-      return unwrap(result) as unknown as User;
-    }
-    return (Array.isArray(data) ? data[0] : data) as unknown as User;
+    if (!error && data) return data as unknown as User;
+
+    const result = await sb()
+      .from('profiles')
+      .update({ status })
+      .eq('id', userId)
+      .select()
+      .single();
+    return unwrap(result) as unknown as User;
   },
 
-  async activate(userId: string): Promise<User> {
-    const { data, error } = await sb().rpc('activate_profile', {
-      p_user_id: userId,
-      p_actor_name: requireUser().name,
-    });
-    if (error) {
-      return this.setStatus(userId, 'Active');
+  /**
+   * Invite a user.
+   * - Org staff: pass organizationId (or omit to use current org).
+   * - Platform user (super_admin only): pass organizationId: null.
+   */
+  async invite(args: {
+    email: string;
+    name: string;
+    role: UserRole;
+    organizationId?: string | null;
+  }): Promise<{ userId: string; temporaryPassword?: string }> {
+    const body: Record<string, unknown> = {
+      email: args.email,
+      name: args.name,
+      role: args.role,
+    };
+    if (args.organizationId === null) {
+      body.organizationId = null;
+    } else if (args.organizationId) {
+      body.organizationId = args.organizationId;
+    } else {
+      body.organizationId = requireOrgId();
     }
-    return (Array.isArray(data) ? data[0] : data) as unknown as User;
+
+    const result = await sb().functions.invoke('invite-staff', { body });
+    if (result.error) throw new Error(result.error.message);
+    if (result.data?.error) throw new Error(result.data.error);
+    return result.data;
   },
 
-  async invite(input: InviteUserInput): Promise<{ userId?: string; inviteSent?: boolean }> {
-    const orgId = input.organizationId !== undefined ? input.organizationId : requireOrgId();
-    try {
-      const result = await sb().functions.invoke('invite-staff', {
-        body: {
-          email: input.email.trim().toLowerCase(),
-          name: input.name,
-          role: input.role,
-          phone: input.phone,
-          organizationId: orgId,
-        },
-      });
-      if (result.error) throw new Error(result.error.message);
-      if (result.data?.error) throw new Error(result.data.error);
-      return {
-        userId: result.data?.userId || result.data?.id,
-        inviteSent: result.data?.inviteSent ?? true,
-      };
-    } catch (e) {
-      // Client-side fallback is intentionally limited; prefer edge function
-      throw e instanceof Error ? e : new Error(String(e));
-    }
-  },
-
-  async purge(userId: string): Promise<void> {
-    const { error } = await sb().from('profiles').delete().eq('id', userId);
+  /** Soft-remove from org (clears organization_id, keeps auth account). */
+  async removeFromOrg(userId: string): Promise<void> {
+    const { error } = await sb()
+      .from('profiles')
+      .update({ organization_id: null, status: 'Inactive' })
+      .eq('id', userId);
     if (error) throw new Error(error.message);
   },
 
-  async remove(userId: string): Promise<void> {
-    return this.purge(userId);
+  /** Hard-delete profile row (super_admin). Auth user may remain. */
+  async purge(userId: string): Promise<void> {
+    const { error } = await sb().from('profiles').delete().eq('id', userId);
+    if (error) throw new Error(error.message);
   },
 };
