@@ -6,6 +6,7 @@ import { MaintenancePortal } from './dashboard/MaintenancePortal';
 import { FinancePortal } from './finance/FinancePortal';
 import { SuperAdminPortal } from './dashboard/SuperAdminPortal';
 import { BroadcastModal } from './dashboard/BroadcastModal';
+import { CentresView } from './management/CentresView';
 import { UnitsDirectoryView } from './management/UnitsDirectoryView';
 import { LeaseManagementView } from './management/LeaseManagementView';
 import { TicketsListView } from './dashboard/TicketsListView';
@@ -26,7 +27,7 @@ import { PreventiveMaintenanceView } from './ops/PreventiveMaintenanceView';
 import { ProfileSettingsView } from './profile/ProfileSettingsView';
 import { CommercialEngineView } from './finance/CommercialEngineView';
 import { auth } from '../services/auth';
-import { announcements as annApi } from '../services/api/announcements';
+import { emergencyBroadcasts as emergApi } from '../services/api/announcements';
 import { tickets as ticketsApi } from '../services/api/tickets';
 import { useSupabaseQuery } from '../hooks/useSupabaseQuery';
 import { useRealtime } from '../hooks/useRealtime';
@@ -60,6 +61,7 @@ export function OperationsApp({ currentUser, showToast }: Props) {
     setSidebarActiveTab(defaultTab(currentUser.role));
   }, [currentUser.role, currentUser.id]);
 
+  // Periodic SLA escalation
   useEffect(() => {
     if (!currentUser.organization_id) return;
     const run = () => ticketsApi.runEscalation().catch(() => {});
@@ -68,10 +70,14 @@ export function OperationsApp({ currentUser, showToast }: Props) {
     return () => clearInterval(id);
   }, [currentUser.organization_id]);
 
-  const { data: activeEmergency } = useSupabaseQuery(
+  // Live emergency alert banner
+  const { data: activeEmergencies = [] } = useSupabaseQuery(
     ['emergency_broadcasts', 'active', currentUser.organization_id ?? ''],
-    () => annApi.activeEmergencyList?.() ?? Promise.resolve([]),
-    { enabled: !!currentUser.organization_id && currentUser.role !== 'super_admin' }
+    () => emergApi.listActive(),
+    {
+      enabled: !!currentUser.organization_id && currentUser.role !== 'super_admin',
+      refreshInterval: 60_000,
+    }
   );
 
   useRealtime({
@@ -83,7 +89,7 @@ export function OperationsApp({ currentUser, showToast }: Props) {
     enabled: !!currentUser.organization_id,
   });
 
-  const firstEmergency = activeEmergency?.[0];
+  const firstEmergency = activeEmergencies[0];
 
   return (
     <>
@@ -111,50 +117,98 @@ export function OperationsApp({ currentUser, showToast }: Props) {
               else setSidebarActiveTab(tab);
             }}
             onOpenCreateTicket={() => setIsCreateTicketOpen(true)}
-            organizationName={auth.getCurrentOrganization()?.company_name}
+            organizationName={
+              auth.getCurrentOrganization()?.company_name
+            }
             orgCode={auth.getCurrentOrganization()?.organization_code}
           />
         </div>
 
         <div className="flex-1 min-w-0">
-          {sidebarActiveTab === 'centre_pulse' && <CentrePulseView />}
-          {sidebarActiveTab === 'sla_matrix' && <SlaMatrixView />}
-          {sidebarActiveTab === 'preventive_maintenance' && <PreventiveMaintenanceView />}
-          {sidebarActiveTab === 'profile_settings' && <ProfileSettingsView />}
-          {sidebarActiveTab === 'commercial_engine' && <CommercialEngineView />}
-          {(sidebarActiveTab === 'properties' || sidebarActiveTab === 'units') && (
+          {/* ---- Manager / admin screens ---- */}
+          {sidebarActiveTab === 'centres' && <CentresView />}
+          {(sidebarActiveTab === 'units' || sidebarActiveTab === 'properties') && (
             <UnitsDirectoryView onSelectShop={() => {}} />
           )}
-          {(sidebarActiveTab === 'leases' || sidebarActiveTab === 'tenant_lease') && <LeaseManagementView />}
-          {(sidebarActiveTab === 'manager_tickets' ||
-            sidebarActiveTab === 'tenant_tickets' ||
-            sidebarActiveTab === 'maintenance_jobs' ||
-            sidebarActiveTab === 'maintenance_completed') && (
+
+          {/* ---- Tenant flow ---- */}
+          {sidebarActiveTab === 'tenant_overview' && currentUser.role === 'tenant' && (
+            <TenantDashboard
+              onOpenCreateTicket={() => setIsCreateTicketOpen(true)}
+              onViewTicket={(id) => setSelectedTicketId(id)}
+            />
+          )}
+          {sidebarActiveTab === 'tenant_tickets' && (
             <TicketsListView
               onViewTicket={(id) => setSelectedTicketId(id)}
               onOpenCreateTicket={() => setIsCreateTicketOpen(true)}
               filterRole={sidebarActiveTab}
             />
           )}
+          {sidebarActiveTab === 'tenant_lease' && <LeaseManagementView />}
+          {sidebarActiveTab === 'tenant_documents' && <TenantDocumentsView />}
+
+          {/* ---- Manager flow ---- */}
+          {(sidebarActiveTab === 'manager_overview' ||
+            sidebarActiveTab === 'admin_overview' ||
+            sidebarActiveTab === 'overview') &&
+            currentUser.role !== 'tenant' &&
+            currentUser.role !== 'maintenance' &&
+            currentUser.role !== 'finance' &&
+            currentUser.role !== 'super_admin' && (
+              <ManagerDashboard
+                onViewTicket={(id) => setSelectedTicketId(id)}
+                onOpenCreateTicket={() => setIsCreateTicketOpen(true)}
+                onOpenBroadcastModal={() => setIsBroadcastOpen(true)}
+              />
+            )}
+          {sidebarActiveTab === 'centre_pulse' && <CentrePulseView />}
+          {sidebarActiveTab === 'manager_tickets' && (
+            <TicketsListView
+              onViewTicket={(id) => setSelectedTicketId(id)}
+              onOpenCreateTicket={() => setIsCreateTicketOpen(true)}
+              filterRole={sidebarActiveTab}
+            />
+          )}
+          {sidebarActiveTab === 'sla_matrix' && <SlaMatrixView />}
+          {sidebarActiveTab === 'preventive_maintenance' && <PreventiveMaintenanceView />}
           {sidebarActiveTab === 'maintenance_ops' && (
             <MaintenancePortal onViewTicket={(id) => setSelectedTicketId(id)} />
           )}
           {sidebarActiveTab === 'tenants_list' && (
             <TenantsListView
               onOpenCreateTicketForShop={() => setIsCreateTicketOpen(true)}
-              onViewLeases={() => setSidebarActiveTab('leases')}
+              onViewLeases={() => setSidebarActiveTab('units')}
             />
           )}
           {sidebarActiveTab === 'staff_schedule' && <StaffScheduleView />}
           {sidebarActiveTab === 'vendors' && <VendorsView />}
           {sidebarActiveTab === 'announcements' && <AnnouncementsView />}
-          {sidebarActiveTab === 'messages' && <MessagesView />}
           {sidebarActiveTab === 'analytics_reports' && <AnalyticsReportsView />}
-          {sidebarActiveTab === 'tenant_documents' && <TenantDocumentsView />}
+
+          {/* ---- Maintenance flow ---- */}
+          {sidebarActiveTab === 'maintenance_jobs' && (
+            <MaintenancePortal onViewTicket={(id) => setSelectedTicketId(id)} />
+          )}
+          {sidebarActiveTab === 'maintenance_completed' && (
+            <TicketsListView
+              onViewTicket={(id) => setSelectedTicketId(id)}
+              onOpenCreateTicket={() => setIsCreateTicketOpen(true)}
+              filterRole={sidebarActiveTab}
+            />
+          )}
+
+          {/* ---- Shared ---- */}
+          {sidebarActiveTab === 'messages' && <MessagesView />}
+          {sidebarActiveTab === 'profile_settings' && <ProfileSettingsView />}
+
+          {/* ---- Admin-specific ---- */}
           {(sidebarActiveTab === 'org_users' || sidebarActiveTab === 'super_users') && <OrgUsersView />}
           {sidebarActiveTab === 'org_settings' && <OrgSettingsView />}
-          {(sidebarActiveTab === 'finance' ||
-            sidebarActiveTab === 'finance_overview' ||
+
+          {/* ---- Finance ---- */}
+          {(sidebarActiveTab === 'finance_overview' ||
+            sidebarActiveTab === 'commercial_engine' ||
             sidebarActiveTab === 'rent_roll' ||
             sidebarActiveTab === 'expenses_ledger' ||
             sidebarActiveTab === 'transactions' ||
@@ -162,6 +216,8 @@ export function OperationsApp({ currentUser, showToast }: Props) {
             sidebarActiveTab === 'finance_documents') && (
             <FinancePortal initialTab={sidebarActiveTab} />
           )}
+
+          {/* ---- Super admin ---- */}
           {currentUser.role === 'super_admin' &&
             (sidebarActiveTab === 'super_overview' ||
               sidebarActiveTab === 'super_approvals' ||
@@ -171,37 +227,15 @@ export function OperationsApp({ currentUser, showToast }: Props) {
               sidebarActiveTab === 'db_backup') && (
               <SuperAdminPortal initialTab={sidebarActiveTab} />
             )}
-          {sidebarActiveTab === 'tenant_overview' && currentUser.role === 'tenant' && (
-            <TenantDashboard
-              onOpenCreateTicket={() => setIsCreateTicketOpen(true)}
-              onViewTicket={(id) => setSelectedTicketId(id)}
-            />
-          )}
-          {(sidebarActiveTab === 'manager_overview' ||
-            sidebarActiveTab === 'admin_overview' ||
-            sidebarActiveTab === 'overview') &&
-            currentUser.role !== 'tenant' &&
-            currentUser.role !== 'maintenance' &&
-            currentUser.role !== 'finance' && (
-              <ManagerDashboard
-                onViewTicket={(id) => setSelectedTicketId(id)}
-                onOpenCreateTicket={() => setIsCreateTicketOpen(true)}
-                onOpenBroadcastModal={() => setIsBroadcastOpen(true)}
-              />
-            )}
-          {currentUser.role === 'maintenance' && sidebarActiveTab === 'maintenance_jobs' && (
-            <MaintenancePortal onViewTicket={(id) => setSelectedTicketId(id)} />
-          )}
-          {currentUser.role === 'finance' && sidebarActiveTab === 'finance_overview' && (
-            <FinancePortal initialTab="rent_roll" />
-          )}
         </div>
       </div>
 
       <CreateTicketWizard
         isOpen={isCreateTicketOpen}
         onClose={() => setIsCreateTicketOpen(false)}
-        onSuccess={(ticketNumber) => showToast('Ticket created', `Ticket #${ticketNumber} is open.`)}
+        onSuccess={(ticketNumber) =>
+          showToast('Ticket created', `Ticket #${ticketNumber} is open with SLA tracking.`)
+        }
       />
       <TicketDetailModal
         ticketId={selectedTicketId}
