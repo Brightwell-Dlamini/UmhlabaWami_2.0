@@ -1,6 +1,7 @@
-import { getSupabase } from '../../lib/supabase';
 import { sb, unwrap } from './_helpers';
+import { isMemoryMode, getMemoryDb } from './mode';
 import type { Organization, SubscriptionTier } from '../../types';
+import { getSupabase } from '../../lib/supabase';
 
 export interface RegisterOrgInput {
   companyName: string;
@@ -17,8 +18,14 @@ export interface RegisterOrgInput {
 }
 
 export const organizations = {
-  /** List all organisations the caller can see (super admin sees all). */
   async list(): Promise<Organization[]> {
+    if (isMemoryMode()) {
+      const db = await getMemoryDb();
+      return [...db.organizations].sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+    }
     const result = await sb()
       .from('organizations')
       .select('*')
@@ -27,6 +34,10 @@ export const organizations = {
   },
 
   async pending(): Promise<Organization[]> {
+    if (isMemoryMode()) {
+      const db = await getMemoryDb();
+      return db.organizations.filter((o) => o.status === 'Pending Approval');
+    }
     const result = await sb()
       .from('organizations')
       .select('*')
@@ -36,21 +47,41 @@ export const organizations = {
   },
 
   async get(id: string): Promise<Organization> {
-    const result = await sb()
-      .from('organizations')
-      .select('*')
-      .eq('id', id)
-      .single();
+    if (isMemoryMode()) {
+      const db = await getMemoryDb();
+      const found = db.organizations.find((o) => o.id === id);
+      if (!found) throw new Error('Organisation not found.');
+      return found;
+    }
+    const result = await sb().from('organizations').select('*').eq('id', id).single();
     return unwrap(result) as unknown as Organization;
   },
 
   /**
-   * Public registration:
-   *  1. Create auth user with the password they chose.
+   * Public registration flow:
+   *  1. Create auth user with chosen password.
    *  2. Insert org via register_organization RPC (status = Pending Approval).
-   *  3. Sign out so they land on the public site until approved.
+   *  3. Sign out so they land on public site until approved.
+   *
+   * Memory mode: writes directly to db.organizations with status Pending.
    */
   async register(input: RegisterOrgInput): Promise<Organization> {
+    if (isMemoryMode()) {
+      const db = await getMemoryDb();
+      const created = db.registerOrganization({
+        company_name: input.companyName,
+        owner_name: input.ownerName,
+        email: input.email,
+        phone: input.phone,
+        address: input.address,
+        subscription_tier: input.tier,
+        property_count: input.propertyCount,
+        tenant_count: input.tenantCount,
+        estimated_rental_income: input.estimatedMonthlyRent,
+      });
+      return created;
+    }
+
     const supabase = getSupabase();
 
     const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
@@ -64,7 +95,6 @@ export const organizations = {
         },
       },
     });
-
     if (signUpErr) throw new Error(signUpErr.message);
 
     const userId = signUpData.user?.id;
@@ -91,11 +121,9 @@ export const organizations = {
     if (error) throw new Error(error.message);
 
     await supabase.auth.signOut();
-
     return data as unknown as Organization;
   },
 
-  /** Update editable fields (RLS: admin-of-own-org or super_admin). */
   async update(
     id: string,
     patch: Partial<
@@ -112,6 +140,14 @@ export const organizations = {
       >
     >
   ): Promise<Organization> {
+    if (isMemoryMode()) {
+      const db = await getMemoryDb();
+      const org = db.organizations.find((o) => o.id === id);
+      if (!org) throw new Error('Organisation not found.');
+      Object.assign(org, patch);
+      db.saveToStorage();
+      return org;
+    }
     const result = await sb()
       .from('organizations')
       .update(patch)
@@ -122,11 +158,14 @@ export const organizations = {
   },
 
   /**
-   * Approve a pending organisation — no edge function.
-   * Calls security-definer RPC approve_organization which:
-   *   - sets status Active + issues org code
-   *   - attaches the owner profile (role admin, status Active, org linked)
-   * Owner logs in with the password they set at registration + the new org code.
+   * Approve a pending organisation. Prefers the `approve_organization` RPC
+   * (which generates the code server-side). Falls back to a direct update
+   * + profile link if the RPC is missing.
+   *
+   * Both paths converge on the same end state:
+   *   - org.status = 'Active'
+   *   - org.organization_code issued
+   *   - owner profile linked (role='admin', status='Active', organization_id set)
    */
   async approve(args: {
     organizationId: string;
@@ -137,81 +176,107 @@ export const organizations = {
     organizationCode: string;
     adminUserId: string;
   }> {
-    const { data, error } = await sb().rpc('approve_organization', {
+    if (isMemoryMode()) {
+      const db = await getMemoryDb();
+      const code = db.approveOrganization(
+        args.organizationId,
+        args.approverName,
+        undefined,
+        args.customCode ? { organization_code: args.customCode } : undefined
+      );
+      // db.approveOrganization also provisions the admin user
+      const org = db.organizations.find((o) => o.id === args.organizationId);
+      const admin = db.users.find(
+        (u) => u.organization_id === args.organizationId && u.role === 'admin'
+      );
+      return {
+        organizationId: args.organizationId,
+        organizationCode: code || org?.organization_code || '',
+        adminUserId: admin?.id || '',
+      };
+    }
+
+    const rpcResult = await sb().rpc('approve_organization', {
       p_org_id: args.organizationId,
       p_approver_name: args.approverName || 'Super Admin',
       p_custom_code: args.customCode ?? null,
     });
 
-    if (error) {
-      // Fallback if RPC missing / old signature: direct update + profile link
-      const { data: org, error: loadErr } = await sb()
-        .from('organizations')
-        .select('*')
-        .eq('id', args.organizationId)
-        .single();
-      if (loadErr || !org) throw new Error(error.message || loadErr?.message || 'Org not found');
-      if (org.status === 'Active') throw new Error('Organisation already active');
-
-      const code =
-        (args.customCode || '').trim().toUpperCase() ||
-        generateOrgCode(org.company_name);
-
-      const { data: patched, error: patchErr } = await sb()
-        .from('organizations')
-        .update({
-          status: 'Active',
-          organization_code: code,
-          approved_at: new Date().toISOString(),
-        })
-        .eq('id', args.organizationId)
-        .select('*')
-        .single();
-
-      if (patchErr || !patched) {
-        throw new Error(
-          patchErr?.message ||
-            error.message ||
-            'Approval failed. Run migration 006_simple_approval.sql in Supabase SQL editor.'
-        );
-      }
-
-      const ownerId =
-        (org as { owner_auth_user_id?: string }).owner_auth_user_id ||
-        (
-          await sb()
-            .from('profiles')
-            .select('id')
-            .eq('email', String(org.email).toLowerCase())
-            .maybeSingle()
-        ).data?.id;
-
-      if (ownerId) {
-        await sb()
-          .from('profiles')
-          .update({
-            organization_id: patched.id,
-            role: 'admin',
-            status: 'Active',
-          })
-          .eq('id', ownerId);
-      }
-
+    if (!rpcResult.error && rpcResult.data) {
+      const org = (Array.isArray(rpcResult.data) ? rpcResult.data[0] : rpcResult.data) as
+        Organization & { owner_auth_user_id?: string };
       return {
-        organizationId: patched.id,
-        organizationCode: patched.organization_code,
-        adminUserId: ownerId || '',
+        organizationId: org.id,
+        organizationCode: org.organization_code,
+        adminUserId: org.owner_auth_user_id || '',
       };
     }
 
-    const org = (Array.isArray(data) ? data[0] : data) as Organization & {
-      owner_auth_user_id?: string;
-    };
+    // Fallback path: RPC missing or failed.
+    const { data: org, error: loadErr } = await sb()
+      .from('organizations')
+      .select('*')
+      .eq('id', args.organizationId)
+      .single();
+    if (loadErr || !org) {
+      throw new Error(
+        rpcResult.error?.message ||
+          loadErr?.message ||
+          'Org not found during approval.'
+      );
+    }
+    if (org.status === 'Active') {
+      throw new Error('Organisation already active.');
+    }
+
+    const code =
+      (args.customCode || '').trim().toUpperCase() || generateOrgCode(org.company_name);
+
+    const { data: patched, error: patchErr } = await sb()
+      .from('organizations')
+      .update({
+        status: 'Active',
+        organization_code: code,
+        approved_at: new Date().toISOString(),
+        approved_by: args.approverName,
+      })
+      .eq('id', args.organizationId)
+      .select('*')
+      .single();
+
+    if (patchErr || !patched) {
+      throw new Error(
+        patchErr?.message ||
+          rpcResult.error?.message ||
+          'Approval failed. Run migration 006_simple_approval.sql in Supabase.'
+      );
+    }
+
+    const ownerId =
+      (org as { owner_auth_user_id?: string }).owner_auth_user_id ||
+      (
+        await sb()
+          .from('profiles')
+          .select('id')
+          .eq('email', String(org.email).toLowerCase())
+          .maybeSingle()
+      ).data?.id;
+
+    if (ownerId) {
+      await sb()
+        .from('profiles')
+        .update({
+          organization_id: patched.id,
+          role: 'admin',
+          status: 'Active',
+        })
+        .eq('id', ownerId);
+    }
 
     return {
-      organizationId: org.id,
-      organizationCode: org.organization_code,
-      adminUserId: org.owner_auth_user_id || '',
+      organizationId: patched.id,
+      organizationCode: patched.organization_code,
+      adminUserId: ownerId || '',
     };
   },
 
@@ -220,6 +285,11 @@ export const organizations = {
     approverName: string;
     reason: string;
   }): Promise<void> {
+    if (isMemoryMode()) {
+      const db = await getMemoryDb();
+      db.rejectOrganization(args.organizationId, args.approverName, args.reason);
+      return;
+    }
     const result = await sb().rpc('reject_organization', {
       p_org_id: args.organizationId,
       p_approver_name: args.approverName,
@@ -235,9 +305,11 @@ export const organizations = {
   },
 };
 
-function generateOrgCode(companyName: string): string {
+/** Generate an organisation code: PREFIX-DDMMYY-#### */
+export function generateOrgCode(companyName: string): string {
   const prefix =
-    (companyName || 'ORG').replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || 'ORG';
+    (companyName || 'ORG').replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() ||
+    'ORG';
   const d = new Date();
   const date =
     String(d.getDate()).padStart(2, '0') +
