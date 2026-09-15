@@ -1,6 +1,13 @@
 import { sb, unwrap, requireOrgId, requireUser } from './_helpers';
 import type { User, UserRole } from '../../types';
-import { auth } from '../auth';
+
+export interface InviteUserInput {
+  email: string;
+  name: string;
+  role: UserRole;
+  phone?: string;
+  organizationId?: string | null;
+}
 
 export const profiles = {
   async list(orgId = requireOrgId()): Promise<User[]> {
@@ -8,7 +15,7 @@ export const profiles = {
       .from('profiles')
       .select('*')
       .eq('organization_id', orgId)
-      .order('created_at', { ascending: false });
+      .order('name', { ascending: true });
     return unwrap(result) as unknown as User[];
   },
 
@@ -16,16 +23,7 @@ export const profiles = {
     const result = await sb()
       .from('profiles')
       .select('*')
-      .order('created_at', { ascending: false });
-    return unwrap(result) as unknown as User[];
-  },
-
-  async listByOrg(orgId: string): Promise<User[]> {
-    const result = await sb()
-      .from('profiles')
-      .select('*')
-      .eq('organization_id', orgId)
-      .order('created_at', { ascending: false });
+      .order('name', { ascending: true });
     return unwrap(result) as unknown as User[];
   },
 
@@ -34,177 +32,103 @@ export const profiles = {
     return unwrap(result) as unknown as User;
   },
 
-  async me(): Promise<User | null> {
-    const {
-      data: { user },
-    } = await sb().auth.getUser();
-    if (!user) return null;
-    const result = await sb().from('profiles').select('*').eq('id', user.id).maybeSingle();
-    if (result.error) throw new Error(result.error.message);
-    return result.data as unknown as User | null;
-  },
-
-  async updateSelf(patch: Partial<Pick<User, 'name' | 'phone' | 'avatar_url'>>) {
-    const {
-      data: { user },
-    } = await sb().auth.getUser();
-    if (!user) throw new Error('Not authenticated.');
-    const result = await sb().from('profiles').update(patch).eq('id', user.id).select().single();
-    return unwrap(result) as unknown as User;
-  },
-
   async updateAsAdmin(
     userId: string,
-    patch: Partial<
-      Pick<User, 'name' | 'email' | 'phone' | 'role' | 'status' | 'organization_id' | 'username'>
-    >
+    patch: Partial<{
+      name: string;
+      email: string;
+      phone: string;
+      role: UserRole;
+      status: string;
+      organization_id: string | null;
+      username: string;
+    }>
   ): Promise<User> {
-    const result = await sb().from('profiles').update(patch).eq('id', userId).select().single();
+    const result = await sb()
+      .from('profiles')
+      .update(patch)
+      .eq('id', userId)
+      .select('*')
+      .single();
     return unwrap(result) as unknown as User;
   },
 
   async setRole(userId: string, role: UserRole): Promise<User> {
-    const actor = requireUser();
-    try {
-      const { data, error } = await sb().rpc('set_profile_role', {
-        p_user_id: userId,
-        p_new_role: role,
-        p_actor_name: actor.name,
-      });
-      if (!error && data) return data as unknown as User;
-    } catch {
-      // fall through
+    const { data, error } = await sb().rpc('set_profile_role', {
+      p_user_id: userId,
+      p_role: role,
+    });
+    if (error) {
+      // fallback for super_admin when RPC missing
+      const result = await sb()
+        .from('profiles')
+        .update({ role })
+        .eq('id', userId)
+        .select('*')
+        .single();
+      return unwrap(result) as unknown as User;
     }
-    const result = await sb()
-      .from('profiles')
-      .update({ role })
-      .eq('id', userId)
-      .select()
-      .single();
-    return unwrap(result) as unknown as User;
+    return (Array.isArray(data) ? data[0] : data) as unknown as User;
   },
 
   async setStatus(userId: string, status: string): Promise<User> {
-    const actor = requireUser();
-    try {
-      const { data, error } = await sb().rpc('set_profile_status', {
-        p_user_id: userId,
-        p_new_status: status,
-        p_actor_name: actor.name,
-      });
-      if (!error && data) return data as unknown as User;
-    } catch {
-      /* fall through */
+    const { data, error } = await sb().rpc('set_profile_status', {
+      p_user_id: userId,
+      p_status: status,
+    });
+    if (error) {
+      const result = await sb()
+        .from('profiles')
+        .update({ status })
+        .eq('id', userId)
+        .select('*')
+        .single();
+      return unwrap(result) as unknown as User;
     }
-    if (status === 'Active') {
-      try {
-        const { data, error } = await sb().rpc('activate_profile', {
-          p_user_id: userId,
-          p_actor_name: actor.name,
-        });
-        if (!error && data) return data as unknown as User;
-      } catch {
-        /* fall through */
-      }
-    }
-    const result = await sb().from('profiles').update({ status }).eq('id', userId).select().single();
-    return unwrap(result) as unknown as User;
+    return (Array.isArray(data) ? data[0] : data) as unknown as User;
   },
 
   async activate(userId: string): Promise<User> {
-    return this.setStatus(userId, 'Active');
+    const { data, error } = await sb().rpc('activate_profile', {
+      p_user_id: userId,
+      p_actor_name: requireUser().name,
+    });
+    if (error) {
+      return this.setStatus(userId, 'Active');
+    }
+    return (Array.isArray(data) ? data[0] : data) as unknown as User;
   },
 
- async invite(args: {
-  email: string;
-  name: string;
-  role: UserRole;
-  phone?: string;
-}): Promise<{ userId: string; inviteSent: boolean }> {
-  const result = await sb().functions.invoke('invite-staff', {
-    body: {
-      ...args,
-      organizationId: requireOrgId(),
-      appUrl: window.location.origin,
-    },
-  });
-  if (result.error) throw new Error(result.error.message);
-  if (!result.data?.success) throw new Error(result.data?.error || 'Invite failed');
-  return result.data;
-}
-    const { createClient } = await import('@supabase/supabase-js');
-    const url = import.meta.env.VITE_SUPABASE_URL as string;
-    const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-    const isolated = createClient(url, key, {
-      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-    });
-    const tempPassword =
-      'Uw!' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 4).toUpperCase() + '9';
-
-    const { data: signed, error: signErr } = await isolated.auth.signUp({
-      email: args.email.toLowerCase(),
-      password: tempPassword,
-      options: {
-        data: {
-          name: args.name,
-          username: args.email.split('@')[0],
-          role: args.role,
-          phone: args.phone,
-          status: 'Active',
-          organization_id: organizationId || null,
+  async invite(input: InviteUserInput): Promise<{ userId?: string; inviteSent?: boolean }> {
+    const orgId = input.organizationId !== undefined ? input.organizationId : requireOrgId();
+    try {
+      const result = await sb().functions.invoke('invite-staff', {
+        body: {
+          email: input.email.trim().toLowerCase(),
+          name: input.name,
+          role: input.role,
+          phone: input.phone,
+          organizationId: orgId,
         },
-      },
-    });
-
-    if (signErr) throw new Error(signErr.message);
-    const userId = signed.user?.id;
-    if (!userId) throw new Error('Could not create auth user');
-
-    await sb().from('profiles').upsert(
-      {
-        id: userId,
-        email: args.email.toLowerCase(),
-        name: args.name,
-        username: args.email.split('@')[0],
-        role: args.role,
-        phone: args.phone ?? null,
-        organization_id: organizationId || null,
-        status: 'Active',
-      },
-      { onConflict: 'id' }
-    );
-
-    return { userId, inviteSent: false, temporaryPassword: tempPassword };
-  },
-
-  async remove(userId: string): Promise<void> {
-    const result = await sb()
-      .from('profiles')
-      .update({ status: 'Inactive' })
-      .eq('id', userId)
-      .select()
-      .single();
-    unwrap(result);
+      });
+      if (result.error) throw new Error(result.error.message);
+      if (result.data?.error) throw new Error(result.data.error);
+      return {
+        userId: result.data?.userId || result.data?.id,
+        inviteSent: result.data?.inviteSent ?? true,
+      };
+    } catch (e) {
+      // Client-side fallback is intentionally limited; prefer edge function
+      throw e instanceof Error ? e : new Error(String(e));
+    }
   },
 
   async purge(userId: string): Promise<void> {
-    if (!auth.isSuperAdmin()) throw new Error('Only super admin can purge users.');
-    const result = await sb()
-      .from('profiles')
-      .update({ status: 'Inactive', organization_id: null })
-      .eq('id', userId)
-      .select()
-      .single();
-    unwrap(result);
+    const { error } = await sb().from('profiles').delete().eq('id', userId);
+    if (error) throw new Error(error.message);
   },
 
-  async assignOrganization(userId: string, organizationId: string | null): Promise<User> {
-    const result = await sb()
-      .from('profiles')
-      .update({ organization_id: organizationId })
-      .eq('id', userId)
-      .select()
-      .single();
-    return unwrap(result) as unknown as User;
+  async remove(userId: string): Promise<void> {
+    return this.purge(userId);
   },
 };
