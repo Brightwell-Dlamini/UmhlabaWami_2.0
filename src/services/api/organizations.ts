@@ -50,7 +50,7 @@ export const organizations = {
     const result = await sb()
       .from('organizations')
       .select('*')
-      .eq('status', 'Pending Approval')
+      .eq('status', 'Pending')
       .order('created_at', { ascending: false });
     return unwrap(result) as unknown as Organization[];
   },
@@ -61,64 +61,66 @@ export const organizations = {
   },
 
   async register(input: RegisterOrgInput): Promise<Organization> {
-    const result = await sb().rpc('register_organization', {
-      p_company_name: input.companyName,
-      p_owner_name: input.ownerName,
-      p_email: input.email,
-      p_phone: input.phone,
-      p_address: input.address,
-      p_subscription_tier: input.tier,
-      p_estimated_monthly_rent: input.estimatedMonthlyRent ?? 0,
-      p_property_count: input.propertyCount ?? 1,
-      p_tenant_count: input.tenantCount ?? 0,
-      p_staff_breakdown: input.staffBreakdown ?? {},
-    });
+    const result = await sb()
+      .from('organizations')
+      .insert({
+        company_name: input.companyName,
+        owner_name: input.ownerName,
+        email: input.email,
+        phone: input.phone,
+        address: input.address,
+        subscription_tier: input.tier,
+        status: 'Pending',
+        organization_code: 'PENDING',
+        estimated_monthly_rent: input.estimatedMonthlyRent ?? null,
+        property_count: input.propertyCount ?? null,
+        tenant_count: input.tenantCount ?? null,
+        staff_breakdown: input.staffBreakdown ?? null,
+      })
+      .select('*')
+      .single();
     return unwrap(result) as unknown as Organization;
   },
 
   async update(
     id: string,
-    patch: Partial<
-      Pick<
-        Organization,
-        | 'company_name'
-        | 'owner_name'
-        | 'email'
-        | 'phone'
-        | 'address'
-        | 'logo_url'
-        | 'custom_branding_color'
-        | 'monthly_fee_estimate'
-        | 'subscription_tier'
-        | 'status'
-        | 'property_limit'
-        | 'tenant_limit'
-        | 'user_limit'
-        | 'storage_limit'
-      >
-    >
+    patch: Partial<{
+      company_name: string;
+      owner_name: string;
+      email: string;
+      phone: string;
+      address: string;
+      subscription_tier: SubscriptionTier;
+      status: string;
+      organization_code: string;
+      property_limit: number;
+      tenant_limit: number;
+      user_limit: number;
+      storage_limit_gb: number;
+    }>
   ): Promise<Organization> {
-    const result = await sb().from('organizations').update(patch).eq('id', id).select().single();
+    const result = await sb().from('organizations').update(patch).eq('id', id).select('*').single();
     return unwrap(result) as unknown as Organization;
   },
 
-  async setStatus(id: string, status: Organization['status']): Promise<Organization> {
-    return this.update(id, { status });
-  },
-
   async setTier(id: string, tier: SubscriptionTier): Promise<Organization> {
-    let limits = { property_limit: 2, tenant_limit: 50, user_limit: 10, storage_limit: 5 };
+    let limits: Partial<Organization> = {};
     try {
-      const { subscriptionTiersApi } = await import('./subscriptionTiers');
-      const rows = await subscriptionTiersApi.list();
-      limits = subscriptionTiersApi.limitsForKey(tier, rows);
-    } catch {
-      try {
-        const { subscriptionPlans } = await import('../subscriptionPlans');
-        limits = subscriptionPlans.limitsFor(tier);
-      } catch {
-        /* defaults */
+      const { data } = await sb()
+        .from('subscription_tiers')
+        .select('*')
+        .eq('tier_key', tier)
+        .maybeSingle();
+      if (data) {
+        limits = {
+          property_limit: data.property_limit,
+          tenant_limit: data.tenant_limit,
+          user_limit: data.user_limit,
+          storage_limit_gb: data.storage_limit_gb,
+        };
       }
+    } catch {
+      /* defaults */
     }
     return this.update(id, { subscription_tier: tier, ...limits });
   },
@@ -137,6 +139,45 @@ export const organizations = {
     inviteSent: boolean;
     temporaryPassword?: string;
   }> {
+    // 1) Primary path: deployed edge function (service role — creates auth user + profile)
+    try {
+      const { data, error } = await sb().functions.invoke('approve-organization', {
+        body: {
+          organizationId: args.organizationId,
+          approverName: args.approverName || 'Super Admin',
+          customCode: args.customCode || undefined,
+          adminEmail: args.adminEmail || undefined,
+          adminName: args.adminName || undefined,
+          temporaryPassword: args.temporaryPassword || undefined,
+        },
+      });
+      if (!error && data && !(data as { error?: string }).error) {
+        const d = data as {
+          organizationId: string;
+          organizationCode: string;
+          adminUserId: string;
+          inviteSent?: boolean;
+          temporaryPassword?: string;
+        };
+        return {
+          organizationId: d.organizationId,
+          organizationCode: d.organizationCode,
+          adminUserId: d.adminUserId || '',
+          inviteSent: !!d.inviteSent,
+          temporaryPassword: d.temporaryPassword || args.temporaryPassword,
+        };
+      }
+      // Edge returned an application error or transport error — fall through to local path
+      if (error) {
+        console.warn('[approve] edge function failed, using fallback:', error.message);
+      } else if ((data as { error?: string })?.error) {
+        console.warn('[approve] edge function error body:', (data as { error: string }).error);
+      }
+    } catch (e) {
+      console.warn('[approve] edge function invoke threw, using fallback:', e);
+    }
+
+    // 2) Fallback: RPC or direct update + isolated signUp (works without edge function)
     const { data: org, error: orgLoadErr } = await sb()
       .from('organizations')
       .select('*')
@@ -206,12 +247,13 @@ export const organizations = {
           organizationId: updatedOrg.id,
         },
       });
-      if (!inv.error && inv.data?.userId) {
-        adminUserId = inv.data.userId;
-        inviteSent = !!inv.data.inviteSent;
+      if (!inv.error && inv.data && !(inv.data as { error?: string }).error) {
+        const d = inv.data as { userId?: string; id?: string };
+        adminUserId = d.userId || d.id || null;
+        inviteSent = true;
       }
     } catch {
-      // ignore
+      // ignore — fall through to signUp
     }
 
     if (!adminUserId) {
