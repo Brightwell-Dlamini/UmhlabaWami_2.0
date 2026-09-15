@@ -115,40 +115,23 @@ export const profiles = {
     return this.setStatus(userId, 'Active');
   },
 
-  async invite(args: {
-    email: string;
-    name: string;
-    role: UserRole;
-    phone?: string;
-    organizationId?: string | null;
-  }): Promise<{ userId: string; inviteSent: boolean; temporaryPassword?: string }> {
-    const isSuper = auth.isSuperAdmin();
-    let organizationId: string | null | undefined = args.organizationId;
-
-    if (!isSuper) {
-      organizationId = organizationId || requireOrgId();
-    }
-    if (!isSuper && !organizationId) {
-      throw new Error('Organisation is required to invite a user.');
-    }
-
-    try {
-      const result = await sb().functions.invoke('invite-staff', {
-        body: {
-          email: args.email,
-          name: args.name,
-          role: args.role,
-          phone: args.phone,
-          organizationId: organizationId || null,
-        },
-      });
-      if (!result.error && result.data?.success) {
-        return result.data as { userId: string; inviteSent: boolean };
-      }
-    } catch {
-      // edge function often unavailable
-    }
-
+ async invite(args: {
+  email: string;
+  name: string;
+  role: UserRole;
+  phone?: string;
+}): Promise<{ userId: string; inviteSent: boolean }> {
+  const result = await sb().functions.invoke('invite-staff', {
+    body: {
+      ...args,
+      organizationId: requireOrgId(),
+      appUrl: window.location.origin,
+    },
+  });
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data?.success) throw new Error(result.data?.error || 'Invite failed');
+  return result.data;
+}
     const { createClient } = await import('@supabase/supabase-js');
     const url = import.meta.env.VITE_SUPABASE_URL as string;
     const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
