@@ -253,4 +253,60 @@ export function CommercialEngineView() {
                       </button>
                     )}
                   </td>
-                </
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold mb-3">Bank reconciliation</h2>
+        <div className="overflow-x-auto rounded-xl border bg-white dark:bg-slate-900">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 dark:bg-slate-800 text-left text-slate-600 dark:text-slate-300">
+              <tr>
+                <th className="px-4 py-3 font-medium">Date</th>
+                <th className="px-4 py-3 font-medium">Description</th>
+                <th className="px-4 py-3 font-medium">Direction</th>
+                <th className="px-4 py-3 font-medium">Amount</th>
+                <th className="px-4 py-3 font-medium">Reconciled</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {bankLines.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-6 text-center text-slate-400 text-xs">
+                    No bank lines.
+                  </td>
+                </tr>
+              ) : (
+                bankLines.map((l) => (
+                  <tr key={l.id}>
+                    <td className="px-4 py-3">{l.date}</td>
+                    <td className="px-4 py-3">{l.description}</td>
+                    <td className="px-4 py-3 capitalize">{l.direction}</td>
+                    <td className="px-4 py-3 tabular-nums">
+                      E{l.amount.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => handleReconcileToggle(l.id, l.reconciled)}
+                        className={`text-xs font-medium ${
+                          l.reconciled ? 'text-emerald-600' : 'text-slate-500'
+                        }`}
+                        type="button"
+                      >
+                        {l.reconciled ? 'Reconciled' : 'Mark reconciled'}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
