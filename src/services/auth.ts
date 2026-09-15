@@ -38,10 +38,15 @@ class AuthService {
         // TOKEN_REFRESHED / INITIAL_SESSION fire when switching browser tabs —
         // do NOT reload profile or they remount the whole UI and wipe form state.
         if (event === 'SIGNED_OUT') {
-          this.currentUser = null;
-          this.currentOrg = null;
-          this.notify(true);
-          clearAll();
+          // logout() already cleared state; only finish up if still signed in
+          if (this.currentUser !== null) {
+            this.currentUser = null;
+            this.currentOrg = null;
+            clearAll();
+            this.notify(true);
+          } else {
+            clearAll();
+          }
           return;
         }
         if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
@@ -213,16 +218,17 @@ class AuthService {
   }
 
   public async logout() {
-    // Clear local session state first so React unmounts dashboard queries
+    // 1) Drop UI session immediately so dashboard unmounts before network work
     this.currentUser = null;
     this.currentOrg = null;
-    this.notify(true);
     clearAll();
+    this.notify(true);
 
+    // 2) End Supabase session (local scope first — does not hang on network)
     const sb = tryGetSupabase();
     if (sb) {
       try {
-        await sb.auth.signOut();
+        await sb.auth.signOut({ scope: 'local' });
       } catch (e) {
         console.warn('[auth] signOut failed', e);
       }

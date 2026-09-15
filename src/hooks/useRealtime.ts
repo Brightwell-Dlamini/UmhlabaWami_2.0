@@ -1,35 +1,39 @@
-import { useEffect } from 'react';
-import { getSupabase } from '../lib/supabase';
+import { useEffect, useRef } from 'react';
+import { tryGetSupabase } from '../lib/supabase';
 import { invalidate } from '../lib/queryClient';
 
 interface Options {
-  /** Table name to watch. */
   table: string;
-  /** Postgres filter, e.g. `organization_id=eq.${orgId}`. */
   filter?: string;
-  /** Cache key prefixes to invalidate on any change. */
   invalidateKeys: string[];
   enabled?: boolean;
 }
 
 /**
- * Subscribe to Postgres changes on a table and invalidate related caches.
- * Components using useSupabaseQuery will refetch automatically.
- *
- *   useRealtime({ table: 'tickets', filter: `organization_id=eq.${orgId}`,
- *                 invalidateKeys: ['tickets'] });
+ * Subscribe to Postgres changes and invalidate related caches once per event.
+ * Dependency array is stabilised so we do NOT tear down/rebuild the channel
+ * on every parent re-render (that loop froze the tab on logout).
  */
 export function useRealtime({ table, filter, invalidateKeys, enabled = true }: Options) {
+  const keysRef = useRef(invalidateKeys);
+  keysRef.current = invalidateKeys;
+  // Stable string so effect deps don't change when callers pass a new array literal
+  const keysKey = invalidateKeys.join('|');
+
   useEffect(() => {
     if (!enabled) return;
-    const sb = getSupabase();
+    const sb = tryGetSupabase();
+    if (!sb) return;
+
+    const channelName = `rt:${table}:${filter ?? 'all'}`;
     const channel = sb
-      .channel(`rt:${table}:${filter ?? 'all'}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table, filter },
+        { event: '*', schema: 'public', table, ...(filter ? { filter } : {}) },
         () => {
-          invalidateKeys.forEach((k) => invalidate(k));
+          // One-shot invalidation; query layer refetches once via needsRefetch
+          keysRef.current.forEach((k) => invalidate(k));
         }
       )
       .subscribe();
@@ -37,5 +41,5 @@ export function useRealtime({ table, filter, invalidateKeys, enabled = true }: O
     return () => {
       void sb.removeChannel(channel);
     };
-  }, [table, filter, enabled, ...invalidateKeys]);
+  }, [table, filter, enabled, keysKey]);
 }

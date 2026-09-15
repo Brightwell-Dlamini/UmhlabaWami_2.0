@@ -1,9 +1,9 @@
 /**
  * Ultra-light query layer.
- * - fetch-on-mount
  * - cache keyed by JSON.stringify(keyArray)
- * - invalidate(prefix) marks matching keys and notifies subscribers to refetch once
- * - clearAll() drops cache without a refetch storm (used on logout)
+ * - invalidate(prefix) sets needsRefetch once and notifies
+ * - clearAll() drops cache silently (logout) — no refetch storm
+ * - setEntry only notifies when something actually changed
  */
 
 type Listener = () => void;
@@ -13,7 +13,6 @@ interface CacheEntry<T> {
   error: Error | null;
   loading: boolean;
   promise: Promise<T> | null;
-  /** Set by invalidate(); cleared after a successful/failed fetch attempt */
   needsRefetch?: boolean;
 }
 
@@ -52,15 +51,31 @@ function keyMatchesPrefix(key: string, prefix: string): boolean {
 }
 
 function notifyMatching(prefix: string) {
-  for (const [key, set] of listeners) {
-    if (keyMatchesPrefix(key, prefix)) {
-      set.forEach((l) => l());
-    }
+  const keys = [...listeners.keys()];
+  for (const key of keys) {
+    if (!keyMatchesPrefix(key, prefix)) continue;
+    const set = listeners.get(key);
+    if (!set) continue;
+    [...set].forEach((l) => {
+      try {
+        l();
+      } catch (e) {
+        console.warn('[queryClient] listener error', e);
+      }
+    });
   }
 }
 
 function notifyExact(key: string) {
-  listeners.get(key)?.forEach((l) => l());
+  const set = listeners.get(key);
+  if (!set) return;
+  [...set].forEach((l) => {
+    try {
+      l();
+    } catch (e) {
+      console.warn('[queryClient] listener error', e);
+    }
+  });
 }
 
 export function getEntry<T>(key: string): CacheEntry<T> {
@@ -78,20 +93,27 @@ export function getEntry<T>(key: string): CacheEntry<T> {
 
 export function setEntry<T>(key: string, entry: Partial<CacheEntry<T>>) {
   const current = getEntry<T>(key);
-  cache.set(key, { ...current, ...entry });
+  const next: CacheEntry<T> = { ...current, ...entry };
+  if (
+    next.data === current.data &&
+    next.error === current.error &&
+    next.loading === current.loading &&
+    next.needsRefetch === current.needsRefetch &&
+    next.promise === current.promise
+  ) {
+    return;
+  }
+  cache.set(key, next);
   notifyExact(key);
 }
 
-/**
- * Mark matching queries stale and notify so mounted hooks refetch once.
- */
 export function invalidate(prefix: string) {
-  const matched: string[] = [];
+  const matched = new Set<string>();
   for (const key of cache.keys()) {
-    if (keyMatchesPrefix(key, prefix)) matched.push(key);
+    if (keyMatchesPrefix(key, prefix)) matched.add(key);
   }
   for (const key of listeners.keys()) {
-    if (keyMatchesPrefix(key, prefix) && !matched.includes(key)) matched.push(key);
+    if (keyMatchesPrefix(key, prefix)) matched.add(key);
   }
 
   for (const key of matched) {
@@ -108,10 +130,7 @@ export function invalidate(prefix: string) {
   notifyMatching(prefix);
 }
 
-/**
- * Drop all cached data. Does NOT notify subscribers — avoids a mass
- * refetch storm on logout (which froze the tab).
- */
+/** Logout: wipe cache, do not notify (avoids mass refetch while UI unmounts). */
 export function clearAll() {
   cache.clear();
 }

@@ -6,10 +6,6 @@ interface Options {
   refreshInterval?: number;
 }
 
-/**
- * After invalidate('tenants'), needsRefetch is set and this hook refetches once.
- * Failed fetches clear needsRefetch so we never infinite-loop (logout freeze).
- */
 export function useSupabaseQuery<T>(
   key: readonly unknown[],
   fetcher: () => Promise<T>,
@@ -26,6 +22,7 @@ export function useSupabaseQuery<T>(
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
   const inFlight = useRef(false);
+  const mounted = useRef(true);
 
   const run = useCallback(async () => {
     if (!enabled || inFlight.current) return;
@@ -33,6 +30,7 @@ export function useSupabaseQuery<T>(
     setEntry<T>(keyStr, { loading: true, error: null, needsRefetch: false });
     try {
       const data = await fetcherRef.current();
+      if (!mounted.current) return data;
       setEntry<T>(keyStr, {
         data,
         loading: false,
@@ -43,13 +41,14 @@ export function useSupabaseQuery<T>(
       return data;
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
-      // Keep needsRefetch false so we do not retry forever on auth errors
-      setEntry<T>(keyStr, {
-        error: err,
-        loading: false,
-        promise: null,
-        needsRefetch: false,
-      });
+      if (mounted.current) {
+        setEntry<T>(keyStr, {
+          error: err,
+          loading: false,
+          promise: null,
+          needsRefetch: false,
+        });
+      }
       return undefined;
     } finally {
       inFlight.current = false;
@@ -57,7 +56,9 @@ export function useSupabaseQuery<T>(
   }, [keyStr, enabled]);
 
   useEffect(() => {
+    mounted.current = true;
     const unsub = subscribe(keyStr, () => {
+      if (!mounted.current) return;
       const next = getEntry<T>(keyStr);
       setLocal({ ...next });
       if (enabled && next.needsRefetch && !next.loading && !inFlight.current) {
@@ -79,10 +80,13 @@ export function useSupabaseQuery<T>(
 
     let interval: ReturnType<typeof setInterval> | undefined;
     if (options.refreshInterval && options.refreshInterval > 0) {
-      interval = setInterval(() => void run(), options.refreshInterval);
+      interval = setInterval(() => {
+        if (mounted.current) void run();
+      }, options.refreshInterval);
     }
 
     return () => {
+      mounted.current = false;
       unsub();
       if (interval) clearInterval(interval);
     };
