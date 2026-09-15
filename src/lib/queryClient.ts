@@ -1,9 +1,9 @@
 /**
  * Ultra-light query layer.
  * - fetch-on-mount
- * - in-memory cache keyed by JSON.stringify(keyArray)
- * - invalidation via `invalidate(prefix)` matching array keys like ["tenants", orgId]
- * - subscribers get notified on invalidation and refetch
+ * - cache keyed by JSON.stringify(keyArray)
+ * - invalidate(prefix) marks matching keys and notifies subscribers to refetch once
+ * - clearAll() drops cache without a refetch storm (used on logout)
  */
 
 type Listener = () => void;
@@ -13,6 +13,8 @@ interface CacheEntry<T> {
   error: Error | null;
   loading: boolean;
   promise: Promise<T> | null;
+  /** Set by invalidate(); cleared after a successful/failed fetch attempt */
+  needsRefetch?: boolean;
 }
 
 const cache = new Map<string, CacheEntry<unknown>>();
@@ -29,13 +31,10 @@ export function subscribe(key: string, listener: Listener): () => void {
   };
 }
 
-/** True if a cache key belongs to the invalidate prefix. */
 function keyMatchesPrefix(key: string, prefix: string): boolean {
   if (!prefix) return false;
   if (key === prefix) return true;
-  // Legacy colon prefixes: "tickets:orgId"
   if (key.startsWith(prefix + ':') || key.startsWith(prefix + ',')) return true;
-  // JSON.stringify(['tenants', orgId]) → '["tenants","uuid"]'
   try {
     const parsed = JSON.parse(key) as unknown;
     if (Array.isArray(parsed)) {
@@ -48,7 +47,6 @@ function keyMatchesPrefix(key: string, prefix: string): boolean {
   } catch {
     /* not JSON */
   }
-  // Fallback: quoted segment inside the stringified array
   if (key.includes(`"${prefix}"`) || key.includes(`"${prefix}:`)) return true;
   return false;
 }
@@ -67,7 +65,13 @@ function notifyExact(key: string) {
 
 export function getEntry<T>(key: string): CacheEntry<T> {
   if (!cache.has(key)) {
-    cache.set(key, { data: undefined, error: null, loading: false, promise: null });
+    cache.set(key, {
+      data: undefined,
+      error: null,
+      loading: false,
+      promise: null,
+      needsRefetch: false,
+    });
   }
   return cache.get(key) as CacheEntry<T>;
 }
@@ -79,21 +83,35 @@ export function setEntry<T>(key: string, entry: Partial<CacheEntry<T>>) {
 }
 
 /**
- * Drop cached data for every key that matches the prefix and notify subscribers.
- * Subscribers (useSupabaseQuery) will refetch when they see data === undefined.
+ * Mark matching queries stale and notify so mounted hooks refetch once.
  */
 export function invalidate(prefix: string) {
-  const toDelete: string[] = [];
+  const matched: string[] = [];
   for (const key of cache.keys()) {
-    if (keyMatchesPrefix(key, prefix)) toDelete.push(key);
+    if (keyMatchesPrefix(key, prefix)) matched.push(key);
   }
-  for (const key of toDelete) {
-    cache.delete(key);
+  for (const key of listeners.keys()) {
+    if (keyMatchesPrefix(key, prefix) && !matched.includes(key)) matched.push(key);
+  }
+
+  for (const key of matched) {
+    const current = getEntry(key);
+    cache.set(key, {
+      ...current,
+      data: undefined,
+      error: null,
+      loading: false,
+      promise: null,
+      needsRefetch: true,
+    });
   }
   notifyMatching(prefix);
 }
 
+/**
+ * Drop all cached data. Does NOT notify subscribers — avoids a mass
+ * refetch storm on logout (which froze the tab).
+ */
 export function clearAll() {
   cache.clear();
-  for (const set of listeners.values()) set.forEach((l) => l());
 }

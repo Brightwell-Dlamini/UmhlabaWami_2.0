@@ -3,19 +3,12 @@ import { getEntry, setEntry, subscribe } from '../lib/queryClient';
 
 interface Options {
   enabled?: boolean;
-  /** Refresh interval in ms. Set to 0 to disable. */
   refreshInterval?: number;
 }
 
 /**
- * useSupabaseQuery — fetch-on-mount with cache + invalidation.
- *
- *   const { data, loading, error, refetch } = useSupabaseQuery(
- *     ['tickets', orgId],
- *     () => api.tickets.list(orgId)
- *   );
- *
- * After a mutation calls invalidate('tickets'), this hook refetches automatically.
+ * After invalidate('tenants'), needsRefetch is set and this hook refetches once.
+ * Failed fetches clear needsRefetch so we never infinite-loop (logout freeze).
  */
 export function useSupabaseQuery<T>(
   key: readonly unknown[],
@@ -32,18 +25,34 @@ export function useSupabaseQuery<T>(
   const enabled = options.enabled ?? true;
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
+  const inFlight = useRef(false);
 
   const run = useCallback(async () => {
-    if (!enabled) return;
-    setEntry<T>(keyStr, { loading: true, error: null });
+    if (!enabled || inFlight.current) return;
+    inFlight.current = true;
+    setEntry<T>(keyStr, { loading: true, error: null, needsRefetch: false });
     try {
       const data = await fetcherRef.current();
-      setEntry<T>(keyStr, { data, loading: false, error: null, promise: null });
+      setEntry<T>(keyStr, {
+        data,
+        loading: false,
+        error: null,
+        promise: null,
+        needsRefetch: false,
+      });
       return data;
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
-      setEntry<T>(keyStr, { error: err, loading: false, promise: null });
+      // Keep needsRefetch false so we do not retry forever on auth errors
+      setEntry<T>(keyStr, {
+        error: err,
+        loading: false,
+        promise: null,
+        needsRefetch: false,
+      });
       return undefined;
+    } finally {
+      inFlight.current = false;
     }
   }, [keyStr, enabled]);
 
@@ -51,14 +60,20 @@ export function useSupabaseQuery<T>(
     const unsub = subscribe(keyStr, () => {
       const next = getEntry<T>(keyStr);
       setLocal({ ...next });
-      // Cache was cleared by invalidate() — refetch so UI updates without hard refresh
-      if (enabled && next.data === undefined && !next.loading) {
+      if (enabled && next.needsRefetch && !next.loading && !inFlight.current) {
         void run();
       }
     });
+
     setLocal({ ...getEntry<T>(keyStr) });
 
-    if (enabled && getEntry<T>(keyStr).data === undefined && !getEntry<T>(keyStr).loading) {
+    const current = getEntry<T>(keyStr);
+    if (
+      enabled &&
+      !current.loading &&
+      !inFlight.current &&
+      (current.data === undefined || current.needsRefetch)
+    ) {
       void run();
     }
 

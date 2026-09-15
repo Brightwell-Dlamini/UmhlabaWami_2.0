@@ -40,8 +40,8 @@ class AuthService {
         if (event === 'SIGNED_OUT') {
           this.currentUser = null;
           this.currentOrg = null;
-          clearAll();
           this.notify(true);
+          clearAll();
           return;
         }
         if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
@@ -106,7 +106,6 @@ class AuthService {
           .maybeSingle();
         if (byEmail) this.currentOrg = byEmail as unknown as Organization;
       }
-      // Heal profile.organization_id so RLS current_org_id() works
       if (this.currentOrg) {
         const orgId = this.currentOrg.id;
         await sb
@@ -173,7 +172,6 @@ class AuthService {
     const code = organizationCode.trim().toUpperCase();
     const identifier = username.trim().toLowerCase();
 
-    // Platform super-admin path: code SUPER / PLATFORM / ADMIN
     if (['SUPER', 'PLATFORM', 'ADMIN'].includes(code)) {
       const emailGuess = identifier.includes('@') ? identifier : null;
       if (emailGuess) {
@@ -186,7 +184,6 @@ class AuthService {
         if (this.currentUser?.role === 'super_admin') {
           return { success: true, user: this.currentUser };
         }
-        // If signed in but not super_admin, still return success — profile load is source of truth
         return { success: true, user: this.currentUser || undefined };
       }
     }
@@ -216,6 +213,12 @@ class AuthService {
   }
 
   public async logout() {
+    // Clear local session state first so React unmounts dashboard queries
+    this.currentUser = null;
+    this.currentOrg = null;
+    this.notify(true);
+    clearAll();
+
     const sb = tryGetSupabase();
     if (sb) {
       try {
@@ -224,13 +227,8 @@ class AuthService {
         console.warn('[auth] signOut failed', e);
       }
     }
-    this.currentUser = null;
-    this.currentOrg = null;
-    clearAll();
-    this.notify(true);
   }
 
-  // ----- role helpers (super_admin has every capability) -----
   public isSuperAdmin(u = this.currentUser): boolean {
     return u?.role === 'super_admin';
   }
@@ -265,7 +263,6 @@ class AuthService {
     if (this.isSuperAdmin(u)) return true;
     return !!u && u.role === 'admin';
   }
-  /** Super admin may act across any organisation and any module. */
   public canAccessEverything(u = this.currentUser) {
     return this.isSuperAdmin(u);
   }
