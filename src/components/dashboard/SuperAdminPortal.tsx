@@ -18,19 +18,16 @@ interface Props {
   initialTab?: string;
 }
 
-type Tab = 'approvals' | 'organizations' | 'listings' | 'audit';
+type Tab = 'approvals' | 'organizations' | 'listings' | 'audit' | 'subscriptions';
 
 export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
- const [activeTab, setActiveTab] = useState<
-  'approvals' | 'organizations' | 'listings' | 'audit' | 'subscriptions'
->(
-  initialTab === 'super_organizations' ? 'organizations'
-  : initialTab === 'super_listings' ? 'listings'
-  : initialTab === 'audit_logs' ? 'audit'
-  : initialTab === 'super_subscriptions' ? 'subscriptions'
-  : 'approvals'
-);
-  });
+  const [activeTab, setActiveTab] = useState<Tab>(
+    initialTab === 'super_organizations' ? 'organizations'
+    : initialTab === 'super_listings' ? 'listings'
+    : initialTab === 'audit_logs' ? 'audit'
+    : initialTab === 'super_subscriptions' ? 'subscriptions'
+    : 'approvals'
+  );
 
   const [actionNotice, setActionNotice] = useState('');
   const [customCode, setCustomCode] = useState('');
@@ -139,12 +136,12 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
 
       <div className="flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
         {[
-  { id: 'approvals', label: `Approvals (${pending.length})` },
-  { id: 'organizations', label: `Organisations (${orgs.length})` },
-  { id: 'subscriptions', label: 'Subscription Tiers' },
-  { id: 'listings', label: `Marketplace (${shops.length})` },
-  { id: 'audit', label: 'Audit' },
-].map((t) => (
+          { id: 'approvals', label: `Approvals (${pending.length})` },
+          { id: 'organizations', label: `Organisations (${orgs.length})` },
+          { id: 'subscriptions', label: 'Subscription Tiers' },
+          { id: 'listings', label: `Marketplace (${shops.length})` },
+          { id: 'audit', label: 'Audit' },
+        ].map((t) => (
           <button
             key={t.id}
             onClick={() => setActiveTab(t.id as Tab)}
@@ -314,57 +311,59 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
           </div>
         </div>
       )}
-{activeTab === 'subscriptions' && (
-  <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6">
-    <h2 className="text-sm font-bold mb-2">Subscription tiers</h2>
-    <p className="text-xs text-slate-500 mb-4">
-      Tier definitions and current usage across the platform
-    </p>
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      {(['Starter', 'Professional', 'Enterprise'] as const).map((tier) => {
-        const count = orgs.filter((o) => o.subscription_tier === tier).length;
-        const price =
-          tier === 'Starter' ? 1450 : tier === 'Professional' ? 3850 : 8900;
-        const limits =
-          tier === 'Starter'
-            ? { props: 3, tenants: 100, users: 10, gb: 10 }
-            : tier === 'Professional'
-            ? { props: 10, tenants: 500, users: 50, gb: 50 }
-            : { props: 999, tenants: 9999, users: 999, gb: 500 };
-        return (
-          <div
-            key={tier}
-            className="p-5 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3"
-          >
-            <div className="text-xs font-bold text-blue-600 uppercase tracking-wider">
-              {tier}
-            </div>
-            <div className="text-2xl font-bold">
-              E {price.toLocaleString()}
-              <span className="text-[10px] font-normal text-slate-500">
-                /mo
-              </span>
-            </div>
-            <ul className="text-[11px] text-slate-500 space-y-1">
-              <li>• Up to {limits.props} properties</li>
-              <li>• {limits.tenants} active tenants</li>
-              <li>• {limits.users} staff logins</li>
-              <li>• {limits.gb} GB storage</li>
-            </ul>
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-700 text-xs">
-              <span className="font-bold text-slate-900 dark:text-white">
-                {count}
-              </span>{' '}
-              <span className="text-slate-500">
-                organisation{count === 1 ? '' : 's'} on this tier
-              </span>
-            </div>
+
+      {activeTab === 'subscriptions' && (
+        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6">
+          <h2 className="text-sm font-bold mb-2">Subscription tiers</h2>
+          <p className="text-xs text-slate-500 mb-4">
+            Tier definitions and current usage across the platform
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {(['Starter', 'Professional', 'Enterprise'] as const).map((tier) => {
+              const count = orgs.filter((o) => o.subscription_tier === tier).length;
+              const price =
+                tier === 'Starter' ? 1450 : tier === 'Professional' ? 3850 : 8900;
+              const limits =
+                tier === 'Starter'
+                  ? { props: 3, tenants: 100, users: 10, gb: 10 }
+                  : tier === 'Professional'
+                  ? { props: 10, tenants: 500, users: 50, gb: 50 }
+                  : { props: 999, tenants: 9999, users: 999, gb: 500 };
+              return (
+                <div
+                  key={tier}
+                  className="p-5 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3"
+                >
+                  <div className="text-xs font-bold text-blue-600 uppercase tracking-wider">
+                    {tier}
+                  </div>
+                  <div className="text-2xl font-bold">
+                    E {price.toLocaleString()}
+                    <span className="text-[10px] font-normal text-slate-500">
+                      /mo
+                    </span>
+                  </div>
+                  <ul className="text-[11px] text-slate-500 space-y-1">
+                    <li>• Up to {limits.props} properties</li>
+                    <li>• {limits.tenants} active tenants</li>
+                    <li>• {limits.users} staff logins</li>
+                    <li>• {limits.gb} GB storage</li>
+                  </ul>
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-700 text-xs">
+                    <span className="font-bold text-slate-900 dark:text-white">
+                      {count}
+                    </span>{' '}
+                    <span className="text-slate-500">
+                      organisation{count === 1 ? '' : 's'} on this tier
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        );
-      })}
-    </div>
-  </div>
-)}
+        </div>
+      )}
+
       {activeTab === 'audit' && (
         <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5">
           <h2 className="text-sm font-bold flex items-center gap-1.5 mb-3">
