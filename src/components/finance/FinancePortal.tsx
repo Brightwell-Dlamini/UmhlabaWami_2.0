@@ -14,24 +14,29 @@ export const FinancePortal: React.FC<{ initialTab?: string }> = ({ initialTab })
     if (
       initialTab === 'rent_roll' ||
       initialTab === 'invoices' ||
-      initialTab === 'finance_overview' ||
       initialTab === 'transactions'
-    ) return 'invoices';
+    )
+      return 'invoices';
     if (
       initialTab === 'quotes' ||
       initialTab === 'orders' ||
       initialTab === 'commercial_engine'
-    ) return 'quotes';
+    )
+      return 'quotes';
     if (
       initialTab === 'items' ||
       initialTab === 'reminders' ||
       initialTab === 'expenses_ledger' ||
       initialTab === 'financial_requests'
-    ) return 'items';
+    )
+      return 'items';
     return 'dashboard';
   });
 
-  if (!org) return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
+  if (!org)
+    return (
+      <div className="p-6 text-slate-500 text-sm">No organisation context.</div>
+    );
 
   return (
     <div className="space-y-6 pb-12">
@@ -50,12 +55,14 @@ export const FinancePortal: React.FC<{ initialTab?: string }> = ({ initialTab })
 
       {/* Tabs */}
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 pb-2 flex-wrap">
-        {([
-          { id: 'dashboard', label: 'Dashboard' },
-          { id: 'invoices', label: 'Invoices' },
-          { id: 'quotes', label: 'Quotes & Orders' },
-          { id: 'items', label: 'Items, Statements & Reminders' },
-        ] as { id: Tab; label: string }[]).map((t) => (
+        {(
+          [
+            { id: 'dashboard', label: 'Dashboard' },
+            { id: 'invoices', label: 'Invoices' },
+            { id: 'quotes', label: 'Quotes & Orders' },
+            { id: 'items', label: 'Items, Statements & Reminders' },
+          ] as { id: Tab; label: string }[]
+        ).map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
