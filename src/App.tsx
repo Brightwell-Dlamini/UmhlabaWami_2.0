@@ -36,7 +36,6 @@ export default function App() {
   useEffect(() => { applyDarkClass(isDarkMode); }, [isDarkMode]);
 
   useEffect(() => {
-    // Wait for auth bootstrap (session restore + profile load)
     auth.whenReady().then(() => {
       setCurrentUser(auth.getCurrentUser());
       setBooting(false);
@@ -112,25 +111,27 @@ export default function App() {
         <div className="fixed bottom-6 right-6 z-50 p-4 rounded-2xl bg-slate-900 text-white shadow-2xl border border-slate-700 flex items-center gap-3 max-w-sm">
           <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
           <div>
-            <div className="text-sm font-bold">{toast.title}</div>
-            <div className="text-xs text-slate-300">{toast.message}</div>
+            <div className="text-xs font-bold">{toast.title}</div>
+            <div className="text-[11px] text-slate-300">{toast.message}</div>
           </div>
         </div>
       )}
 
-      {isLoginOpen && (
-        <LoginModal
-          onClose={() => setIsLoginOpen(false)}
-          onSuccess={() => {
-            setCurrentUser(auth.getCurrentUser());
-            setIsLoginOpen(false);
-          }}
-        />
-      )}
+      <LoginModal
+        isOpen={isLoginOpen}
+        onClose={() => setIsLoginOpen(false)}
+        onOpenRegisterOrg={() => {
+          setIsLoginOpen(false);
+          setIsRegisterOrgOpen(true);
+        }}
+        onLoginSuccess={() => showToast('Signed in', 'Welcome to your workspace.')}
+      />
 
-      {isRegisterOrgOpen && (
-        <RegisterOrgModal onClose={() => setIsRegisterOrgOpen(false)} />
-      )}
+      <RegisterOrgModal
+        isOpen={isRegisterOrgOpen}
+        onClose={() => setIsRegisterOrgOpen(false)}
+        onSuccess={(name) => showToast('Registration submitted', `${name} is pending approval.`)}
+      />
     </div>
   );
 }
