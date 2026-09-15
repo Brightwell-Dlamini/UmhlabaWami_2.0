@@ -1,7 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import {
-  FileText, Download, Plus, Banknote, RefreshCw,
-} from 'lucide-react';
+import { FileText, Download, Plus } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { invoices as invoiceApi } from '../../services/api/invoices';
 import { bankTransactions as bankApi } from '../../services/api/bankTransactions';
@@ -9,20 +7,41 @@ import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 import { useRealtime } from '../../hooks/useRealtime';
 import { downloadCsv } from '../../services/api/_export';
-import type { InvoiceStatus, PaymentRecord } from '../../types';
 
 export function CommercialEngineView() {
   const org = auth.getCurrentOrganization();
   const orgId = org?.id ?? '';
 
   const [message, setMessage] = useState<string | null>(null);
-  const [payments] = useState<PaymentRecord[]>([]);
 
-  const { data: invoices = [] } = useSupabaseQuery(['invoices', orgId], () => invoiceApi.list(), { enabled: !!orgId });
-  const { data: bankLines = [] } = useSupabaseQuery(['bank_transactions', orgId], () => bankApi.list(), { enabled: !!orgId });
+  const showMessage = (text: string, ms = 3000) => {
+    setMessage(text);
+    setTimeout(() => setMessage(null), ms);
+  };
 
-  useRealtime({ table: 'invoices', filter: `organization_id=eq.${orgId}`, invalidateKeys: ['invoices'], enabled: !!orgId });
-  useRealtime({ table: 'bank_transactions', filter: `organization_id=eq.${orgId}`, invalidateKeys: ['bank_transactions'], enabled: !!orgId });
+  const { data: invoices = [] } = useSupabaseQuery(
+    ['invoices', orgId],
+    () => invoiceApi.list(),
+    { enabled: !!orgId }
+  );
+  const { data: bankLines = [] } = useSupabaseQuery(
+    ['bank_transactions', orgId],
+    () => bankApi.list(),
+    { enabled: !!orgId }
+  );
+
+  useRealtime({
+    table: 'invoices',
+    filter: `organization_id=eq.${orgId}`,
+    invalidateKeys: ['invoices'],
+    enabled: !!orgId,
+  });
+  useRealtime({
+    table: 'bank_transactions',
+    filter: `organization_id=eq.${orgId}`,
+    invalidateKeys: ['bank_transactions'],
+    enabled: !!orgId,
+  });
 
   const totals = useMemo(() => {
     const outstanding = invoices
@@ -41,7 +60,6 @@ export function CommercialEngineView() {
       return invoiceApi.bulkGenerateRent(next.toISOString().slice(0, 10));
     },
     invalidateKeys: ['invoices'],
-    onSuccess: (n) => { setMessage(`Generated ${n} rent invoices.`); setTimeout(() => setMessage(null), 3000); },
   });
 
   const recordPayment = useSupabaseMutation({
@@ -49,6 +67,7 @@ export function CommercialEngineView() {
       const inv = invoices.find((i) => i.id === invoiceId);
       if (!inv) throw new Error('Invoice not found');
       const remaining = inv.total - inv.amount_paid;
+      if (remaining <= 0) throw new Error('Invoice already settled.');
       return invoiceApi.recordPayment(invoiceId, {
         amount: remaining,
         method: 'EFT',
@@ -56,13 +75,11 @@ export function CommercialEngineView() {
       });
     },
     invalidateKeys: ['invoices', 'finance_transactions'],
-    onSuccess: () => { setMessage('Payment recorded.'); setTimeout(() => setMessage(null), 3000); },
   });
 
   const reconcile = useSupabaseMutation({
     mutationFn: (id: string) => bankApi.reconcile(id),
     invalidateKeys: ['bank_transactions'],
-    onSuccess: () => { setMessage('Reconciled.'); setTimeout(() => setMessage(null), 2500); },
   });
 
   const unreconcile = useSupabaseMutation({
@@ -70,21 +87,72 @@ export function CommercialEngineView() {
     invalidateKeys: ['bank_transactions'],
   });
 
+  const handleGenerate = async () => {
+    try {
+      const n = await generate.mutate(undefined as never);
+      showMessage(`Generated ${n} rent invoices.`);
+    } catch (e) {
+      showMessage(e instanceof Error ? `Failed: ${e.message}` : 'Failed to generate.', 5000);
+    }
+  };
+
+  const handleRecordPayment = async (invoiceId: string) => {
+    try {
+      await recordPayment.mutate(invoiceId);
+      showMessage('Payment recorded.');
+    } catch (e) {
+      showMessage(e instanceof Error ? `Failed: ${e.message}` : 'Failed to record payment.', 5000);
+    }
+  };
+
+  const handleReconcileToggle = async (id: string, reconciled: boolean) => {
+    try {
+      if (reconciled) {
+        await unreconcile.mutate(id);
+        showMessage('Marked as unreconciled.', 2500);
+      } else {
+        await reconcile.mutate(id);
+        showMessage('Reconciled.', 2500);
+      }
+    } catch (e) {
+      showMessage(e instanceof Error ? `Failed: ${e.message}` : 'Failed to update.', 5000);
+    }
+  };
+
   const exportCsv = () => {
     const rows: (string | number)[][] = [
-      ['InvoiceNumber', 'Tenant', 'Unit', 'IssueDate', 'DueDate', 'Status', 'Subtotal', 'Tax', 'Total', 'AmountPaid'],
+      [
+        'InvoiceNumber',
+        'Tenant',
+        'Unit',
+        'IssueDate',
+        'DueDate',
+        'Status',
+        'Subtotal',
+        'Tax',
+        'Total',
+        'AmountPaid',
+      ],
       ...invoices.map((i) => [
-        i.invoice_number, i.tenant_name, i.shop_number ?? '',
-        i.issue_date, i.due_date, i.status,
-        i.subtotal, i.tax_amount, i.total, i.amount_paid,
+        i.invoice_number,
+        i.tenant_name,
+        i.shop_number ?? '',
+        i.issue_date,
+        i.due_date,
+        i.status,
+        i.subtotal,
+        i.tax_amount,
+        i.total,
+        i.amount_paid,
       ]),
     ];
     downloadCsv(`umhlaba-wami-invoices-${orgId}.csv`, rows);
-    setMessage('Exported CSV.');
-    setTimeout(() => setMessage(null), 2500);
+    showMessage('Exported CSV.', 2500);
   };
 
-  if (!orgId) return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
+  if (!orgId) {
+    return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
+  }
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -100,19 +168,28 @@ export function CommercialEngineView() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => generate.mutate(undefined as never)} disabled={generate.loading}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">
+          <button
+            onClick={handleGenerate}
+            disabled={generate.loading}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+            type="button"
+          >
             <Plus className="w-4 h-4" /> Generate next month
           </button>
-          <button onClick={exportCsv}
-            className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-800">
+          <button
+            onClick={exportCsv}
+            className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-800"
+            type="button"
+          >
             <Download className="w-4 h-4" /> Export CSV
           </button>
         </div>
       </div>
 
       {message && (
-        <div className="rounded-lg border bg-slate-50 dark:bg-slate-800 px-4 py-2 text-sm">{message}</div>
+        <div className="rounded-lg border bg-slate-50 dark:bg-slate-800 px-4 py-2 text-sm">
+          {message}
+        </div>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -145,68 +222,35 @@ export function CommercialEngineView() {
           </thead>
           <tbody className="divide-y">
             {invoices.length === 0 ? (
-              <tr><td colSpan={8} className="p-6 text-center text-slate-400 text-xs">No invoices yet.</td></tr>
-            ) : invoices.map((inv) => (
-              <tr key={inv.id}>
-                <td className="px-4 py-3 font-mono text-xs">{inv.invoice_number}</td>
-                <td className="px-4 py-3">{inv.tenant_name}</td>
-                <td className="px-4 py-3">{inv.shop_number || '—'}</td>
-                <td className="px-4 py-3">{inv.due_date}</td>
-                <td className="px-4 py-3">{inv.status}</td>
-                <td className="px-4 py-3 tabular-nums">E{inv.total.toLocaleString()}</td>
-                <td className="px-4 py-3 tabular-nums">E{inv.amount_paid.toLocaleString()}</td>
-                <td className="px-4 py-3">
-                  {inv.status !== 'Paid' && inv.status !== 'Cancelled' && (
-                    <button onClick={() => recordPayment.mutate(inv.id)}
-                      className="text-xs font-medium text-blue-600 hover:underline">
-                      Record payment
-                    </button>
-                  )}
+              <tr>
+                <td colSpan={8} className="p-6 text-center text-slate-400 text-xs">
+                  No invoices yet.
                 </td>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div>
-        <h2 className="text-sm font-semibold mb-3">Bank reconciliation</h2>
-        <div className="overflow-x-auto rounded-xl border bg-white dark:bg-slate-900">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 dark:bg-slate-800 text-left text-slate-600 dark:text-slate-300">
-              <tr>
-                <th className="px-4 py-3 font-medium">Date</th>
-                <th className="px-4 py-3 font-medium">Description</th>
-                <th className="px-4 py-3 font-medium">Direction</th>
-                <th className="px-4 py-3 font-medium">Amount</th>
-                <th className="px-4 py-3 font-medium">Reconciled</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {bankLines.length === 0 ? (
-                <tr><td colSpan={5} className="p-6 text-center text-slate-400 text-xs">No bank lines.</td></tr>
-              ) : bankLines.map((l) => (
-                <tr key={l.id}>
-                  <td className="px-4 py-3">{l.date}</td>
-                  <td className="px-4 py-3">{l.description}</td>
-                  <td className="px-4 py-3 capitalize">{l.direction}</td>
-                  <td className="px-4 py-3 tabular-nums">E{l.amount.toLocaleString()}</td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => (l.reconciled ? unreconcile.mutate(l.id) : reconcile.mutate(l.id))}
-                      className={`text-xs font-medium ${l.reconciled ? 'text-emerald-600' : 'text-slate-500'}`}>
-                      {l.reconciled ? 'Reconciled' : 'Mark reconciled'}
-                    </button>
+            ) : (
+              invoices.map((inv) => (
+                <tr key={inv.id}>
+                  <td className="px-4 py-3 font-mono text-xs">{inv.invoice_number}</td>
+                  <td className="px-4 py-3">{inv.tenant_name}</td>
+                  <td className="px-4 py-3">{inv.shop_number || '—'}</td>
+                  <td className="px-4 py-3">{inv.due_date}</td>
+                  <td className="px-4 py-3">{inv.status}</td>
+                  <td className="px-4 py-3 tabular-nums">
+                    E{inv.total.toLocaleString()}
                   </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {payments.length > 0 && (
-          <p className="mt-2 text-xs text-slate-400">{payments.length} payments this session.</p>
-        )}
-      </div>
-    </div>
-  );
-}
+                  <td className="px-4 py-3 tabular-nums">
+                    E{inv.amount_paid.toLocaleString()}
+                  </td>
+                  <td className="px-4 py-3">
+                    {inv.status !== 'Paid' && inv.status !== 'Cancelled' && (
+                      <button
+                        onClick={() => handleRecordPayment(inv.id)}
+                        disabled={recordPayment.loading}
+                        className="text-xs font-medium text-blue-600 hover:underline disabled:opacity-60"
+                        type="button"
+                      >
+                        Record payment
+                      </button>
+                    )}
+                  </td>
+                </
