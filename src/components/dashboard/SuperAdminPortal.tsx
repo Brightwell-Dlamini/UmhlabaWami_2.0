@@ -21,11 +21,15 @@ interface Props {
 type Tab = 'approvals' | 'organizations' | 'listings' | 'audit';
 
 export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
-  const [activeTab, setActiveTab] = useState<Tab>(() => {
-    if (initialTab === 'super_organizations') return 'organizations';
-    if (initialTab === 'super_listings') return 'listings';
-    if (initialTab === 'audit_logs') return 'audit';
-    return 'approvals';
+ const [activeTab, setActiveTab] = useState<
+  'approvals' | 'organizations' | 'listings' | 'audit' | 'subscriptions'
+>(
+  initialTab === 'super_organizations' ? 'organizations'
+  : initialTab === 'super_listings' ? 'listings'
+  : initialTab === 'audit_logs' ? 'audit'
+  : initialTab === 'super_subscriptions' ? 'subscriptions'
+  : 'approvals'
+);
   });
 
   const [actionNotice, setActionNotice] = useState('');
