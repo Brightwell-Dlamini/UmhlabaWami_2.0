@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import {
-  DollarSign, TrendingUp, TrendingDown, Clock, AlertTriangle,
+  TrendingUp, TrendingDown, Clock, AlertTriangle,
   FileText, CheckCircle2, Receipt,
 } from 'lucide-react';
 import { auth } from '../../services/auth';
@@ -38,9 +38,7 @@ export function FinanceDashboard() {
     const buckets = { current: 0, d30: 0, d60: 0, d90: 0, older: 0 };
     for (const inv of invoices) {
       if (inv.status === 'Paid' || inv.status === 'Cancelled') continue;
-      const overdue = Math.floor(
-        (now - new Date(inv.due_date).getTime()) / 86400000
-      );
+      const overdue = Math.floor((now - new Date(inv.due_date).getTime()) / 86400000);
       const outstanding = inv.total - inv.amount_paid;
       if (overdue <= 0) buckets.current += outstanding;
       else if (overdue <= 30) buckets.d30 += outstanding;
@@ -58,7 +56,9 @@ export function FinanceDashboard() {
       netIncome,
       buckets,
       invoiceCount: invoices.length,
-      unpaidCount: invoices.filter((i) => i.status !== 'Paid' && i.status !== 'Cancelled').length,
+      unpaidCount: invoices.filter(
+        (i) => i.status !== 'Paid' && i.status !== 'Cancelled'
+      ).length,
     };
   }, [invoices, transactions]);
 
@@ -76,14 +76,14 @@ export function FinanceDashboard() {
         .filter((i) => i.status !== 'Paid' && i.status !== 'Cancelled')
         .filter((i) => new Date(i.due_date) < new Date())
         .sort(
-          (a, b) =>
-            new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
+          (a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
         )
         .slice(0, 5),
     [invoices]
   );
 
-  if (!orgId) return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
+  if (!orgId)
+    return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
 
   return (
     <div className="space-y-6">
@@ -103,7 +103,9 @@ export function FinanceDashboard() {
           tone="emerald"
           sub={
             stats.totalInvoiced > 0
-              ? `${Math.round((stats.totalCollected / stats.totalInvoiced) * 100)}% collection rate`
+              ? `${Math.round(
+                  (stats.totalCollected / stats.totalInvoiced) * 100
+                )}% collection rate`
               : 'No invoices yet'
           }
         />
@@ -152,7 +154,10 @@ export function FinanceDashboard() {
           ) : (
             <div className="divide-y divide-slate-100 dark:divide-slate-700">
               {recentTransactions.map((t) => (
-                <div key={t.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
+                <div
+                  key={t.id}
+                  className="py-2.5 flex items-center justify-between gap-3 text-xs"
+                >
                   <div className="min-w-0">
                     <div className="font-semibold text-slate-900 dark:text-white truncate">
                       {t.description}
@@ -168,7 +173,8 @@ export function FinanceDashboard() {
                         : 'text-red-600 dark:text-red-400'
                     }`}
                   >
-                    {t.direction === 'income' ? '+' : '−'} E{t.amount.toLocaleString()}
+                    {t.direction === 'income' ? '+' : '−'} E
+                    {t.amount.toLocaleString()}
                   </div>
                 </div>
               ))}
@@ -194,7 +200,10 @@ export function FinanceDashboard() {
                   (Date.now() - new Date(inv.due_date).getTime()) / 86400000
                 );
                 return (
-                  <div key={inv.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
+                  <div
+                    key={inv.id}
+                    className="py-2.5 flex items-center justify-between gap-3 text-xs"
+                  >
                     <div className="min-w-0">
                       <div className="font-mono font-bold text-slate-900 dark:text-white">
                         {inv.invoice_number}
@@ -232,7 +241,8 @@ function Kpi({
 }) {
   const tones = {
     blue: 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300',
-    emerald: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300',
+    emerald:
+      'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300',
     amber: 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300',
     red: 'bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-300',
   };
