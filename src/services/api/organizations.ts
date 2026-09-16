@@ -1,5 +1,4 @@
 import { sb, unwrap } from './_helpers';
-import { isMemoryMode, getMemoryDb } from './mode';
 import type { Organization, SubscriptionTier } from '../../types';
 import { getSupabase } from '../../lib/supabase';
 
@@ -19,13 +18,6 @@ export interface RegisterOrgInput {
 
 export const organizations = {
   async list(): Promise<Organization[]> {
-    if (isMemoryMode()) {
-      const db = await getMemoryDb();
-      return [...db.organizations].sort(
-        (a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
-    }
     const result = await sb()
       .from('organizations')
       .select('*')
@@ -34,10 +26,6 @@ export const organizations = {
   },
 
   async pending(): Promise<Organization[]> {
-    if (isMemoryMode()) {
-      const db = await getMemoryDb();
-      return db.organizations.filter((o) => o.status === 'Pending Approval');
-    }
     const result = await sb()
       .from('organizations')
       .select('*')
@@ -47,41 +35,11 @@ export const organizations = {
   },
 
   async get(id: string): Promise<Organization> {
-    if (isMemoryMode()) {
-      const db = await getMemoryDb();
-      const found = db.organizations.find((o) => o.id === id);
-      if (!found) throw new Error('Organisation not found.');
-      return found;
-    }
     const result = await sb().from('organizations').select('*').eq('id', id).single();
     return unwrap(result) as unknown as Organization;
   },
 
-  /**
-   * Public registration flow:
-   *  1. Create auth user with chosen password.
-   *  2. Insert org via register_organization RPC (status = Pending Approval).
-   *  3. Sign out so they land on public site until approved.
-   *
-   * Memory mode: writes directly to db.organizations with status Pending.
-   */
   async register(input: RegisterOrgInput): Promise<Organization> {
-    if (isMemoryMode()) {
-      const db = await getMemoryDb();
-      const created = db.registerOrganization({
-        company_name: input.companyName,
-        owner_name: input.ownerName,
-        email: input.email,
-        phone: input.phone,
-        address: input.address,
-        subscription_tier: input.tier,
-        property_count: input.propertyCount,
-        tenant_count: input.tenantCount,
-        estimated_rental_income: input.estimatedMonthlyRent,
-      });
-      return created;
-    }
-
     const supabase = getSupabase();
 
     const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
@@ -137,17 +95,10 @@ export const organizations = {
         | 'logo_url'
         | 'custom_branding_color'
         | 'monthly_fee_estimate'
+        | 'subscription_tier'
       >
     >
   ): Promise<Organization> {
-    if (isMemoryMode()) {
-      const db = await getMemoryDb();
-      const org = db.organizations.find((o) => o.id === id);
-      if (!org) throw new Error('Organisation not found.');
-      Object.assign(org, patch);
-      db.saveToStorage();
-      return org;
-    }
     const result = await sb()
       .from('organizations')
       .update(patch)
@@ -157,16 +108,6 @@ export const organizations = {
     return unwrap(result) as unknown as Organization;
   },
 
-  /**
-   * Approve a pending organisation. Prefers the `approve_organization` RPC
-   * (which generates the code server-side). Falls back to a direct update
-   * + profile link if the RPC is missing.
-   *
-   * Both paths converge on the same end state:
-   *   - org.status = 'Active'
-   *   - org.organization_code issued
-   *   - owner profile linked (role='admin', status='Active', organization_id set)
-   */
   async approve(args: {
     organizationId: string;
     approverName: string;
@@ -176,32 +117,6 @@ export const organizations = {
     organizationCode: string;
     adminUserId: string;
   }> {
-    if (isMemoryMode()) {
-      const db = await getMemoryDb();
-
-      // db.approveOrganization signature:
-      //   (orgId, superAdminIdOrOptions?, superAdminName?, overrides?)
-      // We pass the options object as the 2nd arg (so organization_code is
-      // honoured) and the approver name as the 3rd arg. The 4th overrides
-      // slot is unused here.
-      const code = db.approveOrganization(
-        args.organizationId,
-        args.customCode ? { organization_code: args.customCode } : undefined,
-        args.approverName
-      );
-
-      const org = db.organizations.find((o) => o.id === args.organizationId);
-      const admin = db.users.find(
-        (u) => u.organization_id === args.organizationId && u.role === 'admin'
-      );
-
-      return {
-        organizationId: args.organizationId,
-        organizationCode: code || org?.organization_code || '',
-        adminUserId: admin?.id || '',
-      };
-    }
-
     const rpcResult = await sb().rpc('approve_organization', {
       p_org_id: args.organizationId,
       p_approver_name: args.approverName || 'Super Admin',
@@ -293,15 +208,6 @@ export const organizations = {
     approverName: string;
     reason: string;
   }): Promise<void> {
-    if (isMemoryMode()) {
-      const db = await getMemoryDb();
-      // db.rejectOrganization signature:
-      //   (orgId, superAdminIdOrReason?, superAdminName?, reasonText?)
-      // Passing reason as 2nd arg and name as 3rd arg is the correct
-      // positional call.
-      db.rejectOrganization(args.organizationId, args.reason, args.approverName);
-      return;
-    }
     const result = await sb().rpc('reject_organization', {
       p_org_id: args.organizationId,
       p_approver_name: args.approverName,
@@ -317,7 +223,6 @@ export const organizations = {
   },
 };
 
-/** Generate an organisation code: PREFIX-DDMMYY-#### */
 export function generateOrgCode(companyName: string): string {
   const prefix =
     (companyName || 'ORG').replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() ||
