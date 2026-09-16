@@ -1,118 +1,181 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Building2,
   Save,
   CheckCircle2,
-  Key,
   Shield,
-  CreditCard,
-  Phone,
-  Mail,
-  MapPin,
   Sparkles,
   Download,
-  Upload,
-  RefreshCw,
   Sliders,
-  DollarSign,
   AlertTriangle,
 } from 'lucide-react';
-import { db, DEFAULT_SUBSCRIPTION_PLANS } from '../../services/db';
 import { auth } from '../../services/auth';
+import { organizations as orgApi } from '../../services/api/organizations';
+import { subscriptionPlans } from '../../services/subscriptionPlans';
+import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
+import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
+import { useRealtime } from '../../hooks/useRealtime';
+import type { Organization, SubscriptionTier } from '../../types';
 
-export const OrgSettingsView: React.FC = () => {
-  const currentOrg = auth.getCurrentOrganization() || db.organizations[0];
+interface SettingsFormState {
+  companyName: string;
+  address: string;
+  email: string;
+  phone: string;
+  taxNumber: string;
+  currency: string;
+  escalationRate: string;
+  gracePeriodDays: string;
+  utilityMarkup: string;
+  autoInvoice: boolean;
+}
 
-  const [companyName, setCompanyName] = useState(currentOrg?.company_name || 'Ezulwini Commercial Properties');
-  const [address, setAddress] = useState(currentOrg?.address || 'The Gables Lifestyle Centre, Ezulwini Valley');
-  const [email, setEmail] = useState(currentOrg?.email || 'admin@ezulwiniproperties.sz');
-  const [phone, setPhone] = useState(currentOrg?.phone || '+268 2416 1000');
-  const [taxNumber, setTaxNumber] = useState('TIN-9088214-SZ');
-  const [currency, setCurrency] = useState('SZL (E)');
+function initialFormFromOrg(org: Organization | null): SettingsFormState {
+  return {
+    companyName: org?.company_name ?? '',
+    address: org?.address ?? '',
+    email: org?.email ?? '',
+    phone: org?.phone ?? '',
+    taxNumber: '',
+    currency: 'SZL (E)',
+    escalationRate: '8.0',
+    gracePeriodDays: '7',
+    utilityMarkup: '5.0',
+    autoInvoice: true,
+  };
+}
 
-  // Operations policies
-  const [escalationRate, setEscalationRate] = useState('8.0');
-  const [gracePeriodDays, setGracePeriodDays] = useState('7');
-  const [utilityMarkup, setUtilityMarkup] = useState('5.0');
-  const [autoInvoice, setAutoInvoice] = useState(true);
+export function OrgSettingsView() {
+  const orgId = auth.getCurrentOrganization()?.id ?? '';
+  const cachedOrg = auth.getCurrentOrganization();
 
-  // Plan upgrade modal
+  const { data: org } = useSupabaseQuery(
+    ['organization', orgId],
+    () => orgApi.get(orgId),
+    { enabled: !!orgId }
+  );
+
+  useRealtime({
+    table: 'organizations',
+    filter: orgId ? `id=eq.${orgId}` : undefined,
+    invalidateKeys: ['organization', 'orgs'],
+    enabled: !!orgId,
+  });
+
+  // Prefer the fetched row, fall back to auth cache for instant paint.
+  const activeOrg: Organization | null = org ?? cachedOrg;
+
+  const [form, setForm] = useState<SettingsFormState>(() =>
+    initialFormFromOrg(activeOrg)
+  );
+  const [saveNotice, setSaveNotice] = useState<{
+    text: string;
+    tone: 'ok' | 'error';
+  } | null>(null);
   const [showPlanModal, setShowPlanModal] = useState(false);
-  const [saveNotice, setSaveNotice] = useState('');
-  const [backupMsg, setBackupMsg] = useState('');
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
 
-  const handleSave = (e: React.FormEvent) => {
+  // Sync form when org row arrives / changes.
+  useEffect(() => {
+    if (activeOrg) setForm(initialFormFromOrg(activeOrg));
+  }, [activeOrg?.id, activeOrg?.company_name]);
+
+  const updateOrg = useSupabaseMutation({
+    mutationFn: (patch: Parameters<typeof orgApi.update>[1]) =>
+      orgApi.update(orgId, patch),
+    invalidateKeys: ['organization', 'orgs'],
+  });
+
+  const plans = useMemo(() => subscriptionPlans.list(), []);
+
+  const flash = (text: string, tone: 'ok' | 'error' = 'ok', ms = 3500) => {
+    setSaveNotice({ text, tone });
+    setTimeout(() => setSaveNotice(null), ms);
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (currentOrg) {
-      currentOrg.company_name = companyName;
-      currentOrg.address = address;
-      currentOrg.email = email;
-      currentOrg.phone = phone;
-      db.saveToStorage();
-      setSaveNotice('Organization settings and operational policies saved successfully!');
-      setTimeout(() => setSaveNotice(''), 3500);
+    if (!orgId) return;
+    try {
+      await updateOrg.mutate({
+        company_name: form.companyName,
+        address: form.address,
+        email: form.email,
+        phone: form.phone,
+      });
+      flash('Organization settings saved.');
+    } catch (err) {
+      flash(
+        err instanceof Error ? err.message : 'Failed to save settings.',
+        'error',
+        5000
+      );
     }
   };
 
-  const handleSelectTier = (tier: 'Starter' | 'Professional' | 'Enterprise') => {
-    if (currentOrg) {
-      currentOrg.subscription_tier = tier;
-      const plan = DEFAULT_SUBSCRIPTION_PLANS.find((p) => p.tier === tier);
-      if (plan) {
-        currentOrg.property_limit = plan.propertyLimit;
-        currentOrg.tenant_limit = plan.tenantLimit;
-      }
-      db.saveToStorage();
+  const handleSelectTier = async (tier: SubscriptionTier) => {
+    if (!orgId) return;
+    const plan = plans.find((p) => p.tier === tier);
+    try {
+      // Tier limits are driven by subscriptionPlans (client config).
+      // The org row stores the chosen tier key — the limits get synced
+      // by the backend when the RPC migration runs.
+      await updateOrg.mutate({ subscription_tier: tier });
+      // Update local plan config so subsequent UI shows new limits.
+      subscriptionPlans.update(tier, {
+        propertyLimit: plan?.propertyLimit,
+        tenantLimit: plan?.tenantLimit,
+        userLimit: plan?.userLimit,
+        storageLimitGb: plan?.storageLimitGb,
+      });
       setShowPlanModal(false);
-      setSaveNotice(`Organization subscription tier updated to ${tier}!`);
-      setTimeout(() => setSaveNotice(''), 3500);
+      flash(`Subscription tier updated to ${tier}.`);
+    } catch (err) {
+      flash(
+        err instanceof Error ? err.message : 'Failed to update tier.',
+        'error',
+        5000
+      );
     }
   };
 
   const handleExportBackup = () => {
-    const jsonStr = db.exportBackupJson();
-    const blob = new Blob([jsonStr], { type: 'application/json' });
+    if (!activeOrg) return;
+    const payload = {
+      exported_at: new Date().toISOString(),
+      version: '2.0.0',
+      organization: activeOrg,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json',
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `umhlaba_wami_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `umhlaba_wami_org_${activeOrg.organization_code || activeOrg.id}_${new Date()
+      .toISOString()
+      .slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    setBackupMsg('Database backup exported to JSON file.');
-    setTimeout(() => setBackupMsg(''), 3000);
+    setExportNotice('Organisation settings exported.');
+    setTimeout(() => setExportNotice(null), 3000);
   };
 
-  const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const content = evt.target?.result as string;
-      if (content) {
-        const success = db.restoreBackupJson(content);
-        if (success) {
-          setBackupMsg('Database restored successfully from backup file!');
-          setTimeout(() => setBackupMsg(''), 3500);
-        } else {
-          alert('Failed to restore backup: invalid JSON format.');
-        }
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  };
+  if (!orgId) {
+    return (
+      <div className="p-6 text-slate-500 text-sm">No organisation context.</div>
+    );
+  }
+  if (!activeOrg) {
+    return (
+      <div className="p-6 text-slate-500 text-sm">Loading organisation…</div>
+    );
+  }
 
-  const handleResetDemo = () => {
-    if (
-      window.confirm(
-        'Are you sure you want to reset the database to demo defaults? All custom additions will be reverted.'
-      )
-    ) {
-      db.resetToInitialSeed();
-    }
-  };
+  const currentTier = activeOrg.subscription_tier;
+  const currentPlan = plans.find((p) => p.tier === currentTier);
 
   return (
     <div className="space-y-6 pb-12">
@@ -121,25 +184,36 @@ export const OrgSettingsView: React.FC = () => {
         <div className="flex items-center gap-2">
           <Building2 className="w-5 h-5 text-blue-600" />
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
-            Organization Profile & Operational Settings
+            Organization Profile &amp; Operational Settings
           </h1>
         </div>
         <p className="text-xs sm:text-sm text-slate-500 mt-1">
-          Configure corporate details, billing information, commercial lease escalation defaults, and data backups
+          Configure corporate details, billing information, commercial lease
+          escalation defaults, and settings export
         </p>
       </div>
 
       {saveNotice && (
-        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 rounded-xl text-xs flex items-center gap-2 animate-in fade-in">
-          <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-          <span>{saveNotice}</span>
+        <div
+          className={`p-3 rounded-xl text-xs flex items-center gap-2 animate-in fade-in ${
+            saveNotice.tone === 'ok'
+              ? 'bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+              : 'bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-800 text-red-800 dark:text-red-200'
+          }`}
+        >
+          {saveNotice.tone === 'ok' ? (
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+          ) : (
+            <AlertTriangle className="w-4 h-4 shrink-0 text-red-600" />
+          )}
+          <span>{saveNotice.text}</span>
         </div>
       )}
 
-      {backupMsg && (
+      {exportNotice && (
         <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-300 dark:border-blue-800 text-blue-800 dark:text-blue-200 rounded-xl text-xs flex items-center gap-2 animate-in fade-in">
           <CheckCircle2 className="w-4 h-4 shrink-0 text-blue-600" />
-          <span>{backupMsg}</span>
+          <span>{exportNotice}</span>
         </div>
       )}
 
@@ -148,39 +222,49 @@ export const OrgSettingsView: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-white/20 text-white uppercase tracking-wider">
-              {currentOrg?.subscription_tier || 'Professional'} Plan
+              {currentTier} Plan
             </span>
             <span className="text-xs text-blue-200">
-              Code: <strong className="font-mono text-white">{currentOrg?.organization_code || 'GAB-070826'}</strong>
+              Code:{' '}
+              <strong className="font-mono text-white">
+                {activeOrg.organization_code || '—'}
+              </strong>
             </span>
           </div>
-          <h3 className="text-lg font-bold mt-1.5">{currentOrg?.company_name || 'Ezulwini Commercial Properties'}</h3>
+          <h3 className="text-lg font-bold mt-1.5">
+            {activeOrg.company_name}
+          </h3>
           <p className="text-xs text-blue-100">
-            Portfolio Capacity: Up to {currentOrg?.property_limit || 10} Commercial Centers • {currentOrg?.tenant_limit || 500} Active Tenants
+            Portfolio Capacity: Up to {currentPlan?.propertyLimit ?? '—'}{' '}
+            Commercial Centers • {currentPlan?.tenantLimit ?? '—'} Active Tenants
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           <button
             onClick={() => setShowPlanModal(true)}
-            className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/30 text-white rounded-xl text-xs font-semibold backdrop-blur-xs transition flex items-center gap-1.5"
+            className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/30 text-white rounded-xl text-xs font-semibold backdrop-blur-sm transition flex items-center gap-1.5"
+            type="button"
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-300" />
             <span>Manage Tier</span>
           </button>
-          <span className="text-xs font-semibold px-3 py-1.5 bg-emerald-500 text-white rounded-xl shadow-xs">
-            Status: {currentOrg?.status || 'Active'}
+          <span className="text-xs font-semibold px-3 py-1.5 bg-emerald-500 text-white rounded-xl shadow-sm">
+            Status: {activeOrg.status}
           </span>
         </div>
       </div>
 
       {/* Settings Form */}
-      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 shadow-xs">
-        <form onSubmit={handleSave} className="space-y-6 max-w-3xl text-xs">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+        <form
+          onSubmit={handleSave}
+          className="space-y-6 max-w-3xl text-xs"
+        >
           <div>
             <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2 border-b border-slate-100 dark:border-slate-700 pb-2">
               <Building2 className="w-4 h-4 text-blue-600" />
-              <span>Corporate & Billing Identity</span>
+              <span>Corporate &amp; Billing Identity</span>
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
               <div className="sm:col-span-2">
@@ -190,8 +274,10 @@ export const OrgSettingsView: React.FC = () => {
                 <input
                   type="text"
                   required
-                  value={companyName}
-                  onChange={(e) => setCompanyName(e.target.value)}
+                  value={form.companyName}
+                  onChange={(e) =>
+                    setForm({ ...form, companyName: e.target.value })
+                  }
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                 />
               </div>
@@ -203,21 +289,23 @@ export const OrgSettingsView: React.FC = () => {
                 <input
                   type="text"
                   required
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
+                  value={form.address}
+                  onChange={(e) =>
+                    setForm({ ...form, address: e.target.value })
+                  }
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                 />
               </div>
 
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Billing & Admin Email *
+                  Billing &amp; Admin Email *
                 </label>
                 <input
                   type="email"
                   required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  value={form.email}
+                  onChange={(e) => setForm({ ...form, email: e.target.value })}
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                 />
               </div>
@@ -229,8 +317,8 @@ export const OrgSettingsView: React.FC = () => {
                 <input
                   type="text"
                   required
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                 />
               </div>
@@ -241,8 +329,10 @@ export const OrgSettingsView: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  value={taxNumber}
-                  onChange={(e) => setTaxNumber(e.target.value)}
+                  value={form.taxNumber}
+                  onChange={(e) =>
+                    setForm({ ...form, taxNumber: e.target.value })
+                  }
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono"
                 />
               </div>
@@ -252,8 +342,10 @@ export const OrgSettingsView: React.FC = () => {
                   Primary Base Currency
                 </label>
                 <select
-                  value={currency}
-                  onChange={(e) => setCurrency(e.target.value)}
+                  value={form.currency}
+                  onChange={(e) =>
+                    setForm({ ...form, currency: e.target.value })
+                  }
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                 >
                   <option value="SZL (E)">SZL - Swazi Lilangeni (E)</option>
@@ -268,7 +360,7 @@ export const OrgSettingsView: React.FC = () => {
           <div className="pt-2">
             <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2 border-b border-slate-100 dark:border-slate-700 pb-2">
               <Sliders className="w-4 h-4 text-blue-600" />
-              <span>Commercial Leasing & Financial Rules</span>
+              <span>Commercial Leasing &amp; Financial Rules</span>
             </h2>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
@@ -279,8 +371,10 @@ export const OrgSettingsView: React.FC = () => {
                 <input
                   type="number"
                   step="0.5"
-                  value={escalationRate}
-                  onChange={(e) => setEscalationRate(e.target.value)}
+                  value={form.escalationRate}
+                  onChange={(e) =>
+                    setForm({ ...form, escalationRate: e.target.value })
+                  }
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                 />
               </div>
@@ -291,8 +385,10 @@ export const OrgSettingsView: React.FC = () => {
                 </label>
                 <input
                   type="number"
-                  value={gracePeriodDays}
-                  onChange={(e) => setGracePeriodDays(e.target.value)}
+                  value={form.gracePeriodDays}
+                  onChange={(e) =>
+                    setForm({ ...form, gracePeriodDays: e.target.value })
+                  }
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                 />
               </div>
@@ -304,8 +400,10 @@ export const OrgSettingsView: React.FC = () => {
                 <input
                   type="number"
                   step="0.5"
-                  value={utilityMarkup}
-                  onChange={(e) => setUtilityMarkup(e.target.value)}
+                  value={form.utilityMarkup}
+                  onChange={(e) =>
+                    setForm({ ...form, utilityMarkup: e.target.value })
+                  }
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                 />
               </div>
@@ -317,13 +415,16 @@ export const OrgSettingsView: React.FC = () => {
                   Automated Rent Invoice Generation
                 </div>
                 <div className="text-[11px] text-slate-500">
-                  Automatically generate recurring rent invoices on the 1st of every calendar month
+                  Automatically generate recurring rent invoices on the 1st of
+                  every calendar month
                 </div>
               </div>
               <input
                 type="checkbox"
-                checked={autoInvoice}
-                onChange={(e) => setAutoInvoice(e.target.checked)}
+                checked={form.autoInvoice}
+                onChange={(e) =>
+                  setForm({ ...form, autoInvoice: e.target.checked })
+                }
                 className="w-4 h-4 text-blue-600 rounded cursor-pointer"
               />
             </div>
@@ -332,49 +433,60 @@ export const OrgSettingsView: React.FC = () => {
           <div className="pt-4 flex items-center justify-end">
             <button
               type="submit"
-              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition flex items-center gap-2"
+              disabled={updateOrg.loading}
+              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold rounded-xl shadow-md transition flex items-center gap-2"
             >
               <Save className="w-4 h-4" />
-              <span>Save Organization Settings</span>
+              <span>
+                {updateOrg.loading ? 'Saving…' : 'Save Organization Settings'}
+              </span>
             </button>
           </div>
         </form>
       </div>
 
-      {/* Data Management & Disaster Recovery */}
-      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 shadow-xs">
+      {/* Data Export */}
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
         <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2 border-b border-slate-100 dark:border-slate-700 pb-2">
           <Shield className="w-4 h-4 text-blue-600" />
-          <span>Database Management & Storage Persistence</span>
+          <span>Data Export</span>
         </h2>
         <p className="text-xs text-slate-500 mt-2">
-          Export full portfolio records, restore from previous state snapshots, or reset to demo data.
+          Download a JSON snapshot of your organisation profile. Full
+          portfolio data can be exported as CSV from the Analytics &amp;
+          Reports view.
         </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
           <button
             onClick={handleExportBackup}
             className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-blue-500 dark:hover:border-blue-500 bg-slate-50 dark:bg-slate-900/50 flex flex-col items-center justify-center gap-2 text-center transition group"
+            type="button"
           >
             <Download className="w-5 h-5 text-blue-600 group-hover:scale-110 transition-transform" />
-            <span className="font-bold text-xs text-slate-900 dark:text-white">Export Backup (JSON)</span>
-            <span className="text-[10px] text-slate-400">Download complete dataset snapshot</span>
+            <span className="font-bold text-xs text-slate-900 dark:text-white">
+              Export Organisation Profile (JSON)
+            </span>
+            <span className="text-[10px] text-slate-400">
+              Company details, tier, and code
+            </span>
           </button>
 
-          <label className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-emerald-500 dark:hover:border-emerald-500 bg-slate-50 dark:bg-slate-900/50 flex flex-col items-center justify-center gap-2 text-center transition cursor-pointer group">
-            <Upload className="w-5 h-5 text-emerald-600 group-hover:scale-110 transition-transform" />
-            <span className="font-bold text-xs text-slate-900 dark:text-white">Restore from Backup</span>
-            <span className="text-[10px] text-slate-400">Import valid JSON backup file</span>
-            <input type="file" accept=".json" onChange={handleImportBackup} className="hidden" />
-          </label>
-
           <button
-            onClick={handleResetDemo}
-            className="p-4 rounded-xl border border-red-200 dark:border-red-900/40 hover:bg-red-50 dark:hover:bg-red-950/20 flex flex-col items-center justify-center gap-2 text-center transition text-red-600 dark:text-red-400 group"
+            onClick={() => {
+              // Deep-link to the Analytics view via hash, which OperationsApp reads.
+              window.location.hash = 'tab=analytics_reports';
+            }}
+            className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-blue-500 dark:hover:border-blue-500 bg-slate-50 dark:bg-slate-900/50 flex flex-col items-center justify-center gap-2 text-center transition group"
+            type="button"
           >
-            <RefreshCw className="w-5 h-5 group-hover:rotate-180 transition-transform duration-500" />
-            <span className="font-bold text-xs">Reset to Demo Defaults</span>
-            <span className="text-[10px] text-red-400/80">Clears current cache & reloads seed</span>
+            <Sliders className="w-5 h-5 text-blue-600 group-hover:scale-110 transition-transform" />
+            <span className="font-bold text-xs text-slate-900 dark:text-white">
+              Open Analytics &amp; Reports
+            </span>
+            <span className="text-[10px] text-slate-400">
+              Export tickets, invoices, and vendor CSVs
+            </span>
           </button>
         </div>
       </div>
@@ -390,14 +502,15 @@ export const OrgSettingsView: React.FC = () => {
               <button
                 onClick={() => setShowPlanModal(false)}
                 className="text-slate-400 hover:text-slate-600 dark:hover:text-white text-xs font-bold px-2 py-1"
+                type="button"
               >
                 ✕
               </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-              {DEFAULT_SUBSCRIPTION_PLANS.map((plan) => {
-                const isCurrent = currentOrg?.subscription_tier === plan.tier;
+              {plans.map((plan) => {
+                const isCurrent = currentTier === plan.tier;
                 return (
                   <div
                     key={plan.tier}
@@ -411,14 +524,15 @@ export const OrgSettingsView: React.FC = () => {
                       <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
                         {plan.tier}
                       </span>
-                      <h3 className="font-bold text-slate-900 dark:text-white mt-1">{plan.name}</h3>
+                      <h3 className="font-bold text-slate-900 dark:text-white mt-1">
+                        {plan.name}
+                      </h3>
                       <div className="mt-2 font-bold text-base text-slate-900 dark:text-white">
-                        E {plan.pricePerMonthE.toLocaleString()}
-                        <span className="text-[10px] font-normal text-slate-500"> /mo</span>
+                        {plan.priceLabel}
                       </div>
                       <ul className="mt-3 space-y-1 text-[11px] text-slate-500">
-                        {plan.features.map((feat, i) => (
-                          <li key={i} className="flex items-center gap-1">
+                        {plan.features.map((feat) => (
+                          <li key={feat} className="flex items-center gap-1">
                             <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
                             <span>{feat}</span>
                           </li>
@@ -428,12 +542,13 @@ export const OrgSettingsView: React.FC = () => {
 
                     <button
                       onClick={() => handleSelectTier(plan.tier)}
-                      disabled={isCurrent}
+                      disabled={isCurrent || updateOrg.loading}
                       className={`mt-4 w-full py-2 rounded-xl font-bold transition text-center ${
                         isCurrent
                           ? 'bg-slate-200 dark:bg-slate-700 text-slate-500 cursor-not-allowed'
-                          : 'bg-blue-600 hover:bg-blue-700 text-white shadow-xs'
+                          : 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm disabled:opacity-60'
                       }`}
+                      type="button"
                     >
                       {isCurrent ? 'Current Plan' : 'Select Plan'}
                     </button>
@@ -446,4 +561,4 @@ export const OrgSettingsView: React.FC = () => {
       )}
     </div>
   );
-};
+}
