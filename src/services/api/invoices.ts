@@ -1,4 +1,5 @@
 import { sb, unwrap, requireOrgId } from './_helpers';
+import { isMemoryMode, getMemoryDb } from './mode';
 import type { Invoice, InvoiceType, PaymentRecord } from '../../types';
 
 export interface InvoiceLineInput {
@@ -20,6 +21,11 @@ export interface CreateInvoiceInput {
 
 export const invoices = {
   async list(orgId = requireOrgId()): Promise<Invoice[]> {
+    if (isMemoryMode()) {
+      // Memory mode has no invoice store yet — return empty array so the UI
+      // renders its empty state cleanly instead of throwing.
+      return [];
+    }
     const result = await sb()
       .from('invoices')
       .select('*, lines:invoice_lines(*)')
@@ -29,6 +35,9 @@ export const invoices = {
   },
 
   async get(id: string): Promise<Invoice> {
+    if (isMemoryMode()) {
+      throw new Error('Invoice lookup is not available in memory mode.');
+    }
     const result = await sb()
       .from('invoices')
       .select('*, lines:invoice_lines(*)')
@@ -38,6 +47,12 @@ export const invoices = {
   },
 
   async create(input: CreateInvoiceInput): Promise<Invoice> {
+    if (isMemoryMode()) {
+      throw new Error('Invoice creation is not available in memory mode.');
+    }
+    if (!input.lines || input.lines.length === 0) {
+      throw new Error('An invoice must have at least one line.');
+    }
     const { data, error } = await sb().rpc('create_invoice_with_lines', {
       p_organization_id: requireOrgId(),
       p_tenant_id: input.tenant_id,
@@ -55,8 +70,19 @@ export const invoices = {
 
   async recordPayment(
     invoiceId: string,
-    args: { amount: number; method: PaymentRecord['method']; reference?: string; notes?: string }
+    args: {
+      amount: number;
+      method: PaymentRecord['method'];
+      reference?: string;
+      notes?: string;
+    }
   ): Promise<PaymentRecord> {
+    if (args.amount <= 0) {
+      throw new Error('Payment amount must be greater than zero.');
+    }
+    if (isMemoryMode()) {
+      throw new Error('Payment recording is not available in memory mode.');
+    }
     const { data, error } = await sb().rpc('record_payment', {
       p_invoice_id: invoiceId,
       p_amount: args.amount,
@@ -68,8 +94,15 @@ export const invoices = {
     return data as unknown as PaymentRecord;
   },
 
-  /** Bulk-generate rent invoices for all active tenants. */
+  /**
+   * Bulk-generate rent invoices for all active tenants for the given period.
+   * Returns the number of invoices created.
+   */
   async bulkGenerateRent(periodDate: string, taxRate = 0.15): Promise<number> {
+    if (isMemoryMode()) {
+      // No-op in memory mode; return 0 so the caller shows "0 generated".
+      return 0;
+    }
     const { data, error } = await sb().rpc('bulk_generate_rent_invoices', {
       p_organization_id: requireOrgId(),
       p_period_date: periodDate,
@@ -80,11 +113,15 @@ export const invoices = {
   },
 
   async remove(id: string): Promise<void> {
+    if (isMemoryMode()) {
+      throw new Error('Invoice deletion is not available in memory mode.');
+    }
     const { error } = await sb().from('invoices').delete().eq('id', id);
     if (error) throw new Error(error.message);
   },
 
   async paymentsForInvoice(invoiceId: string): Promise<PaymentRecord[]> {
+    if (isMemoryMode()) return [];
     const result = await sb()
       .from('payment_records')
       .select('*')
@@ -94,15 +131,26 @@ export const invoices = {
   },
 };
 
-/** Payment helpers used by finance tabs */
 export const payments = {
-  async listForTenant(tenantId: string, from: string, to: string): Promise<PaymentRecord[]> {
+  /**
+   * Payments for a tenant in a date range, inclusive.
+   * `from` and `to` should be 'YYYY-MM-DD'.
+   *
+   * Note: we do NOT append 'T23:59:59' to `to` because `paid_at` may be a
+   * DATE column, in which case a timestamp comparison fails silently.
+   */
+  async listForTenant(
+    tenantId: string,
+    from: string,
+    to: string
+  ): Promise<PaymentRecord[]> {
+    if (isMemoryMode()) return [];
     const result = await sb()
       .from('payment_records')
       .select('*')
       .eq('tenant_id', tenantId)
       .gte('paid_at', from)
-      .lte('paid_at', `${to}T23:59:59`)
+      .lte('paid_at', to)
       .order('paid_at', { ascending: true });
     return unwrap(result) as unknown as PaymentRecord[];
   },
