@@ -1,5 +1,4 @@
 import { sb, unwrap, requireOrgId, requireUser } from './_helpers';
-import { isMemoryMode, getMemoryDb } from './mode';
 import type { User, UserRole } from '../../types';
 import { auth } from '../auth';
 
@@ -30,7 +29,6 @@ const ALLOWED_ROLES: UserRole[] = [
 
 const ALLOWED_STATUSES: User['status'][] = ['Active', 'Inactive', 'Pending', 'Suspended'];
 
-/** Error codes we tolerate from optional RPCs (function may not exist in old deployments). */
 const TOLERATED_RPC_CODES = new Set(['PGRST202', '42883', '42501']);
 
 function isTolerableRpcError(err: unknown): boolean {
@@ -41,22 +39,12 @@ function isTolerableRpcError(err: unknown): boolean {
   return (
     msg.includes('could not find the function') ||
     msg.includes('function does not exist') ||
-    msg.includes('permission denied') // RLS blocks direct fallback too — try the fallback anyway
+    msg.includes('permission denied')
   );
 }
 
 export const profiles = {
   async list(orgId = requireOrgId()): Promise<User[]> {
-    if (isMemoryMode()) {
-      const db = await getMemoryDb();
-      return db.users
-        .filter((u) => u.organization_id === orgId)
-        .slice()
-        .sort(
-          (a, b) =>
-            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
-    }
     const result = await sb()
       .from('profiles')
       .select('*')
@@ -69,13 +57,6 @@ export const profiles = {
     const caller = requireUser();
     if (caller.role !== 'super_admin') {
       throw new Error('Only super admins can list all users.');
-    }
-    if (isMemoryMode()) {
-      const db = await getMemoryDb();
-      return [...db.users].sort(
-        (a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
     }
     const result = await sb()
       .from('profiles')
@@ -93,18 +74,11 @@ export const profiles = {
   },
 
   async get(id: string): Promise<User> {
-    if (isMemoryMode()) {
-      const db = await getMemoryDb();
-      const found = db.users.find((u) => u.id === id);
-      if (!found) throw new Error('User not found.');
-      return found;
-    }
     const result = await sb().from('profiles').select('*').eq('id', id).single();
     return unwrap(result) as unknown as User;
   },
 
   async me(): Promise<User | null> {
-    if (isMemoryMode()) return auth.getCurrentUser();
     const {
       data: { user },
     } = await sb().auth.getUser();
@@ -119,23 +93,12 @@ export const profiles = {
   },
 
   async updateSelf(patch: Partial<Pick<User, 'name' | 'phone' | 'avatar_url'>>) {
-    // Runtime allowlist — even if a caller force-casts to a broader type.
     const safe: Record<string, unknown> = {};
     for (const key of SELF_WRITE_FIELDS) {
       if (key in patch) safe[key] = (patch as Record<string, unknown>)[key];
     }
     if (Object.keys(safe).length === 0) {
       throw new Error('No valid fields to update.');
-    }
-
-    if (isMemoryMode()) {
-      const current = requireUser();
-      const db = await getMemoryDb();
-      const target = db.users.find((u) => u.id === current.id);
-      if (!target) throw new Error('Your profile was not found.');
-      Object.assign(target, safe);
-      db.saveToStorage();
-      return target;
     }
 
     const {
@@ -151,18 +114,9 @@ export const profiles = {
     return unwrap(result) as unknown as User;
   },
 
-  /**
-   * Admin-level update. Enforces:
-   *  - caller must be admin of target's org OR super admin
-   *  - only valid roles / statuses accepted
-   *  - role='super_admin' only grantable by existing super admin
-   *  - super admin cannot demote themselves
-   *  - last admin of an org cannot demote themselves
-   */
   async updateAsAdmin(userId: string, patch: WritePatch): Promise<User> {
     const caller = requireUser();
 
-    // Validate fields
     for (const key of Object.keys(patch)) {
       if (!(WRITE_FIELDS as readonly string[]).includes(key)) {
         throw new Error(`Field "${key}" cannot be updated.`);
@@ -178,7 +132,6 @@ export const profiles = {
       throw new Error('Only super admins can grant super admin role.');
     }
 
-    // Load target for guard checks
     const target = await this.get(userId);
 
     const isSelf = caller.id === target.id;
@@ -206,21 +159,11 @@ export const profiles = {
       }
     }
 
-    // Non-super-admin can only edit users in their own org
     if (
       caller.role !== 'super_admin' &&
       caller.organization_id !== target.organization_id
     ) {
       throw new Error('You cannot edit users outside your organisation.');
-    }
-
-    if (isMemoryMode()) {
-      const db = await getMemoryDb();
-      const record = db.users.find((u) => u.id === userId);
-      if (!record) throw new Error('User not found.');
-      Object.assign(record, patch);
-      db.saveToStorage();
-      return record;
     }
 
     const result = await sb()
@@ -232,10 +175,6 @@ export const profiles = {
     return unwrap(result) as unknown as User;
   },
 
-  /**
-   * Change a user's role via RPC when available; fallback to direct update.
-   * Only tolerated errors trigger the fallback. Permission errors surface.
-   */
   async setRole(userId: string, role: UserRole): Promise<User> {
     const actor = requireUser();
     if (!ALLOWED_ROLES.includes(role)) {
@@ -243,10 +182,6 @@ export const profiles = {
     }
     if (role === 'super_admin' && actor.role !== 'super_admin') {
       throw new Error('Only super admins can grant super admin role.');
-    }
-
-    if (isMemoryMode()) {
-      return this.updateAsAdmin(userId, { role });
     }
 
     const { data, error } = await sb().rpc('set_profile_role', {
@@ -258,7 +193,6 @@ export const profiles = {
     if (error && !isTolerableRpcError(error)) {
       throw new Error(error.message);
     }
-    // Fallback path only when RPC missing/permission-blocked — still enforced by RLS.
     return this.updateAsAdmin(userId, { role });
   },
 
@@ -279,10 +213,6 @@ export const profiles = {
       target.role === 'super_admin'
     ) {
       throw new Error('You cannot suspend your own super admin account.');
-    }
-
-    if (isMemoryMode()) {
-      return this.updateAsAdmin(userId, { status });
     }
 
     const { data, error } = await sb().rpc('set_profile_status', {
@@ -342,14 +272,10 @@ export const profiles = {
         throw new Error('You can only invite users to your own organisation.');
       }
     }
-    if (!organizationId && !isSuper) {
-      throw new Error('Organisation is required to invite a user.');
-    }
 
     const cleanEmail = args.email.trim().toLowerCase();
     const username = cleanEmail.split('@')[0];
 
-    // Try edge function first
     try {
       const result = await sb().functions.invoke('invite-staff', {
         body: {
@@ -367,11 +293,9 @@ export const profiles = {
         };
       }
     } catch {
-      // edge function unavailable — fall through to isolated signUp
+      // edge function unavailable — fall through
     }
 
-    // Fallback: create auth user from an isolated client so we don't
-    // clobber the caller's session.
     const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
     const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
     if (!url || !key) {
@@ -427,7 +351,6 @@ export const profiles = {
       );
     }
 
-    // Populate profile row (idempotent).
     const { error: profileErr } = await sb()
       .from('profiles')
       .upsert(
@@ -447,7 +370,6 @@ export const profiles = {
       throw new Error(`Profile row failed: ${profileErr.message}`);
     }
 
-    // Only surface the temp password in dev or when explicitly allowed.
     const showTemp =
       import.meta.env.DEV ||
       (import.meta.env.VITE_SHOW_TEMP_PASSWORDS as string | undefined) === 'true';
@@ -484,16 +406,6 @@ export const profiles = {
       }
     }
 
-    if (isMemoryMode()) {
-      const db = await getMemoryDb();
-      const record = db.users.find((u) => u.id === userId);
-      if (record) {
-        record.status = 'Inactive';
-        db.saveToStorage();
-      }
-      return;
-    }
-
     const result = await sb()
       .from('profiles')
       .update({ status: 'Inactive' })
@@ -510,17 +422,6 @@ export const profiles = {
     }
     if (caller.id === userId) {
       throw new Error('You cannot purge your own account.');
-    }
-
-    if (isMemoryMode()) {
-      const db = await getMemoryDb();
-      const record = db.users.find((u) => u.id === userId);
-      if (record) {
-        record.status = 'Inactive';
-        record.organization_id = undefined;
-        db.saveToStorage();
-      }
-      return;
     }
 
     const result = await sb()
@@ -541,15 +442,6 @@ export const profiles = {
       throw new Error('Only super admins can reassign organisation.');
     }
 
-    if (isMemoryMode()) {
-      const db = await getMemoryDb();
-      const record = db.users.find((u) => u.id === userId);
-      if (!record) throw new Error('User not found.');
-      record.organization_id = organizationId ?? undefined;
-      db.saveToStorage();
-      return record;
-    }
-
     const result = await sb()
       .from('profiles')
       .update({ organization_id: organizationId })
@@ -560,12 +452,6 @@ export const profiles = {
   },
 
   async countAdminsInOrg(orgId: string): Promise<number> {
-    if (isMemoryMode()) {
-      const db = await getMemoryDb();
-      return db.users.filter(
-        (u) => u.organization_id === orgId && u.role === 'admin'
-      ).length;
-    }
     const { count, error } = await sb()
       .from('profiles')
       .select('id', { count: 'exact', head: true })
@@ -573,7 +459,6 @@ export const profiles = {
       .eq('role', 'admin')
       .eq('status', 'Active');
     if (error) {
-      // Non-fatal — caller decides whether to block on 0.
       console.warn('[profiles] countAdminsInOrg failed', error);
       return 0;
     }
