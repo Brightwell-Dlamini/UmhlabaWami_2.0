@@ -3,6 +3,7 @@ import autoTable from 'jspdf-autotable';
 import type {
   Organization,
   Invoice,
+  Lease,
   Tenant,
   PaymentRecord,
 } from '../types';
@@ -642,5 +643,116 @@ export function generateStatementPdf(
   download(
     doc,
     `Statement-${tenant.business_name.replace(/[^a-zA-Z0-9]/g, '_')}-${statement.period_start}_${statement.period_end}.pdf`
+  );
+}
+// ---------- Lease Certificate PDF ----------
+
+
+export function generateLeaseCertificatePdf(
+  lease: Lease,
+  org: Organization,
+  tenant?: Tenant
+): void {
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  let y = drawHeader({
+    doc,
+    org,
+    documentTitle: 'LEASE CERTIFICATE',
+    documentNumber: lease.document_title || lease.id.slice(0, 8).toUpperCase(),
+    issueDate: lease.start_date,
+    dueDate: lease.end_date,
+  });
+
+  const startY = y;
+  const leftY = drawPartyBlock({
+    doc,
+    x: 20,
+    y,
+    label: 'TENANT',
+    lines: [
+      tenant?.business_name,
+      tenant?.contact_person,
+      tenant?.phone,
+      tenant?.email,
+    ],
+  });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(100, 116, 139);
+  doc.text('STATUS', pageWidth - 20, startY, { align: 'right' });
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text(
+    lease.is_digitally_signed ? 'SIGNED' : 'PENDING SIGNATURE',
+    pageWidth - 20,
+    startY + 6,
+    { align: 'right' }
+  );
+
+  y = leftY + 8;
+
+  // Terms table
+  const terms: [string, string][] = [
+    ['Lease reference', lease.document_title || '—'],
+    ['Start date', lease.start_date],
+    ['End date', lease.end_date],
+    ['Renewal status', lease.renewal_status],
+    ['Monthly rental', `E${lease.rental_amount.toLocaleString()}`],
+    ['Deposit held', `E${(lease.deposit ?? 0).toLocaleString()}`],
+  ];
+  if (lease.is_digitally_signed && lease.signer_name) {
+    terms.push(['Signed by', lease.signer_name]);
+    if (lease.signed_at) {
+      terms.push([
+        'Signed on',
+        new Date(lease.signed_at).toLocaleDateString(),
+      ]);
+    }
+  }
+
+  autoTable(doc, {
+    startY: y,
+    head: [['Term', 'Value']],
+    body: terms,
+    theme: 'grid',
+    headStyles: {
+      fillColor: hexToRgb(org.custom_branding_color || BRAND_FALLBACK),
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 10,
+    },
+    bodyStyles: { fontSize: 10, textColor: [15, 23, 42] },
+    columnStyles: {
+      0: { cellWidth: 55, fontStyle: 'bold' },
+      1: { cellWidth: 'auto' },
+    },
+    margin: { left: 20, right: 20 },
+  });
+
+  // @ts-expect-error — lastAutoTable is added by the plugin at runtime
+  y = (doc.lastAutoTable?.finalY ?? y) + 10;
+
+  if (lease.document_url) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(100, 116, 139);
+    doc.text('Original document', 20, y);
+    y += 5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(37, 99, 235);
+    doc.textWithLink(lease.document_url, 20, y, { url: lease.document_url });
+  }
+
+  drawFooter(doc, [
+    'This certificate reflects terms on file. The signed lease agreement is the legally binding document.',
+  ]);
+
+  download(
+    doc,
+    `Lease-Certificate-${tenant?.business_name?.replace(/[^a-zA-Z0-9]/g, '_') || 'tenant'}.pdf`
   );
 }
