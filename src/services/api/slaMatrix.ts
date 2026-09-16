@@ -1,5 +1,4 @@
 import { sb, unwrap, requireOrgId } from './_helpers';
-import { isMemoryMode, getMemoryDb } from './mode';
 import type { SlaRule, TicketPriority } from '../../types';
 
 const DEFAULT_RULES: SlaRule[] = [
@@ -11,12 +10,6 @@ const DEFAULT_RULES: SlaRule[] = [
 
 export const slaMatrix = {
   async list(orgId = requireOrgId()): Promise<SlaRule[]> {
-    if (isMemoryMode()) {
-      // Memory mode has no persisted SLA matrix — return defaults.
-      // The db seed could carry one, but SLA is an org-config concern
-      // that only matters when backed by a real tenant database.
-      return [...DEFAULT_RULES];
-    }
     const result = await sb()
       .from('sla_matrix')
       .select('priority, response_minutes, resolution_minutes')
@@ -25,14 +18,6 @@ export const slaMatrix = {
   },
 
   async upsert(rules: SlaRule[], orgId = requireOrgId()): Promise<void> {
-    if (isMemoryMode()) {
-      // No-op in memory mode. Log so devs know it didn't persist.
-      console.info(
-        '[slaMatrix] upsert called in memory mode — change not persisted.',
-        rules
-      );
-      return;
-    }
     const rows = rules.map((r) => ({
       organization_id: orgId,
       priority: r.priority,
