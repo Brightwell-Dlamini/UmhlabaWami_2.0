@@ -1,7 +1,15 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  Package, Bell, PlusCircle, Send, X, Trash2, FileText, Search,
-  Receipt, CreditCard,
+  Package,
+  Bell,
+  PlusCircle,
+  Send,
+  X,
+  Trash2,
+  FileText,
+  Search,
+  Receipt,
+  CreditCard,
 } from 'lucide-react';
 import { auth } from '../../services/auth';
 import {
@@ -22,14 +30,28 @@ import { generateStatementPdf } from '../../services/pdf';
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 import { useRealtime } from '../../hooks/useRealtime';
+import {
+  daysBetween,
+  selectOverdueInvoices,
+  suggestedReminderType,
+} from './calculators';
 import type { Tenant } from '../../types';
 
 type SubTab = 'items' | 'statements' | 'reminders' | 'expenses' | 'requisitions';
 
 export function ItemsRemindersTab() {
   const orgId = auth.getCurrentOrganization()?.id ?? '';
+
   const [subTab, setSubTab] = useState<SubTab>('items');
-  const [feedback, setFeedback] = useState('');
+  const [feedback, setFeedback] = useState<{
+    text: string;
+    tone: 'ok' | 'error';
+  } | null>(null);
+
+  const showFeedback = (text: string, tone: 'ok' | 'error' = 'ok', ms = 3500) => {
+    setFeedback({ text, tone });
+    setTimeout(() => setFeedback(null), ms);
+  };
 
   const [periodStart, setPeriodStart] = useState(() => {
     const d = new Date();
@@ -95,37 +117,30 @@ export function ItemsRemindersTab() {
     invalidateKeys: ['financial_requests'],
     enabled: !!orgId,
   });
+  useRealtime({
+    table: 'invoices',
+    filter: `organization_id=eq.${orgId}`,
+    invalidateKeys: ['invoices'],
+    enabled: !!orgId,
+  });
 
+  // ----- Items -----
   const createItem = useSupabaseMutation({
     mutationFn: (input: Parameters<typeof itemsApi.create>[0]) =>
       itemsApi.create(input),
     invalidateKeys: ['invoice_items'],
-    onSuccess: () => {
-      setFeedback('Item created.');
-      setTimeout(() => setFeedback(''), 3000);
-      setShowItemModal(false);
-    },
   });
   const updateItem = useSupabaseMutation({
     mutationFn: ({ id, patch }: { id: string; patch: Partial<InvoiceItem> }) =>
       itemsApi.update(id, patch),
     invalidateKeys: ['invoice_items'],
-    onSuccess: () => {
-      setFeedback('Item updated.');
-      setTimeout(() => setFeedback(''), 3000);
-      setEditingItem(null);
-      setShowItemModal(false);
-    },
   });
   const removeItem = useSupabaseMutation({
     mutationFn: (id: string) => itemsApi.remove(id),
     invalidateKeys: ['invoice_items'],
-    onSuccess: () => {
-      setFeedback('Item removed.');
-      setTimeout(() => setFeedback(''), 3000);
-    },
   });
 
+  // ----- Expenses -----
   const createExpense = useSupabaseMutation({
     mutationFn: (input: {
       description: string;
@@ -145,77 +160,52 @@ export function ItemsRemindersTab() {
         status: 'Approved',
       }),
     invalidateKeys: ['finance_transactions'],
-    onSuccess: () => {
-      setFeedback('Expense recorded.');
-      setTimeout(() => setFeedback(''), 3000);
-      setShowExpenseModal(false);
-    },
   });
   const deleteExpense = useSupabaseMutation({
     mutationFn: (id: string) => txApi.remove(id),
     invalidateKeys: ['finance_transactions'],
-    onSuccess: () => {
-      setFeedback('Expense removed.');
-      setTimeout(() => setFeedback(''), 3000);
-    },
   });
 
+  // ----- Requisitions -----
   const createRequest = useSupabaseMutation({
     mutationFn: (input: Parameters<typeof reqApi.create>[0]) =>
       reqApi.create(input),
     invalidateKeys: ['financial_requests'],
-    onSuccess: () => {
-      setFeedback('Requisition submitted.');
-      setTimeout(() => setFeedback(''), 3000);
-      setShowRequisitionModal(false);
-    },
   });
   const approveRequest = useSupabaseMutation({
     mutationFn: (id: string) => reqApi.approve(id),
     invalidateKeys: ['financial_requests'],
-    onSuccess: () => {
-      setFeedback('Requisition approved.');
-      setTimeout(() => setFeedback(''), 3000);
-    },
   });
   const disburseRequest = useSupabaseMutation({
     mutationFn: (id: string) => reqApi.disburse(id),
     invalidateKeys: ['financial_requests', 'finance_transactions'],
-    onSuccess: () => {
-      setFeedback('Requisition disbursed.');
-      setTimeout(() => setFeedback(''), 3000);
-    },
   });
 
+  // ----- Reminders -----
   const sendReminder = useSupabaseMutation({
     mutationFn: (invoiceId: string) => remindersApi.sendReminder(invoiceId),
-    onSuccess: () => {
-      setFeedback('Reminder logged.');
-      setTimeout(() => setFeedback(''), 3000);
-    },
+    invalidateKeys: ['invoices', 'payment_reminders'],
   });
 
-  const overdue = invoices.filter(
-    (i) =>
-      i.status !== 'Paid' &&
-      i.status !== 'Cancelled' &&
-      new Date(i.due_date) < new Date()
+  // ----- Derived -----
+  const overdue = useMemo(() => selectOverdueInvoices(invoices), [invoices]);
+
+  const filteredOverdue = useMemo(() => {
+    if (!reminderSearch) return overdue;
+    const q = reminderSearch.toLowerCase();
+    return overdue.filter(
+      (i) =>
+        i.invoice_number.toLowerCase().includes(q) ||
+        i.tenant_name.toLowerCase().includes(q)
+    );
+  }, [overdue, reminderSearch]);
+
+  const expenseTransactions = useMemo(
+    () => transactions.filter((t) => t.direction === 'expense'),
+    [transactions]
   );
 
-  const filteredOverdue = reminderSearch
-    ? overdue.filter((i) => {
-        const q = reminderSearch.toLowerCase();
-        return (
-          i.invoice_number.toLowerCase().includes(q) ||
-          i.tenant_name.toLowerCase().includes(q)
-        );
-      })
-    : overdue;
-
-  const expenseTransactions = transactions.filter(
-    (t) => t.direction === 'expense'
-  );
-
+  // ----- Actions -----
   const handleGenerateStatement = async (tenant: Tenant) => {
     const org = auth.getCurrentOrganization();
     if (!org) return;
@@ -232,28 +222,126 @@ export function ItemsRemindersTab() {
         periodEnd
       );
       generateStatementPdf(statement, tenant, invoices, payments, org);
-      setFeedback(`Statement generated for ${tenant.business_name}.`);
-      setTimeout(() => setFeedback(''), 3500);
+      showFeedback(`Statement generated for ${tenant.business_name}.`);
     } catch (e) {
-      setFeedback(
-        e instanceof Error ? `Statement failed: ${e.message}` : 'Statement failed.'
+      showFeedback(
+        e instanceof Error ? `Statement failed: ${e.message}` : 'Statement failed.',
+        'error',
+        5000
       );
-      setTimeout(() => setFeedback(''), 4000);
     } finally {
       setGeneratingId(null);
     }
   };
 
-  if (!orgId)
+  const handleSendReminder = async (invoiceId: string, invoiceNumber: string) => {
+    try {
+      await sendReminder.mutate(invoiceId);
+      showFeedback(`Reminder logged for ${invoiceNumber}.`);
+    } catch (e) {
+      showFeedback(
+        e instanceof Error ? e.message : 'Failed to send reminder.',
+        'error',
+        5000
+      );
+    }
+  };
+
+  const handleCreateItem = async (input: Parameters<typeof itemsApi.create>[0]) => {
+    try {
+      await createItem.mutate(input);
+      showFeedback('Item created.');
+      setShowItemModal(false);
+      setEditingItem(null);
+    } catch (e) {
+      showFeedback(e instanceof Error ? e.message : 'Failed to create item.', 'error');
+    }
+  };
+
+  const handleUpdateItem = async (
+    id: string,
+    patch: Partial<InvoiceItem>
+  ) => {
+    try {
+      await updateItem.mutate({ id, patch });
+      showFeedback('Item updated.');
+      setShowItemModal(false);
+      setEditingItem(null);
+    } catch (e) {
+      showFeedback(e instanceof Error ? e.message : 'Failed to update item.', 'error');
+    }
+  };
+
+  const handleRemoveItem = async (id: string, name: string) => {
+    if (!confirm(`Delete "${name}"?`)) return;
+    try {
+      await removeItem.mutate(id);
+      showFeedback('Item removed.');
+    } catch (e) {
+      showFeedback(e instanceof Error ? e.message : 'Failed to remove item.', 'error');
+    }
+  };
+
+  const handleCreateExpense = async (input: {
+    description: string;
+    category: string;
+    amount: number;
+    shopping_center_id: string;
+  }) => {
+    try {
+      await createExpense.mutate(input);
+      showFeedback('Expense recorded.');
+      setShowExpenseModal(false);
+    } catch (e) {
+      showFeedback(e instanceof Error ? e.message : 'Failed to record expense.', 'error');
+    }
+  };
+
+  const handleDeleteExpense = async (id: string) => {
+    if (!confirm('Delete this expense?')) return;
+    try {
+      await deleteExpense.mutate(id);
+      showFeedback('Expense removed.');
+    } catch (e) {
+      showFeedback(e instanceof Error ? e.message : 'Failed to remove expense.', 'error');
+    }
+  };
+
+  const handleApproveRequest = async (id: string) => {
+    try {
+      await approveRequest.mutate(id);
+      showFeedback('Requisition approved.');
+    } catch (e) {
+      showFeedback(e instanceof Error ? e.message : 'Failed to approve.', 'error');
+    }
+  };
+
+  const handleDisburseRequest = async (id: string) => {
+    try {
+      await disburseRequest.mutate(id);
+      showFeedback('Requisition disbursed.');
+    } catch (e) {
+      showFeedback(e instanceof Error ? e.message : 'Failed to disburse.', 'error');
+    }
+  };
+
+  if (!orgId) {
     return (
       <div className="p-6 text-slate-500 text-sm">No organisation context.</div>
     );
+  }
 
   return (
     <div className="space-y-6">
       {feedback && (
-        <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 text-emerald-800 dark:text-emerald-200 text-xs font-semibold">
-          {feedback}
+        <div
+          className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+            feedback.tone === 'ok'
+              ? 'bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 text-emerald-800 dark:text-emerald-200'
+              : 'bg-red-50 dark:bg-red-950/40 border border-red-300 text-red-800 dark:text-red-200'
+          }`}
+        >
+          {feedback.text}
         </div>
       )}
 
@@ -289,6 +377,7 @@ export function ItemsRemindersTab() {
                   ? 'bg-blue-600 text-white'
                   : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
+              type="button"
             >
               <Icon className="w-3.5 h-3.5" /> {t.label}
             </button>
@@ -312,6 +401,7 @@ export function ItemsRemindersTab() {
                 setShowItemModal(true);
               }}
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+              type="button"
             >
               <PlusCircle className="w-3.5 h-3.5" /> New item
             </button>
@@ -357,15 +447,15 @@ export function ItemsRemindersTab() {
                             setShowItemModal(true);
                           }}
                           className="text-[11px] font-semibold text-blue-600 hover:underline mr-3"
+                          type="button"
                         >
                           Edit
                         </button>
                         <button
-                          onClick={() => {
-                            if (confirm(`Delete "${it.name}"?`))
-                              removeItem.mutate(it.id);
-                          }}
-                          className="p-1 text-slate-400 hover:text-red-500"
+                          onClick={() => handleRemoveItem(it.id, it.name)}
+                          disabled={removeItem.loading}
+                          className="p-1 text-slate-400 hover:text-red-500 disabled:opacity-60"
+                          type="button"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -430,6 +520,7 @@ export function ItemsRemindersTab() {
                       onClick={() => handleGenerateStatement(t)}
                       disabled={generatingId === t.id}
                       className="text-[11px] font-semibold text-blue-600 hover:underline disabled:opacity-60"
+                      type="button"
                     >
                       {generatingId === t.id ? 'Generating…' : 'Generate PDF'}
                     </button>
@@ -485,15 +576,11 @@ export function ItemsRemindersTab() {
                   </tr>
                 ) : (
                   filteredOverdue.map((inv) => {
-                    const days = Math.floor(
-                      (Date.now() - new Date(inv.due_date).getTime()) / 86400000
+                    const days = daysBetween(
+                      inv.due_date,
+                      new Date().toISOString().slice(0, 10)
                     );
-                    const type =
-                      days > 30
-                        ? 'Final Notice'
-                        : days > 7
-                        ? 'Firm'
-                        : 'Friendly';
+                    const type = suggestedReminderType(days);
                     return (
                       <tr key={inv.id}>
                         <td className="px-3 py-3 font-mono font-bold">
@@ -516,8 +603,12 @@ export function ItemsRemindersTab() {
                         </td>
                         <td className="px-3 py-3 text-right">
                           <button
-                            onClick={() => sendReminder.mutate(inv.id)}
-                            className="text-[11px] font-semibold text-blue-600 hover:underline flex items-center gap-1 ml-auto"
+                            onClick={() =>
+                              handleSendReminder(inv.id, inv.invoice_number)
+                            }
+                            disabled={sendReminder.loading}
+                            className="text-[11px] font-semibold text-blue-600 hover:underline flex items-center gap-1 ml-auto disabled:opacity-60"
+                            type="button"
                           >
                             <Send className="w-3 h-3" /> Send
                           </button>
@@ -544,7 +635,9 @@ export function ItemsRemindersTab() {
             </div>
             <button
               onClick={() => setShowExpenseModal(true)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+              disabled={centers.length === 0}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+              type="button"
             >
               <PlusCircle className="w-4 h-4" /> Record expense
             </button>
@@ -587,11 +680,10 @@ export function ItemsRemindersTab() {
                         </td>
                         <td className="px-3 py-3 text-right">
                           <button
-                            onClick={() => {
-                              if (confirm('Delete expense?'))
-                                deleteExpense.mutate(tx.id);
-                            }}
-                            className="p-1 text-slate-400 hover:text-red-500"
+                            onClick={() => handleDeleteExpense(tx.id)}
+                            disabled={deleteExpense.loading}
+                            className="p-1 text-slate-400 hover:text-red-500 disabled:opacity-60"
+                            type="button"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -619,6 +711,7 @@ export function ItemsRemindersTab() {
             <button
               onClick={() => setShowRequisitionModal(true)}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+              type="button"
             >
               <PlusCircle className="w-4 h-4" /> New requisition
             </button>
@@ -660,16 +753,20 @@ export function ItemsRemindersTab() {
                       <td className="px-3 py-3 text-right">
                         {r.status === 'Pending Approval' && (
                           <button
-                            onClick={() => approveRequest.mutate(r.id)}
-                            className="px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-[10px] font-bold"
+                            onClick={() => handleApproveRequest(r.id)}
+                            disabled={approveRequest.loading}
+                            className="px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-[10px] font-bold disabled:opacity-60"
+                            type="button"
                           >
                             Approve
                           </button>
                         )}
                         {r.status === 'Approved' && (
                           <button
-                            onClick={() => disburseRequest.mutate(r.id)}
-                            className="px-2.5 py-1 bg-blue-600 text-white rounded-lg text-[10px] font-bold"
+                            onClick={() => handleDisburseRequest(r.id)}
+                            disabled={disburseRequest.loading}
+                            className="px-2.5 py-1 bg-blue-600 text-white rounded-lg text-[10px] font-bold disabled:opacity-60"
+                            type="button"
                           >
                             Disburse
                           </button>
@@ -688,14 +785,17 @@ export function ItemsRemindersTab() {
       {showItemModal && (
         <ItemForm
           initial={editingItem}
+          busy={createItem.loading || updateItem.loading}
           onCancel={() => {
             setShowItemModal(false);
             setEditingItem(null);
           }}
           onSubmit={(input) => {
-            if (editingItem)
-              updateItem.mutate({ id: editingItem.id, patch: input });
-            else createItem.mutate(input as never);
+            if (editingItem) {
+              handleUpdateItem(editingItem.id, input as Partial<InvoiceItem>);
+            } else {
+              handleCreateItem(input as Parameters<typeof itemsApi.create>[0]);
+            }
           }}
         />
       )}
@@ -703,27 +803,46 @@ export function ItemsRemindersTab() {
       {showExpenseModal && (
         <ExpenseForm
           centers={centers}
+          busy={createExpense.loading}
           onCancel={() => setShowExpenseModal(false)}
-          onSubmit={(input) => createExpense.mutate(input)}
+          onSubmit={handleCreateExpense}
         />
       )}
 
       {showRequisitionModal && (
         <RequisitionForm
+          busy={createRequest.loading}
           onCancel={() => setShowRequisitionModal(false)}
-          onSubmit={(input) => createRequest.mutate(input)}
+          onSubmit={async (input) => {
+            try {
+              await createRequest.mutate(input);
+              showFeedback('Requisition submitted.');
+              setShowRequisitionModal(false);
+            } catch (e) {
+              showFeedback(
+                e instanceof Error ? e.message : 'Failed to submit.',
+                'error'
+              );
+            }
+          }}
         />
       )}
     </div>
   );
 }
 
+// ---------------------------------------------------------------------------
+// Modals (unchanged logic, added busy prop)
+// ---------------------------------------------------------------------------
+
 function ItemForm({
   initial,
+  busy,
   onCancel,
   onSubmit,
 }: {
   initial: InvoiceItem | null;
+  busy: boolean;
   onCancel: () => void;
   onSubmit: (input: Record<string, unknown>) => void;
 }) {
@@ -742,7 +861,7 @@ function ItemForm({
           <h3 className="font-bold text-base">
             {initial ? 'Edit item' : 'New billing item'}
           </h3>
-          <button onClick={onCancel}>
+          <button onClick={onCancel} type="button">
             <X className="w-5 h-5 text-slate-400" />
           </button>
         </div>
@@ -830,9 +949,10 @@ function ItemForm({
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold"
+              disabled={busy}
+              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-60"
             >
-              {initial ? 'Save' : 'Create'}
+              {busy ? 'Saving…' : initial ? 'Save' : 'Create'}
             </button>
           </div>
         </form>
@@ -843,10 +963,12 @@ function ItemForm({
 
 function ExpenseForm({
   centers,
+  busy,
   onCancel,
   onSubmit,
 }: {
   centers: { id: string; name: string }[];
+  busy: boolean;
   onCancel: () => void;
   onSubmit: (input: {
     description: string;
@@ -867,7 +989,7 @@ function ExpenseForm({
           <h3 className="font-bold text-base flex items-center gap-2">
             <Receipt className="w-5 h-5 text-blue-600" /> Record expense
           </h3>
-          <button onClick={onCancel}>
+          <button onClick={onCancel} type="button">
             <X className="w-5 h-5 text-slate-400" />
           </button>
         </div>
@@ -932,9 +1054,10 @@ function ExpenseForm({
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold"
+              disabled={busy}
+              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-60"
             >
-              Save
+              {busy ? 'Saving…' : 'Save'}
             </button>
           </div>
         </form>
@@ -944,9 +1067,11 @@ function ExpenseForm({
 }
 
 function RequisitionForm({
+  busy,
   onCancel,
   onSubmit,
 }: {
+  busy: boolean;
   onCancel: () => void;
   onSubmit: (input: {
     requested_by_name: string;
@@ -966,7 +1091,7 @@ function RequisitionForm({
       <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border border-slate-200 dark:border-slate-700 p-6 shadow-2xl space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-base">New requisition</h3>
-          <button onClick={onCancel}>
+          <button onClick={onCancel} type="button">
             <X className="w-5 h-5 text-slate-400" />
           </button>
         </div>
@@ -1020,9 +1145,10 @@ function RequisitionForm({
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold"
+              disabled={busy}
+              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-60"
             >
-              Submit
+              {busy ? 'Submitting…' : 'Submit'}
             </button>
           </div>
         </form>
