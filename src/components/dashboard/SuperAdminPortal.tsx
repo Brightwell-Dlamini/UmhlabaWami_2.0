@@ -1,3 +1,4 @@
+// src/components/dashboard/SuperAdminPortal.tsx
 import React, { useMemo, useState } from 'react';
 import {
   Shield,
@@ -9,6 +10,7 @@ import { auth } from '../../services/auth';
 import { organizations as orgApi } from '../../services/api/organizations';
 import { shops as shopsApi } from '../../services/api/shops';
 import { auditLogs as auditApi } from '../../services/api/auditLogs';
+import { subscriptionPlans } from '../../services/subscriptionPlans';
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 import { useRealtime } from '../../hooks/useRealtime';
@@ -18,27 +20,38 @@ interface Props {
   initialTab?: string;
 }
 
-type Tab = 'approvals' | 'organizations' | 'listings' | 'audit' | 'subscriptions';
+type Tab =
+  | 'approvals'
+  | 'organizations'
+  | 'listings'
+  | 'audit'
+  | 'subscriptions';
 
 export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
   const [activeTab, setActiveTab] = useState<Tab>(
-    initialTab === 'super_organizations' ? 'organizations'
-    : initialTab === 'super_listings' ? 'listings'
-    : initialTab === 'audit_logs' ? 'audit'
-    : initialTab === 'super_subscriptions' ? 'subscriptions'
-    : 'approvals'
+    initialTab === 'super_organizations'
+      ? 'organizations'
+      : initialTab === 'super_listings'
+      ? 'listings'
+      : initialTab === 'audit_logs'
+      ? 'audit'
+      : initialTab === 'super_subscriptions'
+      ? 'subscriptions'
+      : 'approvals'
   );
 
   const [actionNotice, setActionNotice] = useState('');
   const [customCode, setCustomCode] = useState('');
 
-  const { data: orgs = [] } = useSupabaseQuery(['super_orgs'], () => orgApi.list());
+  const { data: orgs = [] } = useSupabaseQuery(['super_orgs'], () =>
+    orgApi.list()
+  );
   const { data: shops = [] } = useSupabaseQuery(['super_shops'], () =>
     shopsApi.publicAvailable()
   );
   const { data: logs = [] } = useSupabaseQuery(
     ['super_audit'],
-    () => auditApi.list(undefined as never, 200),
+    () => auditApi.list(undefined, 200),
     { enabled: activeTab === 'audit' }
   );
 
@@ -86,6 +99,8 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
     () => orgs.filter((o) => o.status === 'Pending Approval'),
     [orgs]
   );
+
+  const plans = useMemo(() => subscriptionPlans.list(), []);
 
   const exportBackup = () => {
     downloadCsv(
@@ -185,7 +200,9 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
                   </div>
                   <div className="text-right text-xs">
                     <div className="text-slate-500">Tier</div>
-                    <strong className="text-blue-600">{org.subscription_tier}</strong>
+                    <strong className="text-blue-600">
+                      {org.subscription_tier}
+                    </strong>
                     {org.monthly_fee_estimate && (
                       <div className="font-bold mt-1">
                         E{org.monthly_fee_estimate.toLocaleString()}/mo
@@ -209,7 +226,9 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
                       </label>
                       <input
                         value={customCode}
-                        onChange={(e) => setCustomCode(e.target.value.toUpperCase())}
+                        onChange={(e) =>
+                          setCustomCode(e.target.value.toUpperCase())
+                        }
                         placeholder="e.g. GAB-140926-0001"
                         className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-mono text-xs bg-white dark:bg-slate-800"
                       />
@@ -298,7 +317,9 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
                   key={s.id}
                   className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50"
                 >
-                  <div className="text-xs font-bold">Unit {s.shop_number}</div>
+                  <div className="text-xs font-bold">
+                    Unit {s.shop_number}
+                  </div>
                   <div className="text-[11px] text-slate-500">
                     {s.property_type} · {s.size_sqm} m²
                   </div>
@@ -316,38 +337,36 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
         <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6">
           <h2 className="text-sm font-bold mb-2">Subscription tiers</h2>
           <p className="text-xs text-slate-500 mb-4">
-            Tier definitions and current usage across the platform
+            Tier definitions from <code>subscriptionPlans.ts</code> — the
+            single source of truth for pricing and limits
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {(['Starter', 'Professional', 'Enterprise'] as const).map((tier) => {
-              const count = orgs.filter((o) => o.subscription_tier === tier).length;
-              const price =
-                tier === 'Starter' ? 1450 : tier === 'Professional' ? 3850 : 8900;
-              const limits =
-                tier === 'Starter'
-                  ? { props: 3, tenants: 100, users: 10, gb: 10 }
-                  : tier === 'Professional'
-                  ? { props: 10, tenants: 500, users: 50, gb: 50 }
-                  : { props: 999, tenants: 9999, users: 999, gb: 500 };
+            {plans.map((plan) => {
+              const count = orgs.filter(
+                (o) => o.subscription_tier === plan.tier
+              ).length;
               return (
                 <div
-                  key={tier}
+                  key={plan.tier}
                   className="p-5 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3"
                 >
                   <div className="text-xs font-bold text-blue-600 uppercase tracking-wider">
-                    {tier}
+                    {plan.tier}
                   </div>
                   <div className="text-2xl font-bold">
-                    E {price.toLocaleString()}
+                    E {plan.monthlyFeeE.toLocaleString()}
                     <span className="text-[10px] font-normal text-slate-500">
                       /mo
                     </span>
                   </div>
                   <ul className="text-[11px] text-slate-500 space-y-1">
-                    <li>• Up to {limits.props} properties</li>
-                    <li>• {limits.tenants} active tenants</li>
-                    <li>• {limits.users} staff logins</li>
-                    <li>• {limits.gb} GB storage</li>
+                    <li>
+                      • Up to {plan.propertyLimit} propert
+                      {plan.propertyLimit === 1 ? 'y' : 'ies'}
+                    </li>
+                    <li>• {plan.tenantLimit} active tenants</li>
+                    <li>• {plan.userLimit} staff logins</li>
+                    <li>• {plan.storageLimitGb} GB storage</li>
                   </ul>
                   <div className="pt-2 border-t border-slate-100 dark:border-slate-700 text-xs">
                     <span className="font-bold text-slate-900 dark:text-white">

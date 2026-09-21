@@ -1,12 +1,24 @@
-import React, { useState } from 'react';
+// src/components/tickets/TicketDetailModal.tsx
+import React, { useRef, useState } from 'react';
 import {
-  X, Clock, CheckCircle2, AlertTriangle, User, Wrench, Star, Send,
-  MessageSquare, ShieldCheck, RefreshCw,
+  X,
+  Clock,
+  CheckCircle2,
+  AlertTriangle,
+  User,
+  Wrench,
+  Star,
+  Send,
+  MessageSquare,
+  ShieldCheck,
+  RefreshCw,
+  Upload,
 } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { tickets as ticketsApi } from '../../services/api/tickets';
 import { ticketComments as commentsApi } from '../../services/api/ticketComments';
 import { profiles as profilesApi } from '../../services/api/profiles';
+import { uploadFile } from '../../services/storage';
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 
@@ -16,8 +28,16 @@ interface Props {
   onRefresh?: () => void;
 }
 
-export const TicketDetailModal: React.FC<Props> = ({ ticketId, onClose, onRefresh }) => {
+const MAX_AFTER_PHOTO_BYTES = 5 * 1024 * 1024;
+
+export const TicketDetailModal: React.FC<Props> = ({
+  ticketId,
+  onClose,
+  onRefresh,
+}) => {
   const currentUser = auth.getCurrentUser();
+  const orgId = currentUser?.organization_id ?? '';
+
   const [rating, setRating] = useState(5);
   const [feedback, setFeedback] = useState('');
   const [reopenReason, setReopenReason] = useState('');
@@ -26,15 +46,20 @@ export const TicketDetailModal: React.FC<Props> = ({ ticketId, onClose, onRefres
   const [materialsUsed, setMaterialsUsed] = useState('');
   const [hoursSpent, setHoursSpent] = useState('1.5');
   const [cost, setCost] = useState('450');
-  const [afterPhotoUrl, setAfterPhotoUrl] = useState('');
+  const [afterPhotoUrls, setAfterPhotoUrls] = useState<string[]>([]);
+  const [uploadingAfter, setUploadingAfter] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [selectedTechId, setSelectedTechId] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
+  const afterInputRef = useRef<HTMLInputElement>(null);
 
   const { data: ticket, loading } = useSupabaseQuery(
     ['tickets', 'detail', ticketId ?? ''],
-    () => (ticketId ? ticketsApi.get(ticketId) : Promise.reject(new Error('no id'))),
+    () =>
+      ticketId
+        ? ticketsApi.get(ticketId)
+        : Promise.reject(new Error('no id')),
     { enabled: !!ticketId }
   );
 
@@ -45,12 +70,12 @@ export const TicketDetailModal: React.FC<Props> = ({ ticketId, onClose, onRefres
   );
 
   const { data: technicians = [] } = useSupabaseQuery(
-    ['profiles', 'technicians', currentUser?.organization_id ?? ''],
+    ['profiles', 'technicians', orgId],
     () =>
       profilesApi
         .list()
         .then((list) => list.filter((u) => u.role === 'maintenance')),
-    { enabled: !!currentUser?.organization_id }
+    { enabled: !!orgId }
   );
 
   const confirm = useSupabaseMutation({
@@ -66,8 +91,13 @@ export const TicketDetailModal: React.FC<Props> = ({ ticketId, onClose, onRefres
   });
 
   const assign = useSupabaseMutation({
-    mutationFn: ({ techId, techName }: { techId: string; techName: string }) =>
-      ticketsApi.assign(ticketId!, techId, techName),
+    mutationFn: ({
+      techId,
+      techName,
+    }: {
+      techId: string;
+      techName: string;
+    }) => ticketsApi.assign(ticketId!, techId, techName),
     invalidateKeys: ['tickets', 'notifications'],
   });
 
@@ -79,21 +109,22 @@ export const TicketDetailModal: React.FC<Props> = ({ ticketId, onClose, onRefres
   const resolve = useSupabaseMutation({
     mutationFn: () =>
       ticketsApi.resolve(ticketId!, {
-        repair_notes: repairNotes || 'Completed repairs per safety standards.',
+        repair_notes:
+          repairNotes || 'Completed repairs per safety standards.',
         materials_used: materialsUsed || undefined,
         time_spent_hours: Number(hoursSpent) || undefined,
         cost: Number(cost) || undefined,
-        after_images: afterPhotoUrl ? [afterPhotoUrl] : [],
+        after_images: afterPhotoUrls,
       }),
     invalidateKeys: ['tickets', 'notifications', 'finance_transactions'],
   });
 
   const addComment = useSupabaseMutation({
-    mutationFn: ({ text }: { text: string }) => commentsApi.add(ticketId!, text),
+    mutationFn: ({ text }: { text: string }) =>
+      commentsApi.add(ticketId!, text),
     invalidateKeys: ['ticket_comments', 'tickets'],
   });
 
-  // Wrap every async action so errors surface and success closes/refreshes.
   const runAction = async (fn: () => Promise<unknown>) => {
     setActionError(null);
     setActionBusy(true);
@@ -122,15 +153,56 @@ export const TicketDetailModal: React.FC<Props> = ({ ticketId, onClose, onRefres
   const handleAssign = () => {
     const tech = technicians.find((t) => t.id === selectedTechId);
     if (!tech) return;
-    void runAction(() => assign.mutate({ techId: tech.id, techName: tech.name }));
+    void runAction(() =>
+      assign.mutate({ techId: tech.id, techName: tech.name })
+    );
   };
 
-  const handleAccept = () =>
-    runAction(() => accept.mutate(undefined as never));
+  const handleAccept = () => runAction(() => accept.mutate());
+
+  const handleAfterPhotoSelected = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    if (!ticketId || !orgId) return;
+
+    setActionError(null);
+    setUploadingAfter(true);
+    try {
+      const uploaded: string[] = [];
+      for (const file of Array.from(files)) {
+        if (file.size > MAX_AFTER_PHOTO_BYTES) {
+          throw new Error(
+            `"${file.name}" exceeds 5MB. Choose a smaller image.`
+          );
+        }
+        const { publicUrl, path } = await uploadFile({
+          bucket: 'ticket-attachments',
+          organizationId: orgId,
+          entityId: ticketId,
+          file,
+        });
+        uploaded.push(publicUrl ?? path);
+      }
+      setAfterPhotoUrls((prev) => [...prev, ...uploaded]);
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : 'Photo upload failed.'
+      );
+    } finally {
+      setUploadingAfter(false);
+      if (afterInputRef.current) afterInputRef.current.value = '';
+    }
+  };
+
+  const removeAfterPhoto = (url: string) => {
+    setAfterPhotoUrls((prev) => prev.filter((u) => u !== url));
+  };
 
   const handleResolve = () =>
     runAction(async () => {
-      await resolve.mutate(undefined as never);
+      await resolve.mutate();
       onClose();
     });
 
@@ -157,7 +229,9 @@ export const TicketDetailModal: React.FC<Props> = ({ ticketId, onClose, onRefres
   const diffMs = resDeadline.getTime() - now.getTime();
   const diffHours = Math.round(diffMs / (1000 * 60 * 60));
   const isBreached =
-    diffMs < 0 && ticket.status !== 'Resolved' && ticket.status !== 'Closed';
+    diffMs < 0 &&
+    ticket.status !== 'Resolved' &&
+    ticket.status !== 'Closed';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/80 backdrop-blur-sm overflow-y-auto">
@@ -196,8 +270,8 @@ export const TicketDetailModal: React.FC<Props> = ({ ticketId, onClose, onRefres
               {ticket.status === 'Closed' || ticket.status === 'Resolved'
                 ? 'Completed'
                 : isBreached
-                  ? `Breached (${Math.abs(diffHours)} hrs overdue)`
-                  : `${diffHours} hours remaining`}
+                ? `Breached (${Math.abs(diffHours)} hrs overdue)`
+                : `${diffHours} hours remaining`}
             </span>
           </div>
           <div className="text-[11px] text-slate-500">
@@ -213,19 +287,24 @@ export const TicketDetailModal: React.FC<Props> = ({ ticketId, onClose, onRefres
           )}
 
           <div>
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white">{ticket.title}</h2>
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+              {ticket.title}
+            </h2>
             <div className="mt-1 text-xs text-slate-500 space-y-0.5">
               <div>
                 Category: <strong>{ticket.category}</strong>
               </div>
               <div>
-                Assigned: <strong>{ticket.assigned_to_name || 'Unassigned'}</strong>
+                Assigned:{' '}
+                <strong>{ticket.assigned_to_name || 'Unassigned'}</strong>
               </div>
             </div>
           </div>
 
           <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border text-xs space-y-2">
-            <div className="font-semibold text-[10px] uppercase tracking-wider">Description</div>
+            <div className="font-semibold text-[10px] uppercase tracking-wider">
+              Description
+            </div>
             <p>{ticket.description}</p>
             {ticket.exact_location_description && (
               <p className="text-[11px] pt-2 border-t">
@@ -254,97 +333,101 @@ export const TicketDetailModal: React.FC<Props> = ({ ticketId, onClose, onRefres
             </div>
           )}
 
-          {/* Tenant confirmation */}
-          {ticket.status === 'Resolved' && currentUser?.role === 'tenant' && (
-            <div className="p-5 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/40 border-2 border-blue-400 space-y-4">
-              <div className="flex items-center gap-2 text-blue-900 dark:text-blue-200 font-bold text-sm">
-                <ShieldCheck className="w-5 h-5 text-blue-600" />
-                <span>Has the issue been fixed?</span>
-              </div>
+          {ticket.status === 'Resolved' &&
+            currentUser?.role === 'tenant' && (
+              <div className="p-5 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/40 border-2 border-blue-400 space-y-4">
+                <div className="flex items-center gap-2 text-blue-900 dark:text-blue-200 font-bold text-sm">
+                  <ShieldCheck className="w-5 h-5 text-blue-600" />
+                  <span>Has the issue been fixed?</span>
+                </div>
 
-              {!showReopenInput ? (
-                <>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-semibold">Rate:</span>
-                    <div className="flex gap-1">
-                      {[1, 2, 3, 4, 5].map((s) => (
-                        <button
-                          key={s}
-                          onClick={() => setRating(s)}
-                          className="p-1"
-                          type="button"
-                        >
-                          <Star
-                            className={`w-5 h-5 ${
-                              s <= rating ? 'fill-amber-400 text-amber-400' : 'text-slate-300'
-                            }`}
-                          />
-                        </button>
-                      ))}
+                {!showReopenInput ? (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-semibold">Rate:</span>
+                      <div className="flex gap-1">
+                        {[1, 2, 3, 4, 5].map((s) => (
+                          <button
+                            key={s}
+                            onClick={() => setRating(s)}
+                            className="p-1"
+                            type="button"
+                          >
+                            <Star
+                              className={`w-5 h-5 ${
+                                s <= rating
+                                  ? 'fill-amber-400 text-amber-400'
+                                  : 'text-slate-300'
+                              }`}
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <input
+                      value={feedback}
+                      onChange={(e) => setFeedback(e.target.value)}
+                      placeholder="Optional feedback"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 rounded-xl border text-xs"
+                    />
+                    <div className="flex gap-3">
+                      <button
+                        onClick={handleConfirm}
+                        disabled={actionBusy || confirm.loading}
+                        className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2"
+                        type="button"
+                      >
+                        <CheckCircle2 className="w-4 h-4" /> Yes, fixed
+                      </button>
+                      <button
+                        onClick={() => setShowReopenInput(true)}
+                        className="py-2.5 px-4 bg-red-100 hover:bg-red-200 text-red-700 font-bold text-xs rounded-xl flex items-center gap-1.5"
+                        type="button"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" /> Reopen
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-4 bg-red-50 dark:bg-red-950/40 rounded-xl border border-red-200 space-y-3">
+                    <textarea
+                      rows={2}
+                      value={reopenReason}
+                      onChange={(e) => setReopenReason(e.target.value)}
+                      placeholder="Why is it not fixed?"
+                      className="w-full px-3 py-2 rounded-xl border text-xs"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onClick={() => setShowReopenInput(false)}
+                        className="px-3 py-1.5 text-xs text-slate-600"
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleReopen}
+                        disabled={
+                          !reopenReason || actionBusy || reopen.loading
+                        }
+                        className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-xs rounded-xl font-semibold"
+                        type="button"
+                      >
+                        Reopen ticket
+                      </button>
                     </div>
                   </div>
-                  <input
-                    value={feedback}
-                    onChange={(e) => setFeedback(e.target.value)}
-                    placeholder="Optional feedback"
-                    className="w-full px-3 py-2 bg-white dark:bg-slate-900 rounded-xl border text-xs"
-                  />
-                  <div className="flex gap-3">
-                    <button
-                      onClick={handleConfirm}
-                      disabled={actionBusy || confirm.loading}
-                      className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2"
-                      type="button"
-                    >
-                      <CheckCircle2 className="w-4 h-4" /> Yes, fixed
-                    </button>
-                    <button
-                      onClick={() => setShowReopenInput(true)}
-                      className="py-2.5 px-4 bg-red-100 hover:bg-red-200 text-red-700 font-bold text-xs rounded-xl flex items-center gap-1.5"
-                      type="button"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" /> Reopen
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="p-4 bg-red-50 dark:bg-red-950/40 rounded-xl border border-red-200 space-y-3">
-                  <textarea
-                    rows={2}
-                    value={reopenReason}
-                    onChange={(e) => setReopenReason(e.target.value)}
-                    placeholder="Why is it not fixed?"
-                    className="w-full px-3 py-2 rounded-xl border text-xs"
-                  />
-                  <div className="flex justify-end gap-2">
-                    <button
-                      onClick={() => setShowReopenInput(false)}
-                      className="px-3 py-1.5 text-xs text-slate-600"
-                      type="button"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleReopen}
-                      disabled={!reopenReason || actionBusy || reopen.loading}
-                      className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-xs rounded-xl font-semibold"
-                      type="button"
-                    >
-                      Reopen ticket
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
 
-          {/* Technician actions */}
           {currentUser?.role === 'maintenance' &&
             ticket.status !== 'Closed' &&
             ticket.status !== 'Resolved' && (
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border space-y-3">
                 <div className="font-bold text-xs flex items-center gap-1.5">
-                  <Wrench className="w-4 h-4 text-blue-600" /> Technician actions
+                  <Wrench className="w-4 h-4 text-blue-600" /> Technician
+                  actions
                 </div>
                 {ticket.status === 'Open' ? (
                   <button
@@ -388,31 +471,75 @@ export const TicketDetailModal: React.FC<Props> = ({ ticketId, onClose, onRefres
                         className="px-3 py-2 rounded-xl border text-xs"
                       />
                     </div>
-                    <input
-                      value={afterPhotoUrl}
-                      onChange={(e) => setAfterPhotoUrl(e.target.value)}
-                      placeholder="After photo URL (optional)"
-                      className="w-full px-3 py-2 rounded-xl border text-xs"
-                    />
+
+                    {/* After-photo upload (replaces free-text URL) */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                          After photos
+                        </span>
+                        <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-[11px] font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-600">
+                          <Upload className="w-3 h-3" />
+                          {uploadingAfter ? 'Uploading…' : 'Add photo'}
+                          <input
+                            ref={afterInputRef}
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            disabled={uploadingAfter}
+                            onChange={handleAfterPhotoSelected}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+                      {afterPhotoUrls.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {afterPhotoUrls.map((url) => (
+                            <div
+                              key={url}
+                              className="relative w-16 h-16 rounded-lg overflow-hidden border"
+                            >
+                              <img
+                                src={url}
+                                alt="After repair"
+                                className="w-full h-full object-cover"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeAfterPhoto(url)}
+                                className="absolute top-0.5 right-0.5 p-0.5 rounded bg-black/60 text-white"
+                                aria-label="Remove photo"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
                     <button
                       onClick={handleResolve}
-                      disabled={actionBusy || resolve.loading}
+                      disabled={actionBusy || resolve.loading || uploadingAfter}
                       className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2"
                       type="button"
                     >
-                      <CheckCircle2 className="w-4 h-4" /> Complete job &amp; send to tenant
+                      <CheckCircle2 className="w-4 h-4" /> Complete job &amp;
+                      send to tenant
                     </button>
                   </div>
                 )}
               </div>
             )}
 
-          {/* Manager assign */}
-          {(currentUser?.role === 'property_manager' || currentUser?.role === 'admin') && (
+          {(currentUser?.role === 'property_manager' ||
+            currentUser?.role === 'admin') && (
             <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border flex flex-col sm:flex-row items-center justify-between gap-3">
               <div className="text-xs">
                 <strong>Assign technician:</strong>{' '}
-                <span className="text-slate-500">allocate to center maintenance team</span>
+                <span className="text-slate-500">
+                  allocate to center maintenance team
+                </span>
               </div>
               <div className="flex gap-2 w-full sm:w-auto">
                 <select
@@ -439,16 +566,19 @@ export const TicketDetailModal: React.FC<Props> = ({ ticketId, onClose, onRefres
             </div>
           )}
 
-          {/* Timeline */}
           <div>
-            <h4 className="text-xs font-bold uppercase tracking-wider mb-3">Audit trail</h4>
+            <h4 className="text-xs font-bold uppercase tracking-wider mb-3">
+              Audit trail
+            </h4>
             <div className="relative pl-6 space-y-4 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200 dark:before:bg-slate-700">
               {ticket.timeline.map((item) => (
                 <div key={item.id} className="relative">
                   <div className="absolute -left-6 top-1 w-2.5 h-2.5 rounded-full bg-blue-600 ring-4 ring-white dark:ring-slate-900" />
                   <div className="text-xs font-semibold">{item.title}</div>
                   {item.description && (
-                    <div className="text-[11px] text-slate-500">{item.description}</div>
+                    <div className="text-[11px] text-slate-500">
+                      {item.description}
+                    </div>
                   )}
                   <div className="text-[10px] text-slate-400 mt-0.5">
                     {item.actor_name} ({item.actor_role}) •{' '}
@@ -459,14 +589,16 @@ export const TicketDetailModal: React.FC<Props> = ({ ticketId, onClose, onRefres
             </div>
           </div>
 
-          {/* Comments */}
           <div className="border-t pt-4">
             <h4 className="text-xs font-bold uppercase tracking-wider mb-3 flex items-center gap-1.5">
-              <MessageSquare className="w-3.5 h-3.5 text-blue-600" /> Discussion
+              <MessageSquare className="w-3.5 h-3.5 text-blue-600" />{' '}
+              Discussion
             </h4>
             <div className="space-y-2.5 mb-3 max-h-48 overflow-y-auto">
               {comments.length === 0 ? (
-                <div className="text-xs text-slate-400 py-2">No comments yet.</div>
+                <div className="text-xs text-slate-400 py-2">
+                  No comments yet.
+                </div>
               ) : (
                 comments.map((c) => (
                   <div
@@ -502,7 +634,9 @@ export const TicketDetailModal: React.FC<Props> = ({ ticketId, onClose, onRefres
               />
               <button
                 type="submit"
-                disabled={!newComment.trim() || actionBusy || addComment.loading}
+                disabled={
+                  !newComment.trim() || actionBusy || addComment.loading
+                }
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-xl text-xs font-semibold flex items-center gap-1"
               >
                 <Send className="w-3.5 h-3.5" /> Send

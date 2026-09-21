@@ -1,3 +1,4 @@
+// src/components/dashboard/TicketsListView.tsx
 import React, { useMemo, useState } from 'react';
 import {
   Ticket as TicketIcon,
@@ -22,7 +23,7 @@ interface Props {
 type StatusChip = {
   key: string;
   label: string;
-  value: string | null; // null = "All"
+  value: string | null;
   priority?: string;
   tone: 'amber' | 'red' | 'blue' | 'emerald';
   icon: React.ComponentType<{ className?: string }>;
@@ -92,8 +93,8 @@ export const TicketsListView: React.FC<Props> = ({
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
 
   const { data: allTickets = [], loading, error } = useSupabaseQuery(
-    ['tickets', orgId],
-    () => ticketsApi.list(),
+    ['tickets', 'lite', orgId],
+    () => ticketsApi.listLite(),
     { enabled: !!orgId }
   );
 
@@ -106,10 +107,10 @@ export const TicketsListView: React.FC<Props> = ({
 
   const displayedTickets = useMemo(() => {
     return allTickets.filter((t) => {
-      // Tenant sees only their own.
       if (currentUser?.role === 'tenant') {
         const mineByUser = t.created_by_user_id === currentUser.id;
-        const mineByShop = !!currentUser.shop_id && t.shop_id === currentUser.shop_id;
+        const mineByShop =
+          !!currentUser.shop_id && t.shop_id === currentUser.shop_id;
         if (!mineByUser && !mineByShop) return false;
       }
       if (statusFilter !== 'All' && t.status !== statusFilter) return false;
@@ -158,7 +159,6 @@ export const TicketsListView: React.FC<Props> = ({
       setStatusFilter('All');
       return;
     }
-    // Resolved chip covers both Resolved and Closed.
     setStatusFilter(chip.value ?? 'All');
     setPriorityFilter('All');
   };
@@ -209,10 +209,10 @@ export const TicketsListView: React.FC<Props> = ({
             chip.key === 'open'
               ? counts.open
               : chip.key === 'emergency'
-                ? counts.emergency
-                : chip.key === 'progress'
-                  ? counts.progress
-                  : counts.resolved;
+              ? counts.emergency
+              : chip.key === 'progress'
+              ? counts.progress
+              : counts.resolved;
           const tone = CHIP_TONES[chip.tone];
           return (
             <button
@@ -227,7 +227,9 @@ export const TicketsListView: React.FC<Props> = ({
                 </span>
                 <Icon className={`w-4 h-4 ${tone.text}`} />
               </div>
-              <div className={`text-2xl font-bold ${tone.text}`}>{value}</div>
+              <div className={`text-2xl font-bold ${tone.text}`}>
+                {value}
+              </div>
             </button>
           );
         })}
@@ -326,10 +328,10 @@ export const TicketsListView: React.FC<Props> = ({
                         t.priority === 'Emergency'
                           ? 'bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300'
                           : t.priority === 'High'
-                            ? 'bg-orange-100 text-orange-800'
-                            : t.priority === 'Medium'
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-slate-100 text-slate-600'
+                          ? 'bg-orange-100 text-orange-800'
+                          : t.priority === 'Medium'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-slate-100 text-slate-600'
                       }`}
                     >
                       {t.priority}
@@ -353,8 +355,8 @@ export const TicketsListView: React.FC<Props> = ({
                         t.sla_status === 'Compliant'
                           ? 'text-emerald-600'
                           : t.sla_status === 'Warning'
-                            ? 'text-amber-600'
-                            : 'text-red-600'
+                          ? 'text-amber-600'
+                          : 'text-red-600'
                       }`}
                     >
                       {t.sla_status}

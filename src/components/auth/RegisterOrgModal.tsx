@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+// src/components/auth/RegisterOrgModal.tsx
+import React, { useMemo, useState } from 'react';
 import {
   X,
   Building2,
@@ -9,6 +10,7 @@ import {
   Calculator,
 } from 'lucide-react';
 import { organizations } from '../../services/api/organizations';
+import { subscriptionPlans } from '../../services/subscriptionPlans';
 import type { SubscriptionTier } from '../../types';
 
 interface Props {
@@ -51,12 +53,14 @@ export const RegisterOrgModal: React.FC<Props> = ({
   // Step 3
   const [tier, setTier] = useState<SubscriptionTier>('Professional');
 
-  if (!isOpen) return null;
+  const plans = useMemo(() => subscriptionPlans.list(), []);
 
-  const tierBaseFee =
-    tier === 'Starter' ? 1450 : tier === 'Professional' ? 3850 : 8900;
-  const rentRollFee = Math.round(estimatedMonthlyRental * 0.02);
-  const totalEstimate = tierBaseFee + rentRollFee;
+  const feePreview = useMemo(
+    () => subscriptionPlans.estimateMonthlyFee(tier, estimatedMonthlyRental),
+    [tier, estimatedMonthlyRental]
+  );
+
+  if (!isOpen) return null;
 
   const handleNext = (e: React.FormEvent) => {
     e.preventDefault();
@@ -157,10 +161,10 @@ export const RegisterOrgModal: React.FC<Props> = ({
               Application Submitted
             </h4>
             <p className="text-xs text-slate-600 dark:text-slate-300 max-w-md mx-auto">
-              <strong>{companyName}</strong> is now <em>Pending Approval</em>. Once a
-              Super Admin reviews your application and issues your organisation
-              code, you'll sign in with the password you chose during
-              registration.
+              <strong>{companyName}</strong> is now{' '}
+              <em>Pending Approval</em>. Once a Super Admin reviews your
+              application and issues your organisation code, you'll sign in
+              with the password you chose during registration.
             </p>
           </div>
         ) : (
@@ -272,26 +276,46 @@ export const RegisterOrgModal: React.FC<Props> = ({
 
                 <div>
                   <label className="block text-xs font-semibold mb-1.5 flex items-center gap-1.5">
-                    <Users className="w-3.5 h-3.5 text-blue-600" /> Estimated staff
-                    breakdown
+                    <Users className="w-3.5 h-3.5 text-blue-600" /> Estimated
+                    staff breakdown
                   </label>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {[
-                      { label: 'Managers', value: staffManagers, set: setStaffManagers },
-                      { label: 'Maintenance', value: staffMaintenance, set: setStaffMaintenance },
-                      { label: 'Finance', value: staffFinance, set: setStaffFinance },
-                      { label: 'General', value: staffGeneral, set: setStaffGeneral },
+                      {
+                        label: 'Managers',
+                        value: staffManagers,
+                        set: setStaffManagers,
+                      },
+                      {
+                        label: 'Maintenance',
+                        value: staffMaintenance,
+                        set: setStaffMaintenance,
+                      },
+                      {
+                        label: 'Finance',
+                        value: staffFinance,
+                        set: setStaffFinance,
+                      },
+                      {
+                        label: 'General',
+                        value: staffGeneral,
+                        set: setStaffGeneral,
+                      },
                     ].map((s) => (
                       <div
                         key={s.label}
                         className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
                       >
-                        <span className="text-[10px] text-slate-500">{s.label}</span>
+                        <span className="text-[10px] text-slate-500">
+                          {s.label}
+                        </span>
                         <input
                           type="number"
                           min={0}
                           value={s.value}
-                          onChange={(e) => s.set(Number(e.target.value) || 0)}
+                          onChange={(e) =>
+                            s.set(Number(e.target.value) || 0)
+                          }
                           className="w-full bg-transparent text-xs font-bold mt-1 focus:outline-none"
                         />
                       </div>
@@ -328,7 +352,7 @@ export const RegisterOrgModal: React.FC<Props> = ({
                       <option>Shopping Centre / Mall</option>
                       <option>Commercial Office Park</option>
                       <option>Industrial Logistics Park</option>
-                      <option>Mixed-use Retail & Office</option>
+                      <option>Mixed-use Retail &amp; Office</option>
                       <option>Strip Mall</option>
                     </select>
                   </div>
@@ -336,7 +360,9 @@ export const RegisterOrgModal: React.FC<Props> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold mb-1">Location</label>
+                    <label className="block text-xs font-semibold mb-1">
+                      Location
+                    </label>
                     <select
                       value={location}
                       onChange={(e) => setLocation(e.target.value)}
@@ -351,22 +377,30 @@ export const RegisterOrgModal: React.FC<Props> = ({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold mb-1">Total Units</label>
+                    <label className="block text-xs font-semibold mb-1">
+                      Total Units
+                    </label>
                     <input
                       type="number"
                       min={1}
                       value={unitCount}
-                      onChange={(e) => setUnitCount(Number(e.target.value) || 1)}
+                      onChange={(e) =>
+                        setUnitCount(Number(e.target.value) || 1)
+                      }
                       className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold mb-1">Active Tenants</label>
+                    <label className="block text-xs font-semibold mb-1">
+                      Active Tenants
+                    </label>
                     <input
                       type="number"
                       min={0}
                       value={tenantCount}
-                      onChange={(e) => setTenantCount(Number(e.target.value) || 0)}
+                      onChange={(e) =>
+                        setTenantCount(Number(e.target.value) || 0)
+                      }
                       className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs"
                     />
                   </div>
@@ -380,7 +414,9 @@ export const RegisterOrgModal: React.FC<Props> = ({
                     type="number"
                     min={0}
                     value={estimatedMonthlyRental}
-                    onChange={(e) => setEstimatedMonthlyRental(Number(e.target.value) || 0)}
+                    onChange={(e) =>
+                      setEstimatedMonthlyRental(Number(e.target.value) || 0)
+                    }
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs"
                   />
                 </div>
@@ -390,25 +426,30 @@ export const RegisterOrgModal: React.FC<Props> = ({
             {step === 3 && (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {(['Starter', 'Professional', 'Enterprise'] as SubscriptionTier[]).map(
-                    (t) => (
-                      <div
-                        key={t}
-                        onClick={() => setTier(t)}
-                        className={`p-4 rounded-xl border-2 cursor-pointer transition ${
-                          tier === t
-                            ? 'border-blue-600 bg-blue-50/50 dark:bg-blue-950/40'
-                            : 'border-slate-200 dark:border-slate-700'
-                        }`}
-                      >
-                        <div className="text-xs font-bold">{t}</div>
-                        <div className="text-lg font-extrabold text-blue-600 mt-1">
-                          E{t === 'Starter' ? '1,450' : t === 'Professional' ? '3,850' : '8,900'}
-                          <span className="text-[10px] text-slate-500 font-normal">/mo</span>
-                        </div>
+                  {plans.map((plan) => (
+                    <div
+                      key={plan.tier}
+                      onClick={() => setTier(plan.tier)}
+                      className={`p-4 rounded-xl border-2 cursor-pointer transition ${
+                        tier === plan.tier
+                          ? 'border-blue-600 bg-blue-50/50 dark:bg-blue-950/40'
+                          : 'border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      <div className="text-xs font-bold">{plan.name}</div>
+                      <div className="text-lg font-extrabold text-blue-600 mt-1">
+                        E{plan.monthlyFeeE.toLocaleString()}
+                        <span className="text-[10px] text-slate-500 font-normal">
+                          /mo
+                        </span>
                       </div>
-                    )
-                  )}
+                      <ul className="mt-2 space-y-0.5 text-[10px] text-slate-500">
+                        {plan.features.slice(0, 3).map((f) => (
+                          <li key={f}>• {f}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
                 </div>
 
                 <div className="p-4 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
@@ -418,17 +459,27 @@ export const RegisterOrgModal: React.FC<Props> = ({
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-xs pt-2 border-t border-slate-200 dark:border-slate-700">
                     <div>
-                      <div className="text-[10px] text-slate-500">Base Fee</div>
-                      <div className="font-bold">E{tierBaseFee.toLocaleString()}</div>
+                      <div className="text-[10px] text-slate-500">
+                        Base Fee
+                      </div>
+                      <div className="font-bold">
+                        E{feePreview.baseFee.toLocaleString()}
+                      </div>
                     </div>
                     <div>
-                      <div className="text-[10px] text-slate-500">Rent Roll (2%)</div>
-                      <div className="font-bold">E{rentRollFee.toLocaleString()}</div>
+                      <div className="text-[10px] text-slate-500">
+                        Rent Roll (2%)
+                      </div>
+                      <div className="font-bold">
+                        E{feePreview.rentRollFee.toLocaleString()}
+                      </div>
                     </div>
                     <div>
-                      <div className="text-[10px] text-slate-500">Monthly Est.</div>
+                      <div className="text-[10px] text-slate-500">
+                        Monthly Est.
+                      </div>
                       <div className="font-extrabold text-blue-600">
-                        E{totalEstimate.toLocaleString()}
+                        E{feePreview.total.toLocaleString()}
                       </div>
                     </div>
                   </div>

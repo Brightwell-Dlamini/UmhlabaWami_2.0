@@ -1,3 +1,4 @@
+// src/components/dashboard/MaintenancePortal.tsx
 import React, { useMemo, useState } from 'react';
 import { Wrench, Clock, Play, MapPin, AlertTriangle } from 'lucide-react';
 import { auth } from '../../services/auth';
@@ -21,8 +22,8 @@ export const MaintenancePortal: React.FC<Props> = ({ onViewTicket }) => {
   const [error, setError] = useState<string | null>(null);
 
   const { data: allTickets = [], loading } = useSupabaseQuery(
-    ['tickets', orgId],
-    () => ticketsApi.list(),
+    ['tickets', 'lite', orgId],
+    () => ticketsApi.listLite(),
     { enabled: !!orgId }
   );
 
@@ -39,7 +40,11 @@ export const MaintenancePortal: React.FC<Props> = ({ onViewTicket }) => {
   });
 
   const claim = useSupabaseMutation({
-    mutationFn: (args: { id: string; techId: string; techName: string }) =>
+    mutationFn: (args: {
+      id: string;
+      techId: string;
+      techName: string;
+    }) =>
       ticketsApi
         .assign(args.id, args.techId, args.techName)
         .then(() => ticketsApi.accept(args.id)),
@@ -71,8 +76,8 @@ export const MaintenancePortal: React.FC<Props> = ({ onViewTicket }) => {
     activeTab === 'my_jobs'
       ? myActiveJobs
       : activeTab === 'new_jobs'
-        ? unassignedNewJobs
-        : completedJobs;
+      ? unassignedNewJobs
+      : completedJobs;
 
   const handleClaim = async (ticketId: string) => {
     if (!currentUser) return;
@@ -87,7 +92,9 @@ export const MaintenancePortal: React.FC<Props> = ({ onViewTicket }) => {
       setActiveTab('my_jobs');
     } catch (e) {
       setError(
-        e instanceof Error ? `Could not claim: ${e.message}` : 'Could not claim ticket.'
+        e instanceof Error
+          ? `Could not claim: ${e.message}`
+          : 'Could not claim ticket.'
       );
     } finally {
       setClaimingId(null);
@@ -100,13 +107,16 @@ export const MaintenancePortal: React.FC<Props> = ({ onViewTicket }) => {
       await accept.mutate({ id: ticketId });
     } catch (e) {
       setError(
-        e instanceof Error ? `Could not accept: ${e.message}` : 'Could not accept ticket.'
+        e instanceof Error
+          ? `Could not accept: ${e.message}`
+          : 'Could not accept ticket.'
       );
     }
   };
 
   const emptyMessages: Record<QueueTab, string> = {
-    my_jobs: 'You have no active jobs. Check the Dispatch Pool for new work.',
+    my_jobs:
+      'You have no active jobs. Check the Dispatch Pool for new work.',
     new_jobs: 'No unassigned tickets right now. Nice work.',
     completed: 'No completed jobs yet.',
   };
@@ -127,8 +137,12 @@ export const MaintenancePortal: React.FC<Props> = ({ onViewTicket }) => {
         </div>
         <div className="flex items-center gap-3 text-xs bg-black/20 px-3 py-2 rounded-xl">
           <div>
-            <div className="text-[10px] text-amber-200 uppercase">Active</div>
-            <div className="text-lg font-extrabold">{myActiveJobs.length}</div>
+            <div className="text-[10px] text-amber-200 uppercase">
+              Active
+            </div>
+            <div className="text-lg font-extrabold">
+              {myActiveJobs.length}
+            </div>
           </div>
           <div className="w-px h-8 bg-amber-400/30" />
           <div>
@@ -203,8 +217,8 @@ export const MaintenancePortal: React.FC<Props> = ({ onViewTicket }) => {
                       t.priority === 'Emergency'
                         ? 'bg-red-600 text-white'
                         : t.priority === 'High'
-                          ? 'bg-amber-500 text-white'
-                          : 'bg-slate-100 dark:bg-slate-700'
+                        ? 'bg-amber-500 text-white'
+                        : 'bg-slate-100 dark:bg-slate-700'
                     }`}
                   >
                     {t.priority}
@@ -223,7 +237,9 @@ export const MaintenancePortal: React.FC<Props> = ({ onViewTicket }) => {
                 <div className="flex items-center justify-between text-[11px] p-2 bg-blue-50 dark:bg-blue-950/40 rounded-xl">
                   <div className="flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5" />
-                    <span>{new Date(t.resolution_deadline).toLocaleString()}</span>
+                    <span>
+                      {new Date(t.resolution_deadline).toLocaleString()}
+                    </span>
                   </div>
                   <span className="font-bold">{t.sla_status}</span>
                 </div>

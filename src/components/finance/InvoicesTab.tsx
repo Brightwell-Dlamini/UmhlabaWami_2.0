@@ -1,3 +1,4 @@
+// src/components/finance/InvoicesTab.tsx
 import React, { useMemo, useState } from 'react';
 import {
   FileText,
@@ -38,7 +39,11 @@ export function InvoicesTab() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
 
-  const showFeedback = (text: string, tone: 'ok' | 'error' = 'ok', ms = 3500) => {
+  const showFeedback = (
+    text: string,
+    tone: 'ok' | 'error' = 'ok',
+    ms = 3500
+  ) => {
     setFeedback(text);
     setFeedbackTone(tone);
     setTimeout(() => setFeedback(null), ms);
@@ -118,17 +123,23 @@ export function InvoicesTab() {
 
   const handleBulkGenerate = async () => {
     try {
-      const n = await bulkGenerate.mutate(undefined as never);
+      const n = await bulkGenerate.mutate();
       const period = new Date();
       const label = period.toLocaleString(undefined, {
         month: 'long',
         year: 'numeric',
       });
       showFeedback(
-        n > 0 ? `Generated ${n} rent invoice${n === 1 ? '' : 's'} for ${label}.` : `No invoices generated for ${label}.`
+        n > 0
+          ? `Generated ${n} rent invoice${n === 1 ? '' : 's'} for ${label}.`
+          : `No invoices generated for ${label}.`
       );
     } catch (e) {
-      showFeedback(e instanceof Error ? e.message : 'Failed to generate invoices.', 'error', 5000);
+      showFeedback(
+        e instanceof Error ? e.message : 'Failed to generate invoices.',
+        'error',
+        5000
+      );
     }
   };
 
@@ -137,25 +148,39 @@ export function InvoicesTab() {
       await recordPayment.mutate({ invoice });
       showFeedback(`Payment recorded for ${invoice.invoice_number}.`);
     } catch (e) {
-      showFeedback(e instanceof Error ? e.message : 'Failed to record payment.', 'error', 5000);
+      showFeedback(
+        e instanceof Error ? e.message : 'Failed to record payment.',
+        'error',
+        5000
+      );
     }
   };
 
   const handleDelete = async (inv: Invoice) => {
-    if (!confirm(`Delete invoice ${inv.invoice_number}? This cannot be undone.`)) {
+    if (
+      !confirm(
+        `Delete invoice ${inv.invoice_number}? This cannot be undone.`
+      )
+    ) {
       return;
     }
     try {
       await deleteInvoice.mutate(inv.id);
       showFeedback(`Invoice ${inv.invoice_number} deleted.`);
     } catch (e) {
-      showFeedback(e instanceof Error ? e.message : 'Failed to delete invoice.', 'error', 5000);
+      showFeedback(
+        e instanceof Error ? e.message : 'Failed to delete invoice.',
+        'error',
+        5000
+      );
     }
   };
 
   if (!orgId) {
     return (
-      <div className="p-6 text-slate-500 text-sm">No organisation context.</div>
+      <div className="p-6 text-slate-500 text-sm">
+        No organisation context.
+      </div>
     );
   }
 
@@ -239,7 +264,10 @@ export function InvoicesTab() {
             <tbody className="divide-y">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-8 text-center text-slate-400">
+                  <td
+                    colSpan={9}
+                    className="p-8 text-center text-slate-400"
+                  >
                     No invoices match your filters.
                   </td>
                 </tr>
@@ -254,8 +282,12 @@ export function InvoicesTab() {
                     </td>
                     <td className="px-4 py-3">{inv.tenant_name}</td>
                     <td className="px-4 py-3">{inv.shop_number ?? '—'}</td>
-                    <td className="px-4 py-3 text-slate-500">{inv.issue_date}</td>
-                    <td className="px-4 py-3 text-slate-500">{inv.due_date}</td>
+                    <td className="px-4 py-3 text-slate-500">
+                      {inv.issue_date}
+                    </td>
+                    <td className="px-4 py-3 text-slate-500">
+                      {inv.due_date}
+                    </td>
                     <td className="px-4 py-3">
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusTone(
@@ -288,16 +320,17 @@ export function InvoicesTab() {
                         >
                           View
                         </button>
-                        {inv.status !== 'Paid' && inv.status !== 'Cancelled' && (
-                          <button
-                            onClick={() => handleRecordPayment(inv)}
-                            disabled={recordPayment.loading}
-                            className="text-[11px] font-semibold text-emerald-600 hover:underline disabled:opacity-60"
-                            type="button"
-                          >
-                            Record payment
-                          </button>
-                        )}
+                        {inv.status !== 'Paid' &&
+                          inv.status !== 'Cancelled' && (
+                            <button
+                              onClick={() => handleRecordPayment(inv)}
+                              disabled={recordPayment.loading}
+                              className="text-[11px] font-semibold text-emerald-600 hover:underline disabled:opacity-60"
+                              type="button"
+                            >
+                              Record payment
+                            </button>
+                          )}
                         <button
                           onClick={() => handleDelete(inv)}
                           disabled={deleteInvoice.loading}
@@ -397,16 +430,22 @@ function InvoiceViewer({
         <div className="p-6 space-y-4 text-xs">
           <div className="flex justify-between">
             <div>
-              <div className="text-[10px] text-slate-400 uppercase">Billed to</div>
+              <div className="text-[10px] text-slate-400 uppercase">
+                Billed to
+              </div>
               <div className="font-bold">{invoice.tenant_name}</div>
               <div className="text-slate-500">
                 Unit {shop?.shop_number ?? '—'}
               </div>
             </div>
             <div className="text-right">
-              <div className="text-[10px] text-slate-400 uppercase">Issued</div>
+              <div className="text-[10px] text-slate-400 uppercase">
+                Issued
+              </div>
               <div>{invoice.issue_date}</div>
-              <div className="text-[10px] text-slate-400 uppercase mt-1">Due</div>
+              <div className="text-[10px] text-slate-400 uppercase mt-1">
+                Due
+              </div>
               <div>{invoice.due_date}</div>
             </div>
           </div>
@@ -429,7 +468,9 @@ function InvoiceViewer({
                   </tr>
                 ))}
                 <tr className="bg-slate-50 dark:bg-slate-800/40">
-                  <td className="p-2.5 text-right text-slate-500">Subtotal</td>
+                  <td className="p-2.5 text-right text-slate-500">
+                    Subtotal
+                  </td>
                   <td className="p-2.5 text-right">
                     E{invoice.subtotal.toLocaleString()}
                   </td>
@@ -458,7 +499,8 @@ function InvoiceViewer({
                       Balance due
                     </td>
                     <td className="p-2.5 text-right text-amber-700 dark:text-amber-300">
-                      E{(invoice.total - invoice.amount_paid).toLocaleString()}
+                      E
+                      {(invoice.total - invoice.amount_paid).toLocaleString()}
                     </td>
                   </tr>
                 )}
@@ -470,9 +512,12 @@ function InvoiceViewer({
             <div className="font-bold">Banking details</div>
             <div>Bank: {BANKING_DETAILS.bank}</div>
             <div>
-              Account #: {BANKING_DETAILS.account} • Branch: {BANKING_DETAILS.branch}
+              Account #: {BANKING_DETAILS.account} • Branch:{' '}
+              {BANKING_DETAILS.branch}
             </div>
-            <div className="text-slate-400">Ref: {invoice.invoice_number}</div>
+            <div className="text-slate-400">
+              Ref: {invoice.invoice_number}
+            </div>
           </div>
         </div>
       </div>

@@ -1,3 +1,4 @@
+// src/services/api/invoices.ts
 import { sb, unwrap, requireOrgId } from './_helpers';
 import type { Invoice, InvoiceType, PaymentRecord } from '../../types';
 
@@ -16,6 +17,20 @@ export interface CreateInvoiceInput {
   tax_rate?: number;
   lines: InvoiceLineInput[];
   notes?: string;
+}
+
+/**
+ * Extend a YYYY-MM-DD string to the inclusive end of that UTC day.
+ * Used when filtering timestamp columns by date range.
+ */
+function endOfDayUtc(iso: string): string {
+  if (iso.includes('T')) return iso;
+  return `${iso}T23:59:59.999Z`;
+}
+
+function startOfDayUtc(iso: string): string {
+  if (iso.includes('T')) return iso;
+  return `${iso}T00:00:00.000Z`;
 }
 
 export const invoices = {
@@ -68,6 +83,27 @@ export const invoices = {
     if (args.amount <= 0) {
       throw new Error('Payment amount must be greater than zero.');
     }
+
+    // Client-side guard: fetch fresh invoice to compute remaining balance.
+    // The RPC must ALSO re-check inside its transaction — this is defence
+    // in depth, not a substitute for a server-side check.
+    const { data: invRow, error: loadErr } = await sb()
+      .from('invoices')
+      .select('total, amount_paid, status')
+      .eq('id', invoiceId)
+      .single();
+    if (loadErr) throw new Error(loadErr.message);
+
+    const remaining = Number(invRow.total) - Number(invRow.amount_paid);
+    if (remaining <= 0) {
+      throw new Error('Invoice is already fully settled.');
+    }
+    if (args.amount > remaining + 0.01) {
+      throw new Error(
+        `Payment exceeds outstanding balance (E${remaining.toFixed(2)}).`
+      );
+    }
+
     const { data, error } = await sb().rpc('record_payment', {
       p_invoice_id: invoiceId,
       p_amount: args.amount,
@@ -105,6 +141,10 @@ export const invoices = {
 };
 
 export const payments = {
+  /**
+   * Payments for a tenant in [from, to] inclusive on both ends.
+   * `paid_at` is a timestamp, so `to` is widened to end-of-UTC-day.
+   */
   async listForTenant(
     tenantId: string,
     from: string,
@@ -114,8 +154,8 @@ export const payments = {
       .from('payment_records')
       .select('*')
       .eq('tenant_id', tenantId)
-      .gte('paid_at', from)
-      .lte('paid_at', to)
+      .gte('paid_at', startOfDayUtc(from))
+      .lte('paid_at', endOfDayUtc(to))
       .order('paid_at', { ascending: true });
     return unwrap(result) as unknown as PaymentRecord[];
   },

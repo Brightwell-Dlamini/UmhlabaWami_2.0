@@ -1,3 +1,4 @@
+// src/components/ops/PreventiveMaintenanceView.tsx
 import React, { useState } from 'react';
 import { CalendarClock, Plus } from 'lucide-react';
 import { auth } from '../../services/auth';
@@ -25,9 +26,11 @@ export function PreventiveMaintenanceView() {
   const [frequency, setFrequency] = useState(90);
   const [feedback, setFeedback] = useState<string | null>(null);
 
-  const { data: tasks = [] } = useSupabaseQuery(['pm', orgId], () => pmApi.list(), {
-    enabled: !!orgId,
-  });
+  const { data: tasks = [] } = useSupabaseQuery(
+    ['pm', orgId],
+    () => pmApi.list(),
+    { enabled: !!orgId }
+  );
 
   useRealtime({
     table: 'preventive_maintenance',
@@ -71,16 +74,23 @@ export function PreventiveMaintenanceView() {
   });
 
   if (!orgId) {
-    return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
+    return (
+      <div className="p-6 text-slate-500 text-sm">
+        No organisation context.
+      </div>
+    );
   }
 
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div>
         <h1 className="text-2xl font-semibold flex items-center gap-2">
-          <CalendarClock className="w-6 h-6 text-blue-600" /> Preventive maintenance
+          <CalendarClock className="w-6 h-6 text-blue-600" /> Preventive
+          maintenance
         </h1>
-        <p className="text-sm text-slate-500 mt-1">Recurring facility schedules</p>
+        <p className="text-sm text-slate-500 mt-1">
+          Recurring facility schedules
+        </p>
       </div>
 
       {feedback && (
@@ -118,7 +128,7 @@ export function PreventiveMaintenanceView() {
               title="Frequency (days)"
             />
             <button
-              onClick={() => add.mutate(undefined as never)}
+              onClick={() => add.mutate()}
               disabled={!title.trim() || add.loading}
               className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-60"
               type="button"
@@ -144,7 +154,10 @@ export function PreventiveMaintenanceView() {
           <tbody className="divide-y">
             {tasks.length === 0 ? (
               <tr>
-                <td colSpan={6} className="p-8 text-center text-slate-400 text-xs">
+                <td
+                  colSpan={6}
+                  className="p-8 text-center text-slate-400 text-xs"
+                >
                   No PM tasks yet.
                 </td>
               </tr>
@@ -160,7 +173,9 @@ export function PreventiveMaintenanceView() {
                   <td className="px-4 py-3">
                     <span
                       className={
-                        t.status === 'Overdue' ? 'text-red-600 font-semibold' : ''
+                        t.status === 'Overdue'
+                          ? 'text-red-600 font-semibold'
+                          : ''
                       }
                     >
                       {t.status}
@@ -177,7 +192,8 @@ export function PreventiveMaintenanceView() {
                     </button>
                     <button
                       onClick={() => {
-                        if (confirm('Delete this PM task?')) remove.mutate(t.id);
+                        if (confirm('Delete this PM task?'))
+                          remove.mutate(t.id);
                       }}
                       disabled={remove.loading}
                       className="text-red-500 hover:underline text-xs disabled:opacity-60"

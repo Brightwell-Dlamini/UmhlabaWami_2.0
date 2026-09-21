@@ -1,3 +1,4 @@
+// src/services/api/tickets.ts
 import { sb, unwrap, requireOrgId, requireUser } from './_helpers';
 import type {
   Ticket,
@@ -11,6 +12,39 @@ const TICKET_SELECT = `
   timeline:ticket_timeline(*),
   attachments:ticket_attachments(*)
 `;
+
+/**
+ * Slim projection for list views. No timeline/attachments join.
+ * Order of columns is not important — only what's included.
+ */
+const TICKET_LITE_SELECT = `
+  id,
+  ticket_number,
+  organization_id,
+  shopping_center_id,
+  property_id,
+  shop_id, exact_location_description,
+  tenant_id,
+  title,
+  description,
+  priority,
+  category,
+  status,
+  assigned_to,
+  assigned_to_name,
+  created_by_user_id,
+  created_at,
+  response_deadline,
+  resolution_deadline,
+  responded_at,
+  resolved_at,
+  closed_at,
+  sla_status,
+  tenant_confirmed_fixed
+`;
+
+/** Lite variant — everything except timeline, attachments, image arrays, costs. */
+export type TicketListItem = Omit<Ticket, 'timeline' | 'attachments'>;
 
 export interface CreateTicketInput {
   shopping_center_id: string;
@@ -26,6 +60,7 @@ export interface CreateTicketInput {
 }
 
 export const tickets = {
+  /** Full graph — use only in the detail modal. */
   async list(orgId = requireOrgId()): Promise<Ticket[]> {
     const result = await sb()
       .from('tickets')
@@ -33,6 +68,19 @@ export const tickets = {
       .eq('organization_id', orgId)
       .order('created_at', { ascending: false });
     return unwrap(result) as unknown as Ticket[];
+  },
+
+  /**
+   * Slim list for dashboards and list views. No timeline/attachments join.
+   * Returns a TicketListItem[] where the heavy fields are absent.
+   */
+  async listLite(orgId = requireOrgId()): Promise<TicketListItem[]> {
+    const result = await sb()
+      .from('tickets')
+      .select(TICKET_LITE_SELECT)
+      .eq('organization_id', orgId)
+      .order('created_at', { ascending: false });
+    return unwrap(result) as unknown as TicketListItem[];
   },
 
   async get(id: string): Promise<Ticket> {

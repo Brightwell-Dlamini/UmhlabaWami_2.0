@@ -1,3 +1,4 @@
+// src/components/finance/CommercialEngineView.tsx
 import React, { useMemo, useState } from 'react';
 import { FileText, Download, Plus } from 'lucide-react';
 import { auth } from '../../services/auth';
@@ -79,20 +80,30 @@ export function CommercialEngineView() {
 
   const reconcile = useSupabaseMutation({
     mutationFn: (id: string) => bankApi.reconcile(id),
-    invalidateKeys: ['bank_transactions'],
+    invalidateKeys: ['bank_transactions', 'finance_transactions'],
   });
 
   const unreconcile = useSupabaseMutation({
     mutationFn: (id: string) => bankApi.unreconcile(id),
-    invalidateKeys: ['bank_transactions'],
+    invalidateKeys: ['bank_transactions', 'finance_transactions'],
   });
 
   const handleGenerate = async () => {
     try {
-      const n = await generate.mutate(undefined as never);
-      showMessage(`Generated ${n} rent invoices.`);
+      const n = await generate.mutate();
+      if (n === 0) {
+        showMessage('No invoices to generate for the next period.', 3500);
+      } else {
+        showMessage(
+          `Generated ${n} rent invoice${n === 1 ? '' : 's'}.`,
+          3500
+        );
+      }
     } catch (e) {
-      showMessage(e instanceof Error ? `Failed: ${e.message}` : 'Failed to generate.', 5000);
+      showMessage(
+        e instanceof Error ? `Failed: ${e.message}` : 'Failed to generate.',
+        5000
+      );
     }
   };
 
@@ -101,7 +112,12 @@ export function CommercialEngineView() {
       await recordPayment.mutate(invoiceId);
       showMessage('Payment recorded.');
     } catch (e) {
-      showMessage(e instanceof Error ? `Failed: ${e.message}` : 'Failed to record payment.', 5000);
+      showMessage(
+        e instanceof Error
+          ? `Failed: ${e.message}`
+          : 'Failed to record payment.',
+        5000
+      );
     }
   };
 
@@ -115,7 +131,10 @@ export function CommercialEngineView() {
         showMessage('Reconciled.', 2500);
       }
     } catch (e) {
-      showMessage(e instanceof Error ? `Failed: ${e.message}` : 'Failed to update.', 5000);
+      showMessage(
+        e instanceof Error ? `Failed: ${e.message}` : 'Failed to update.',
+        5000
+      );
     }
   };
 
@@ -151,7 +170,11 @@ export function CommercialEngineView() {
   };
 
   if (!orgId) {
-    return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
+    return (
+      <div className="p-6 text-slate-500 text-sm">
+        No organisation context.
+      </div>
+    );
   }
 
   return (
@@ -195,13 +218,26 @@ export function CommercialEngineView() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: 'Invoices', value: totals.count },
-          { label: 'Collected', value: `E${totals.collected.toLocaleString()}` },
-          { label: 'Outstanding', value: `E${totals.outstanding.toLocaleString()}` },
+          {
+            label: 'Collected',
+            value: `E${totals.collected.toLocaleString()}`,
+          },
+          {
+            label: 'Outstanding',
+            value: `E${totals.outstanding.toLocaleString()}`,
+          },
           { label: 'Overdue', value: totals.overdue },
         ].map((c) => (
-          <div key={c.label} className="rounded-xl border bg-white dark:bg-slate-900 p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">{c.label}</p>
-            <p className="mt-2 text-2xl font-semibold tabular-nums">{c.value}</p>
+          <div
+            key={c.label}
+            className="rounded-xl border bg-white dark:bg-slate-900 p-4"
+          >
+            <p className="text-xs uppercase tracking-wide text-slate-500">
+              {c.label}
+            </p>
+            <p className="mt-2 text-2xl font-semibold tabular-nums">
+              {c.value}
+            </p>
           </div>
         ))}
       </div>
@@ -223,14 +259,19 @@ export function CommercialEngineView() {
           <tbody className="divide-y">
             {invoices.length === 0 ? (
               <tr>
-                <td colSpan={8} className="p-6 text-center text-slate-400 text-xs">
+                <td
+                  colSpan={8}
+                  className="p-6 text-center text-slate-400 text-xs"
+                >
                   No invoices yet.
                 </td>
               </tr>
             ) : (
               invoices.map((inv) => (
                 <tr key={inv.id}>
-                  <td className="px-4 py-3 font-mono text-xs">{inv.invoice_number}</td>
+                  <td className="px-4 py-3 font-mono text-xs">
+                    {inv.invoice_number}
+                  </td>
                   <td className="px-4 py-3">{inv.tenant_name}</td>
                   <td className="px-4 py-3">{inv.shop_number || '—'}</td>
                   <td className="px-4 py-3">{inv.due_date}</td>
@@ -276,7 +317,10 @@ export function CommercialEngineView() {
             <tbody className="divide-y">
               {bankLines.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="p-6 text-center text-slate-400 text-xs">
+                  <td
+                    colSpan={5}
+                    className="p-6 text-center text-slate-400 text-xs"
+                  >
                     No bank lines.
                   </td>
                 </tr>
@@ -291,7 +335,9 @@ export function CommercialEngineView() {
                     </td>
                     <td className="px-4 py-3">
                       <button
-                        onClick={() => handleReconcileToggle(l.id, l.reconciled)}
+                        onClick={() =>
+                          handleReconcileToggle(l.id, l.reconciled)
+                        }
                         className={`text-xs font-medium ${
                           l.reconciled ? 'text-emerald-600' : 'text-slate-500'
                         }`}

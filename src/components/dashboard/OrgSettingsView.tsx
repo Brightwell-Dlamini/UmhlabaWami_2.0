@@ -1,3 +1,4 @@
+// src/components/dashboard/OrgSettingsView.tsx
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Building2,
@@ -62,7 +63,6 @@ export function OrgSettingsView() {
     enabled: !!orgId,
   });
 
-  // Prefer the fetched row, fall back to auth cache for instant paint.
   const activeOrg: Organization | null = org ?? cachedOrg;
 
   const [form, setForm] = useState<SettingsFormState>(() =>
@@ -75,9 +75,9 @@ export function OrgSettingsView() {
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
 
-  // Sync form when org row arrives / changes.
   useEffect(() => {
     if (activeOrg) setForm(initialFormFromOrg(activeOrg));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeOrg?.id, activeOrg?.company_name]);
 
   const updateOrg = useSupabaseMutation({
@@ -115,19 +115,10 @@ export function OrgSettingsView() {
 
   const handleSelectTier = async (tier: SubscriptionTier) => {
     if (!orgId) return;
-    const plan = plans.find((p) => p.tier === tier);
     try {
-      // Tier limits are driven by subscriptionPlans (client config).
-      // The org row stores the chosen tier key — the limits get synced
-      // by the backend when the RPC migration runs.
+      // Server-side tier change only. Plan pricing/limits are the concern
+      // of subscriptionPlans.ts, not of org state.
       await updateOrg.mutate({ subscription_tier: tier });
-      // Update local plan config so subsequent UI shows new limits.
-      subscriptionPlans.update(tier, {
-        propertyLimit: plan?.propertyLimit,
-        tenantLimit: plan?.tenantLimit,
-        userLimit: plan?.userLimit,
-        storageLimitGb: plan?.storageLimitGb,
-      });
       setShowPlanModal(false);
       flash(`Subscription tier updated to ${tier}.`);
     } catch (err) {
@@ -152,9 +143,9 @@ export function OrgSettingsView() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `umhlaba_wami_org_${activeOrg.organization_code || activeOrg.id}_${new Date()
-      .toISOString()
-      .slice(0, 10)}.json`;
+    a.download = `umhlaba_wami_org_${
+      activeOrg.organization_code || activeOrg.id
+    }_${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -165,7 +156,9 @@ export function OrgSettingsView() {
 
   if (!orgId) {
     return (
-      <div className="p-6 text-slate-500 text-sm">No organisation context.</div>
+      <div className="p-6 text-slate-500 text-sm">
+        No organisation context.
+      </div>
     );
   }
   if (!activeOrg) {
@@ -179,7 +172,6 @@ export function OrgSettingsView() {
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Header */}
       <div>
         <div className="flex items-center gap-2">
           <Building2 className="w-5 h-5 text-blue-600" />
@@ -195,7 +187,7 @@ export function OrgSettingsView() {
 
       {saveNotice && (
         <div
-          className={`p-3 rounded-xl text-xs flex items-center gap-2 animate-in fade-in ${
+          className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
             saveNotice.tone === 'ok'
               ? 'bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
               : 'bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-800 text-red-800 dark:text-red-200'
@@ -211,7 +203,7 @@ export function OrgSettingsView() {
       )}
 
       {exportNotice && (
-        <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-300 dark:border-blue-800 text-blue-800 dark:text-blue-200 rounded-xl text-xs flex items-center gap-2 animate-in fade-in">
+        <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-300 dark:border-blue-800 text-blue-800 dark:text-blue-200 rounded-xl text-xs flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 shrink-0 text-blue-600" />
           <span>{exportNotice}</span>
         </div>
@@ -236,7 +228,8 @@ export function OrgSettingsView() {
           </h3>
           <p className="text-xs text-blue-100">
             Portfolio Capacity: Up to {currentPlan?.propertyLimit ?? '—'}{' '}
-            Commercial Centers • {currentPlan?.tenantLimit ?? '—'} Active Tenants
+            Commercial Centers • {currentPlan?.tenantLimit ?? '—'} Active
+            Tenants
           </p>
         </div>
 
@@ -257,10 +250,7 @@ export function OrgSettingsView() {
 
       {/* Settings Form */}
       <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
-        <form
-          onSubmit={handleSave}
-          className="space-y-6 max-w-3xl text-xs"
-        >
+        <form onSubmit={handleSave} className="space-y-6 max-w-3xl text-xs">
           <div>
             <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2 border-b border-slate-100 dark:border-slate-700 pb-2">
               <Building2 className="w-4 h-4 text-blue-600" />
@@ -356,7 +346,6 @@ export function OrgSettingsView() {
             </div>
           </div>
 
-          {/* Operational Defaults */}
           <div className="pt-2">
             <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2 border-b border-slate-100 dark:border-slate-700 pb-2">
               <Sliders className="w-4 h-4 text-blue-600" />
@@ -445,16 +434,14 @@ export function OrgSettingsView() {
         </form>
       </div>
 
-      {/* Data Export */}
       <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
         <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2 border-b border-slate-100 dark:border-slate-700 pb-2">
           <Shield className="w-4 h-4 text-blue-600" />
           <span>Data Export</span>
         </h2>
         <p className="text-xs text-slate-500 mt-2">
-          Download a JSON snapshot of your organisation profile. Full
-          portfolio data can be exported as CSV from the Analytics &amp;
-          Reports view.
+          Download a JSON snapshot of your organisation profile. Full portfolio
+          data can be exported as CSV from the Analytics &amp; Reports view.
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
@@ -474,7 +461,6 @@ export function OrgSettingsView() {
 
           <button
             onClick={() => {
-              // Deep-link to the Analytics view via hash, which OperationsApp reads.
               window.location.hash = 'tab=analytics_reports';
             }}
             className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-blue-500 dark:hover:border-blue-500 bg-slate-50 dark:bg-slate-900/50 flex flex-col items-center justify-center gap-2 text-center transition group"
@@ -494,7 +480,7 @@ export function OrgSettingsView() {
       {/* Subscription Tier Modal */}
       {showPlanModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-xl border border-slate-200 dark:border-slate-700 space-y-4 animate-in fade-in zoom-in-95">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-xl border border-slate-200 dark:border-slate-700 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
               <h2 className="text-base font-bold text-slate-900 dark:text-white">
                 Select Subscription Plan Tier
