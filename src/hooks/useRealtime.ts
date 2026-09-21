@@ -32,7 +32,9 @@ export function useRealtime({ table, filter, invalidateKeys, enabled = true }: O
         'postgres_changes',
         { event: '*', schema: 'public', table, ...(filter ? { filter } : {}) },
         () => {
-          // One-shot invalidation; query layer refetches once via needsRefetch
+          // Mark caches stale. Actual network refetch is gated by
+          // useSupabaseQuery on document visibility — so switching Chrome
+          // tabs / minimising the browser never triggers a UI reload.
           keysRef.current.forEach((k) => invalidate(k));
         }
       )

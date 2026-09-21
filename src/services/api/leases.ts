@@ -11,6 +11,7 @@ export interface LeaseInput {
   renewal_status: Lease['renewal_status'];
   document_title: string;
   document_url?: string;
+  terms_body?: string;
 }
 
 export const leases = {
@@ -47,7 +48,13 @@ export const leases = {
       p_renewal_status: input.renewal_status,
     });
     if (error) throw new Error(error.message);
-    return data as unknown as Lease;
+    let lease = data as unknown as Lease;
+    if (input.terms_body) {
+      lease = await this.update(lease.id, {
+        terms_body: input.terms_body,
+      } as Partial<Lease>);
+    }
+    return lease;
   },
 
   async update(id: string, patch: Partial<Lease>): Promise<Lease> {
