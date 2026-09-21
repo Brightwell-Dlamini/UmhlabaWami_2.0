@@ -1,3 +1,4 @@
+// src/hooks/useSupabaseMutation.ts
 import { useCallback, useState, useRef } from 'react';
 import { invalidate } from '../lib/queryClient';
 
@@ -20,12 +21,14 @@ interface MutationResult<TArgs, TResult> {
  * Mutation hook with cache invalidation.
  *
  * - Returns a Promise that REJECTS on failure (after calling onError).
- *   This lets callers `await mutate(...)` and use try/catch if they need
- *   the result, or fire-and-forget if they don't.
+ *   Callers can `await mutate(...)` inside try/catch, or fire-and-forget.
  * - loading/error are state for UI binding.
  * - mutate is stable across renders.
+ *
+ * TArgs defaults to `void` so no-arg mutations can call `mutate()` directly
+ * instead of `mutate(undefined as never)`.
  */
-export function useSupabaseMutation<TArgs, TResult>(
+export function useSupabaseMutation<TArgs = void, TResult = unknown>(
   opts: MutationOptions<TArgs, TResult>
 ): MutationResult<TArgs, TResult> {
   const [loading, setLoading] = useState(false);

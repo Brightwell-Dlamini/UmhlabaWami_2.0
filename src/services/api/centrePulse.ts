@@ -1,3 +1,4 @@
+// src/services/api/centrePulse.ts
 import { sb, requireOrgId } from './_helpers';
 
 export interface CentrePulseSnapshot {
@@ -16,7 +17,13 @@ export interface CentrePulseSnapshot {
   generatedAt: string;
 }
 
-const OPEN_TICKET_STATUSES = ['Open', 'In Progress', 'Awaiting Approval', 'Reopened'] as const;
+const OPEN_TICKET_STATUSES = [
+  'Open',
+  'In Progress',
+  'Awaiting Approval',
+  'Reopened',
+] as const;
+
 const OVERDUE_SLA_STATUSES = ['Overdue', 'Escalated'] as const;
 
 export const centrePulse = {
@@ -52,8 +59,12 @@ export const centrePulse = {
       .eq('status', 'Scheduled');
 
     const [tRes, sRes, vRes, pRes, shRes] = await Promise.all([
-      shoppingCenterId ? ticketsQ.eq('shopping_center_id', shoppingCenterId) : ticketsQ,
-      shoppingCenterId ? shopsQ.eq('shopping_center_id', shoppingCenterId) : shopsQ,
+      shoppingCenterId
+        ? ticketsQ.eq('shopping_center_id', shoppingCenterId)
+        : ticketsQ,
+      shoppingCenterId
+        ? shopsQ.eq('shopping_center_id', shoppingCenterId)
+        : shopsQ,
       vendorsQ,
       pmQ,
       shiftsQ,
@@ -104,7 +115,3 @@ export const centrePulse = {
     };
   },
 };
-
-/** Back-compat alias for old imports. */
-export const fetchCentrePulse = (orgId?: string, centerId?: string) =>
-  centrePulse.fetch(orgId, centerId);

@@ -1,3 +1,4 @@
+// src/types/index.ts
 export type UserRole =
   | 'tenant'
   | 'property_manager'
@@ -6,7 +7,11 @@ export type UserRole =
   | 'admin'
   | 'super_admin';
 
-export type UnitStatus = 'Available' | 'Occupied' | 'Reserved' | 'Under Maintenance';
+export type UnitStatus =
+  | 'Available'
+  | 'Occupied'
+  | 'Reserved'
+  | 'Under Maintenance';
 
 export type TicketPriority = 'Low' | 'Medium' | 'High' | 'Emergency';
 
@@ -79,6 +84,13 @@ export interface User {
   property_id?: string;
   shopping_center_id?: string;
   shop_id?: string;
+  /**
+   * Account lifecycle:
+   *   Active    — normal sign-in allowed
+   *   Pending   — created but not activated (owner approval flows)
+   *   Suspended — temporarily blocked (login must reject)
+   *   Inactive  — deactivated / archived (login must reject)
+   */
   status: 'Active' | 'Inactive' | 'Pending' | 'Suspended';
   avatar_url?: string;
   created_at: string;
@@ -166,7 +178,12 @@ export interface Lease {
   end_date: string;
   rental_amount: number;
   deposit: number;
-  renewal_status: 'Active' | 'Pending Renewal' | 'Renewed' | 'Expired' | 'Terminated';
+  renewal_status:
+    | 'Active'
+    | 'Pending Renewal'
+    | 'Renewed'
+    | 'Expired'
+    | 'Terminated';
   document_url: string;
   document_title: string;
   is_digitally_signed: boolean;
@@ -202,7 +219,15 @@ export interface TicketTimelineItem {
   description: string;
   actor_name: string;
   actor_role: string;
-  type: 'creation' | 'assignment' | 'acceptance' | 'progress' | 'resolution' | 'confirmation' | 'reopened' | 'escalation';
+  type:
+    | 'creation'
+    | 'assignment'
+    | 'acceptance'
+    | 'progress'
+    | 'resolution'
+    | 'confirmation'
+    | 'reopened'
+    | 'escalation';
 }
 
 export interface TicketAttachment {
@@ -246,6 +271,7 @@ export interface Ticket {
   time_spent_hours?: number;
   cost?: number;
   before_images?: string[];
+  /** Storage URLs (public or signed) — never arbitrary user-pasted links. */
   after_images?: string[];
   tenant_rating?: number;
   tenant_feedback?: string;
@@ -268,9 +294,18 @@ export interface StaffShift {
   property_id: string;
   staff_id: string;
   staff_name: string;
-  staff_role: 'Manager' | 'Maintenance' | 'Security' | 'Cleaning' | 'Finance';
+  staff_role:
+    | 'Manager'
+    | 'Maintenance'
+    | 'Security'
+    | 'Cleaning'
+    | 'Finance';
   date: string;
-  shift_type: 'Morning (07:00-15:00)' | 'Afternoon (14:00-22:00)' | 'Night (22:00-07:00)' | 'General (08:00-17:00)';
+  shift_type:
+    | 'Morning (07:00-15:00)'
+    | 'Afternoon (14:00-22:00)'
+    | 'Night (22:00-07:00)'
+    | 'General (08:00-17:00)';
   status: 'Scheduled' | 'Completed' | 'Leave' | 'On-Call';
   notes?: string;
 }
@@ -283,7 +318,6 @@ export interface Vendor {
   contact_person: string;
   phone: string;
   email: string;
-  assigned_property_ids: string[];
   contract_expiry: string;
   performance_rating: number;
   status: 'Active' | 'Under Review' | 'Inactive';
@@ -296,7 +330,12 @@ export interface FinanceTransaction {
   shop_id?: string;
   tenant_id?: string;
   ticket_id?: string;
-  type: 'Rent Collection' | 'Maintenance Expense' | 'Utility Payment' | 'Vendor Payout' | 'Security Deposit';
+  type:
+    | 'Rent Collection'
+    | 'Maintenance Expense'
+    | 'Utility Payment'
+    | 'Vendor Payout'
+    | 'Security Deposit';
   category?: string;
   amount: number;
   direction: 'income' | 'expense';
@@ -312,7 +351,11 @@ export interface FinancialRequest {
   organization_id: string;
   property_id: string;
   requested_by_name: string;
-  type: 'Petty Cash' | 'Purchase Request' | 'Maintenance Funding' | 'Vendor Payment';
+  type:
+    | 'Petty Cash'
+    | 'Purchase Request'
+    | 'Maintenance Funding'
+    | 'Vendor Payment';
   amount: number;
   purpose: string;
   status: 'Pending Approval' | 'Approved' | 'Rejected' | 'Disbursed';
@@ -337,7 +380,13 @@ export interface EmergencyBroadcast {
   id: string;
   organization_id: string;
   property_id: string;
-  type: 'Fire' | 'Security' | 'Water Outage' | 'Power Outage' | 'Evacuation' | 'Major Maintenance';
+  type:
+    | 'Fire'
+    | 'Security'
+    | 'Water Outage'
+    | 'Power Outage'
+    | 'Evacuation'
+    | 'Major Maintenance';
   headline: string;
   instructions: string;
   issued_at: string;
@@ -405,22 +454,15 @@ export interface AuditLog {
   details?: string;
 }
 
-export interface PropertyLead {
-  id: string;
-  name: string;
-  company: string;
-  phone: string;
-  email: string;
-  property_count: number;
-  tenant_count: number;
-  location: string;
-  property_type: string;
-  submitted_at: string;
-  status: 'New' | 'Contacted' | 'Qualified' | 'Converted';
-}
-
 // Phase 4 — Commercial engine
-export type InvoiceStatus = 'Draft' | 'Sent' | 'Partially Paid' | 'Paid' | 'Overdue' | 'Cancelled';
+export type InvoiceStatus =
+  | 'Draft'
+  | 'Sent'
+  | 'Partially Paid'
+  | 'Paid'
+  | 'Overdue'
+  | 'Cancelled';
+
 export type InvoiceType = 'Rent' | 'Service Charge' | 'Deposit' | 'Other';
 
 export interface InvoiceLine {
