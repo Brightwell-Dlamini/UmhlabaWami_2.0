@@ -310,8 +310,8 @@ export function OperationsApp({ currentUser, showToast }: Props) {
               sidebarActiveTab === 'super_approvals' ||
               sidebarActiveTab === 'super_organizations' ||
               sidebarActiveTab === 'super_subscriptions' ||
-              sidebarActiveTab === 'audit_logs' ||
-              sidebarActiveTab === 'db_backup') && (
+              sidebarActiveTab === 'super_listings' ||
+              sidebarActiveTab === 'audit_logs') && (
               <SuperAdminPortal initialTab={sidebarActiveTab} />
             )}
         </div>
