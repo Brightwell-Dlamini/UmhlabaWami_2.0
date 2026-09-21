@@ -1,6 +1,8 @@
 import { sb, unwrap } from './_helpers';
 import type { Organization, SubscriptionTier } from '../../types';
 import { getSupabase } from '../../lib/supabase';
+import { auditLogs } from './auditLogs';
+import { auth } from '../auth';
 
 export interface RegisterOrgInput {
   companyName: string;
@@ -14,6 +16,20 @@ export interface RegisterOrgInput {
   propertyCount?: number;
   tenantCount?: number;
   staffBreakdown?: Record<string, number>;
+}
+
+async function writeAudit(action: string, entityId: string, details: string, orgId?: string) {
+  const u = auth.getCurrentUser();
+  if (!u) return;
+  await auditLogs.create({
+    user_id: u.id,
+    user_name: u.name || 'Super Admin',
+    action,
+    entity_type: 'organization',
+    entity_id: entityId,
+    organization_id: orgId ?? entityId,
+    details,
+  });
 }
 
 export const organizations = {
@@ -96,10 +112,11 @@ export const organizations = {
         | 'custom_branding_color'
         | 'monthly_fee_estimate'
         | 'subscription_tier'
-  | 'escalation_rate_pct'
- | 'grace_period_days'
-  | 'utility_markup_pct' 
-| 'auto_invoice_enabled'
+        | 'status'
+        | 'property_limit'
+        | 'tenant_limit'
+        | 'user_limit'
+        | 'storage_limit'
       >
     >
   ): Promise<Organization> {
@@ -109,7 +126,14 @@ export const organizations = {
       .eq('id', id)
       .select()
       .single();
-    return unwrap(result) as unknown as Organization;
+    const org = unwrap(result) as unknown as Organization;
+    await writeAudit(
+      'ORG_UPDATE',
+      id,
+      `Updated organisation ${org.company_name}: ${Object.keys(patch).join(', ')}`,
+      id
+    );
+    return org;
   },
 
   async approve(args: {
@@ -127,84 +151,111 @@ export const organizations = {
       p_custom_code: args.customCode ?? null,
     });
 
+    let out: {
+      organizationId: string;
+      organizationCode: string;
+      adminUserId: string;
+    };
+
     if (!rpcResult.error && rpcResult.data) {
-      const org = (Array.isArray(rpcResult.data)
-        ? rpcResult.data[0]
-        : rpcResult.data) as Organization & { owner_auth_user_id?: string };
-      return {
-        organizationId: org.id,
-        organizationCode: org.organization_code,
-        adminUserId: org.owner_auth_user_id || '',
+      const raw = Array.isArray(rpcResult.data) ? rpcResult.data[0] : rpcResult.data;
+      // RPC may return jsonb with organizationId/organizationCode or full org row
+      if (raw && typeof raw === 'object' && 'organizationCode' in (raw as object)) {
+        const r = raw as {
+          organizationId: string;
+          organizationCode: string;
+          adminUserId?: string;
+        };
+        out = {
+          organizationId: r.organizationId,
+          organizationCode: r.organizationCode,
+          adminUserId: r.adminUserId || '',
+        };
+      } else {
+        const org = raw as Organization & { owner_auth_user_id?: string };
+        out = {
+          organizationId: org.id,
+          organizationCode: org.organization_code,
+          adminUserId: org.owner_auth_user_id || '',
+        };
+      }
+    } else {
+      // Fallback path: RPC missing or failed.
+      const { data: org, error: loadErr } = await sb()
+        .from('organizations')
+        .select('*')
+        .eq('id', args.organizationId)
+        .single();
+      if (loadErr || !org) {
+        throw new Error(
+          rpcResult.error?.message ||
+            loadErr?.message ||
+            'Org not found during approval.'
+        );
+      }
+      if (org.status === 'Active') {
+        throw new Error('Organisation already active.');
+      }
+
+      const code =
+        (args.customCode || '').trim().toUpperCase() ||
+        generateOrgCode(org.company_name);
+
+      const { data: patched, error: patchErr } = await sb()
+        .from('organizations')
+        .update({
+          status: 'Active',
+          organization_code: code,
+          approved_at: new Date().toISOString(),
+          approved_by: args.approverName,
+        })
+        .eq('id', args.organizationId)
+        .select('*')
+        .single();
+
+      if (patchErr || !patched) {
+        throw new Error(
+          patchErr?.message ||
+            rpcResult.error?.message ||
+            'Approval failed. Run migration 006_simple_approval.sql in Supabase.'
+        );
+      }
+
+      const ownerId =
+        (org as { owner_auth_user_id?: string }).owner_auth_user_id ||
+        (
+          await sb()
+            .from('profiles')
+            .select('id')
+            .eq('email', String(org.email).toLowerCase())
+            .maybeSingle()
+        ).data?.id;
+
+      if (ownerId) {
+        await sb()
+          .from('profiles')
+          .update({
+            organization_id: patched.id,
+            role: 'admin',
+            status: 'Active',
+          })
+          .eq('id', ownerId);
+      }
+
+      out = {
+        organizationId: patched.id,
+        organizationCode: patched.organization_code,
+        adminUserId: ownerId || '',
       };
     }
 
-    // Fallback path: RPC missing or failed.
-    const { data: org, error: loadErr } = await sb()
-      .from('organizations')
-      .select('*')
-      .eq('id', args.organizationId)
-      .single();
-    if (loadErr || !org) {
-      throw new Error(
-        rpcResult.error?.message ||
-          loadErr?.message ||
-          'Org not found during approval.'
-      );
-    }
-    if (org.status === 'Active') {
-      throw new Error('Organisation already active.');
-    }
-
-    const code =
-      (args.customCode || '').trim().toUpperCase() ||
-      generateOrgCode(org.company_name);
-
-    const { data: patched, error: patchErr } = await sb()
-      .from('organizations')
-      .update({
-        status: 'Active',
-        organization_code: code,
-        approved_at: new Date().toISOString(),
-        approved_by: args.approverName,
-      })
-      .eq('id', args.organizationId)
-      .select('*')
-      .single();
-
-    if (patchErr || !patched) {
-      throw new Error(
-        patchErr?.message ||
-          rpcResult.error?.message ||
-          'Approval failed. Run migration 006_simple_approval.sql in Supabase.'
-      );
-    }
-
-    const ownerId =
-      (org as { owner_auth_user_id?: string }).owner_auth_user_id ||
-      (
-        await sb()
-          .from('profiles')
-          .select('id')
-          .eq('email', String(org.email).toLowerCase())
-          .maybeSingle()
-      ).data?.id;
-
-    if (ownerId) {
-      await sb()
-        .from('profiles')
-        .update({
-          organization_id: patched.id,
-          role: 'admin',
-          status: 'Active',
-        })
-        .eq('id', ownerId);
-    }
-
-    return {
-      organizationId: patched.id,
-      organizationCode: patched.organization_code,
-      adminUserId: ownerId || '',
-    };
+    await writeAudit(
+      'ORG_APPROVE',
+      out.organizationId,
+      `Approved organisation — code ${out.organizationCode}`,
+      out.organizationId
+    );
+    return out;
   },
 
   async reject(args: {
@@ -224,6 +275,12 @@ export const organizations = {
         .eq('id', args.organizationId);
       if (error) throw new Error(result.error.message || error.message);
     }
+    await writeAudit(
+      'ORG_REJECT',
+      args.organizationId,
+      args.reason || 'Application not approved.',
+      args.organizationId
+    );
   },
 };
 
