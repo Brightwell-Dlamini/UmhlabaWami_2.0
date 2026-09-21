@@ -5,7 +5,8 @@ export type UserRole =
   | 'maintenance'
   | 'finance'
   | 'admin'
-  | 'super_admin';
+  | 'super_admin'
+  | 'landlord';
 
 export type UnitStatus =
   | 'Available'
@@ -84,13 +85,6 @@ export interface User {
   property_id?: string;
   shopping_center_id?: string;
   shop_id?: string;
-  /**
-   * Account lifecycle:
-   *   Active    — normal sign-in allowed
-   *   Pending   — created but not activated (owner approval flows)
-   *   Suspended — temporarily blocked (login must reject)
-   *   Inactive  — deactivated / archived (login must reject)
-   */
   status: 'Active' | 'Inactive' | 'Pending' | 'Suspended';
   avatar_url?: string;
   created_at: string;
@@ -186,6 +180,8 @@ export interface Lease {
     | 'Terminated';
   document_url: string;
   document_title: string;
+  /** Full lease wording the tenant reads before signing. */
+  terms_body?: string;
   is_digitally_signed: boolean;
   signed_at?: string;
   signer_name?: string;
@@ -271,7 +267,6 @@ export interface Ticket {
   time_spent_hours?: number;
   cost?: number;
   before_images?: string[];
-  /** Storage URLs (public or signed) — never arbitrary user-pasted links. */
   after_images?: string[];
   tenant_rating?: number;
   tenant_feedback?: string;
@@ -454,7 +449,6 @@ export interface AuditLog {
   details?: string;
 }
 
-// Phase 4 — Commercial engine
 export type InvoiceStatus =
   | 'Draft'
   | 'Sent'
