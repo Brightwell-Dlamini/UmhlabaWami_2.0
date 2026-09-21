@@ -1,35 +1,58 @@
-import React, { useMemo, useState } from 'react';
+// src/components/finance/FinancePortal.tsx
+import React, { useEffect, useMemo, useState } from 'react';
 import { auth } from '../../services/auth';
 import { FinanceDashboard } from './FinanceDashboard';
 import { InvoicesTab } from './InvoicesTab';
 import { QuotesOrdersTab } from './QuotesOrdersTab';
 import { ItemsRemindersTab } from './ItemsRemindersTab';
+import type { ItemsSubTab } from './ItemsRemindersTab';
+import { CommercialEngineView } from './CommercialEngineView';
 
-type Tab = 'dashboard' | 'invoices' | 'quotes' | 'items';
+type Tab = 'dashboard' | 'invoices' | 'quotes' | 'items' | 'engine';
+
+interface PortalRoute {
+  tab: Tab;
+  /** Only meaningful for tab === 'items' */
+  itemsSubTab?: ItemsSubTab;
+}
 
 /**
- * Maps the sidebar's granular item ids to the coarse tab we render.
- * Sidebar has: rent_roll, invoices, transactions, quotes, orders,
- * commercial_engine, items, reminders, expenses_ledger, financial_requests.
+ * Maps the sidebar's granular item ids to the coarse tab + optional
+ * sub-tab we render.
+ *
+ *   rent_roll             → invoices
+ *   invoices              → invoices
+ *   transactions          → items / expenses
+ *   expenses_ledger       → items / expenses
+ *   financial_requests    → items / requisitions
+ *   finance_documents     → invoices
+ *   commercial_engine     → engine
+ *   quotes / orders       → quotes
+ *   items / reminders     → items
  */
-function resolveInitialTab(initialTab?: string): Tab {
-  if (!initialTab) return 'dashboard';
+function resolveRoute(initialTab?: string): PortalRoute {
+  if (!initialTab) return { tab: 'dashboard' };
   switch (initialTab) {
     case 'rent_roll':
     case 'invoices':
-    case 'transactions':
-      return 'invoices';
+    case 'finance_documents':
+      return { tab: 'invoices' };
     case 'quotes':
     case 'orders':
-    case 'commercial_engine':
-      return 'quotes';
-    case 'items':
-    case 'reminders':
+      return { tab: 'quotes' };
+    case 'transactions':
     case 'expenses_ledger':
+      return { tab: 'items', itemsSubTab: 'expenses' };
     case 'financial_requests':
-      return 'items';
+      return { tab: 'items', itemsSubTab: 'requisitions' };
+    case 'items':
+      return { tab: 'items', itemsSubTab: 'items' };
+    case 'reminders':
+      return { tab: 'items', itemsSubTab: 'reminders' };
+    case 'commercial_engine':
+      return { tab: 'engine' };
     default:
-      return 'dashboard';
+      return { tab: 'dashboard' };
   }
 }
 
@@ -37,6 +60,7 @@ const TAB_LABELS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'invoices', label: 'Invoices' },
   { id: 'quotes', label: 'Quotes & Orders' },
+  { id: 'engine', label: 'Commercial Engine' },
   { id: 'items', label: 'Items, Statements & Reminders' },
 ];
 
@@ -44,7 +68,19 @@ export const FinancePortal: React.FC<{ initialTab?: string }> = ({
   initialTab,
 }) => {
   const org = auth.getCurrentOrganization();
-  const [tab, setTab] = useState<Tab>(() => resolveInitialTab(initialTab));
+
+  const initialRoute = useMemo(() => resolveRoute(initialTab), [initialTab]);
+  const [tab, setTab] = useState<Tab>(initialRoute.tab);
+  const [itemsSubTab, setItemsSubTab] = useState<ItemsSubTab | undefined>(
+    initialRoute.itemsSubTab
+  );
+
+  // If the parent pushes a new initialTab, follow it.
+  useEffect(() => {
+    const route = resolveRoute(initialTab);
+    setTab(route.tab);
+    setItemsSubTab(route.itemsSubTab);
+  }, [initialTab]);
 
   const header = useMemo(
     () => ({
@@ -73,7 +109,9 @@ export const FinancePortal: React.FC<{ initialTab?: string }> = ({
           <h1 className="text-2xl font-bold mt-1">{header.companyName}</h1>
           <p className="text-xs text-emerald-100">
             Invoicing, collections, expenses, and reconciliation
-            <span className="ml-2 font-mono opacity-80">{header.orgCode}</span>
+            <span className="ml-2 font-mono opacity-80">
+              {header.orgCode}
+            </span>
           </p>
         </div>
       </div>
@@ -83,7 +121,11 @@ export const FinancePortal: React.FC<{ initialTab?: string }> = ({
         {TAB_LABELS.map((t) => (
           <button
             key={t.id}
-            onClick={() => setTab(t.id)}
+            onClick={() => {
+              setTab(t.id);
+              // Reset sub-tab hint when leaving the items tab.
+              if (t.id !== 'items') setItemsSubTab(undefined);
+            }}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
               tab === t.id
                 ? 'bg-blue-600 text-white shadow-sm'
@@ -99,7 +141,8 @@ export const FinancePortal: React.FC<{ initialTab?: string }> = ({
       {tab === 'dashboard' && <FinanceDashboard />}
       {tab === 'invoices' && <InvoicesTab />}
       {tab === 'quotes' && <QuotesOrdersTab />}
-      {tab === 'items' && <ItemsRemindersTab />}
+      {tab === 'engine' && <CommercialEngineView />}
+      {tab === 'items' && <ItemsRemindersTab initialSubTab={itemsSubTab} />}
     </div>
   );
 };

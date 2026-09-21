@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+// src/components/finance/ItemsRemindersTab.tsx
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Package,
   Bell,
@@ -37,18 +38,42 @@ import {
 } from './calculators';
 import type { Tenant } from '../../types';
 
-type SubTab = 'items' | 'statements' | 'reminders' | 'expenses' | 'requisitions';
+export type ItemsSubTab =
+  | 'items'
+  | 'statements'
+  | 'reminders'
+  | 'expenses'
+  | 'requisitions';
 
-export function ItemsRemindersTab() {
+interface Props {
+  /** Optional sub-tab to open on mount or when the prop changes. */
+  initialSubTab?: ItemsSubTab;
+}
+
+export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
   const orgId = auth.getCurrentOrganization()?.id ?? '';
 
-  const [subTab, setSubTab] = useState<SubTab>('items');
+  const [subTab, setSubTab] = useState<ItemsSubTab>(
+    initialSubTab ?? 'items'
+  );
   const [feedback, setFeedback] = useState<{
     text: string;
     tone: 'ok' | 'error';
   } | null>(null);
 
-  const showFeedback = (text: string, tone: 'ok' | 'error' = 'ok', ms = 3500) => {
+  // Sync when parent routes to a new sub-tab.
+  useEffect(() => {
+    if (initialSubTab && initialSubTab !== subTab) {
+      setSubTab(initialSubTab);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSubTab]);
+
+  const showFeedback = (
+    text: string,
+    tone: 'ok' | 'error' = 'ok',
+    ms = 3500
+  ) => {
     setFeedback({ text, tone });
     setTimeout(() => setFeedback(null), ms);
   };
@@ -188,7 +213,10 @@ export function ItemsRemindersTab() {
   });
 
   // ----- Derived -----
-  const overdue = useMemo(() => selectOverdueInvoices(invoices), [invoices]);
+  const overdue = useMemo(
+    () => selectOverdueInvoices(invoices),
+    [invoices]
+  );
 
   const filteredOverdue = useMemo(() => {
     if (!reminderSearch) return overdue;
@@ -225,7 +253,9 @@ export function ItemsRemindersTab() {
       showFeedback(`Statement generated for ${tenant.business_name}.`);
     } catch (e) {
       showFeedback(
-        e instanceof Error ? `Statement failed: ${e.message}` : 'Statement failed.',
+        e instanceof Error
+          ? `Statement failed: ${e.message}`
+          : 'Statement failed.',
         'error',
         5000
       );
@@ -234,7 +264,10 @@ export function ItemsRemindersTab() {
     }
   };
 
-  const handleSendReminder = async (invoiceId: string, invoiceNumber: string) => {
+  const handleSendReminder = async (
+    invoiceId: string,
+    invoiceNumber: string
+  ) => {
     try {
       await sendReminder.mutate(invoiceId);
       showFeedback(`Reminder logged for ${invoiceNumber}.`);
@@ -247,14 +280,19 @@ export function ItemsRemindersTab() {
     }
   };
 
-  const handleCreateItem = async (input: Parameters<typeof itemsApi.create>[0]) => {
+  const handleCreateItem = async (
+    input: Parameters<typeof itemsApi.create>[0]
+  ) => {
     try {
       await createItem.mutate(input);
       showFeedback('Item created.');
       setShowItemModal(false);
       setEditingItem(null);
     } catch (e) {
-      showFeedback(e instanceof Error ? e.message : 'Failed to create item.', 'error');
+      showFeedback(
+        e instanceof Error ? e.message : 'Failed to create item.',
+        'error'
+      );
     }
   };
 
@@ -268,7 +306,10 @@ export function ItemsRemindersTab() {
       setShowItemModal(false);
       setEditingItem(null);
     } catch (e) {
-      showFeedback(e instanceof Error ? e.message : 'Failed to update item.', 'error');
+      showFeedback(
+        e instanceof Error ? e.message : 'Failed to update item.',
+        'error'
+      );
     }
   };
 
@@ -278,7 +319,10 @@ export function ItemsRemindersTab() {
       await removeItem.mutate(id);
       showFeedback('Item removed.');
     } catch (e) {
-      showFeedback(e instanceof Error ? e.message : 'Failed to remove item.', 'error');
+      showFeedback(
+        e instanceof Error ? e.message : 'Failed to remove item.',
+        'error'
+      );
     }
   };
 
@@ -293,7 +337,10 @@ export function ItemsRemindersTab() {
       showFeedback('Expense recorded.');
       setShowExpenseModal(false);
     } catch (e) {
-      showFeedback(e instanceof Error ? e.message : 'Failed to record expense.', 'error');
+      showFeedback(
+        e instanceof Error ? e.message : 'Failed to record expense.',
+        'error'
+      );
     }
   };
 
@@ -303,7 +350,10 @@ export function ItemsRemindersTab() {
       await deleteExpense.mutate(id);
       showFeedback('Expense removed.');
     } catch (e) {
-      showFeedback(e instanceof Error ? e.message : 'Failed to remove expense.', 'error');
+      showFeedback(
+        e instanceof Error ? e.message : 'Failed to remove expense.',
+        'error'
+      );
     }
   };
 
@@ -312,7 +362,10 @@ export function ItemsRemindersTab() {
       await approveRequest.mutate(id);
       showFeedback('Requisition approved.');
     } catch (e) {
-      showFeedback(e instanceof Error ? e.message : 'Failed to approve.', 'error');
+      showFeedback(
+        e instanceof Error ? e.message : 'Failed to approve.',
+        'error'
+      );
     }
   };
 
@@ -321,13 +374,18 @@ export function ItemsRemindersTab() {
       await disburseRequest.mutate(id);
       showFeedback('Requisition disbursed.');
     } catch (e) {
-      showFeedback(e instanceof Error ? e.message : 'Failed to disburse.', 'error');
+      showFeedback(
+        e instanceof Error ? e.message : 'Failed to disburse.',
+        'error'
+      );
     }
   };
 
   if (!orgId) {
     return (
-      <div className="p-6 text-slate-500 text-sm">No organisation context.</div>
+      <div className="p-6 text-slate-500 text-sm">
+        No organisation context.
+      </div>
     );
   }
 
@@ -348,9 +406,17 @@ export function ItemsRemindersTab() {
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 pb-2 flex-wrap">
         {(
           [
-            { id: 'items', label: `Items catalog (${catalog.length})`, icon: Package },
+            {
+              id: 'items',
+              label: `Items catalog (${catalog.length})`,
+              icon: Package,
+            },
             { id: 'statements', label: 'Statements', icon: FileText },
-            { id: 'reminders', label: `Overdue (${overdue.length})`, icon: Bell },
+            {
+              id: 'reminders',
+              label: `Overdue (${overdue.length})`,
+              icon: Bell,
+            },
             {
               id: 'expenses',
               label: `Expenses (${expenseTransactions.length})`,
@@ -362,7 +428,7 @@ export function ItemsRemindersTab() {
               icon: CreditCard,
             },
           ] as {
-            id: SubTab;
+            id: ItemsSubTab;
             label: string;
             icon: React.ComponentType<{ className?: string }>;
           }[]
@@ -422,14 +488,19 @@ export function ItemsRemindersTab() {
               <tbody className="divide-y">
                 {catalog.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-400">
+                    <td
+                      colSpan={6}
+                      className="p-8 text-center text-slate-400"
+                    >
                       No items yet.
                     </td>
                   </tr>
                 ) : (
                   catalog.map((it) => (
                     <tr key={it.id}>
-                      <td className="px-3 py-3 font-mono">{it.code ?? '—'}</td>
+                      <td className="px-3 py-3 font-mono">
+                        {it.code ?? '—'}
+                      </td>
                       <td className="px-3 py-3 font-bold">{it.name}</td>
                       <td className="px-3 py-3 text-slate-500">
                         {it.category ?? '—'}
@@ -452,7 +523,9 @@ export function ItemsRemindersTab() {
                           Edit
                         </button>
                         <button
-                          onClick={() => handleRemoveItem(it.id, it.name)}
+                          onClick={() =>
+                            handleRemoveItem(it.id, it.name)
+                          }
                           disabled={removeItem.loading}
                           className="p-1 text-slate-400 hover:text-red-500 disabled:opacity-60"
                           type="button"
@@ -511,7 +584,9 @@ export function ItemsRemindersTab() {
                   key={t.id}
                   className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 space-y-2"
                 >
-                  <div className="font-bold text-xs">{t.business_name}</div>
+                  <div className="font-bold text-xs">
+                    {t.business_name}
+                  </div>
                   <div className="text-[11px] text-slate-500">
                     {t.contact_person}
                   </div>
@@ -522,7 +597,9 @@ export function ItemsRemindersTab() {
                       className="text-[11px] font-semibold text-blue-600 hover:underline disabled:opacity-60"
                       type="button"
                     >
-                      {generatingId === t.id ? 'Generating…' : 'Generate PDF'}
+                      {generatingId === t.id
+                        ? 'Generating…'
+                        : 'Generate PDF'}
                     </button>
                   </div>
                 </div>
@@ -561,7 +638,9 @@ export function ItemsRemindersTab() {
                   <th className="px-3 py-2.5">Invoice</th>
                   <th className="px-3 py-2.5">Tenant</th>
                   <th className="px-3 py-2.5">Due</th>
-                  <th className="px-3 py-2.5 text-right">Days overdue</th>
+                  <th className="px-3 py-2.5 text-right">
+                    Days overdue
+                  </th>
                   <th className="px-3 py-2.5 text-right">Outstanding</th>
                   <th className="px-3 py-2.5">Suggested</th>
                   <th className="px-3 py-2.5 text-right">Action</th>
@@ -570,7 +649,10 @@ export function ItemsRemindersTab() {
               <tbody className="divide-y">
                 {filteredOverdue.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="p-8 text-center text-slate-400">
+                    <td
+                      colSpan={7}
+                      className="p-8 text-center text-slate-400"
+                    >
                       No overdue invoices.
                     </td>
                   </tr>
@@ -594,7 +676,8 @@ export function ItemsRemindersTab() {
                           {days}
                         </td>
                         <td className="px-3 py-3 text-right font-bold">
-                          E{(inv.total - inv.amount_paid).toLocaleString()}
+                          E
+                          {(inv.total - inv.amount_paid).toLocaleString()}
                         </td>
                         <td className="px-3 py-3">
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
@@ -604,7 +687,10 @@ export function ItemsRemindersTab() {
                         <td className="px-3 py-3 text-right">
                           <button
                             onClick={() =>
-                              handleSendReminder(inv.id, inv.invoice_number)
+                              handleSendReminder(
+                                inv.id,
+                                inv.invoice_number
+                              )
                             }
                             disabled={sendReminder.loading}
                             className="text-[11px] font-semibold text-blue-600 hover:underline flex items-center gap-1 ml-auto disabled:opacity-60"
@@ -630,7 +716,8 @@ export function ItemsRemindersTab() {
             <div>
               <h3 className="font-bold text-sm">Expense ledger</h3>
               <p className="text-xs text-slate-500 mt-1">
-                All outgoing payments — maintenance, utilities, security, vendors
+                All outgoing payments — maintenance, utilities, security,
+                vendors
               </p>
             </div>
             <button
@@ -658,16 +745,23 @@ export function ItemsRemindersTab() {
               <tbody className="divide-y">
                 {expenseTransactions.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-400">
+                    <td
+                      colSpan={6}
+                      className="p-8 text-center text-slate-400"
+                    >
                       No expenses recorded.
                     </td>
                   </tr>
                 ) : (
                   expenseTransactions.map((tx) => {
-                    const center = centers.find((c) => c.id === tx.property_id);
+                    const center = centers.find(
+                      (c) => c.id === tx.property_id
+                    );
                     return (
                       <tr key={tx.id}>
-                        <td className="px-3 py-3 text-slate-500">{tx.date}</td>
+                        <td className="px-3 py-3 text-slate-500">
+                          {tx.date}
+                        </td>
                         <td className="px-3 py-3 font-mono text-blue-600">
                           {tx.reference || tx.id.slice(0, 8)}
                         </td>
@@ -703,7 +797,9 @@ export function ItemsRemindersTab() {
         <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5 space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-bold text-sm">Requisitions &amp; petty cash</h3>
+              <h3 className="font-bold text-sm">
+                Requisitions &amp; petty cash
+              </h3>
               <p className="text-xs text-slate-500 mt-1">
                 Material requests and petty cash authorizations
               </p>
@@ -732,7 +828,10 @@ export function ItemsRemindersTab() {
               <tbody className="divide-y">
                 {requests.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-400">
+                    <td
+                      colSpan={6}
+                      className="p-8 text-center text-slate-400"
+                    >
                       No requisitions.
                     </td>
                   </tr>
@@ -792,9 +891,14 @@ export function ItemsRemindersTab() {
           }}
           onSubmit={(input) => {
             if (editingItem) {
-              handleUpdateItem(editingItem.id, input as Partial<InvoiceItem>);
+              handleUpdateItem(
+                editingItem.id,
+                input as Partial<InvoiceItem>
+              );
             } else {
-              handleCreateItem(input as Parameters<typeof itemsApi.create>[0]);
+              handleCreateItem(
+                input as Parameters<typeof itemsApi.create>[0]
+              );
             }
           }}
         />
@@ -832,7 +936,7 @@ export function ItemsRemindersTab() {
 }
 
 // ---------------------------------------------------------------------------
-// Modals (unchanged logic, added busy prop)
+// Modals
 // ---------------------------------------------------------------------------
 
 function ItemForm({
@@ -848,10 +952,14 @@ function ItemForm({
 }) {
   const [code, setCode] = useState(initial?.code ?? '');
   const [name, setName] = useState(initial?.name ?? '');
-  const [description, setDescription] = useState(initial?.description ?? '');
+  const [description, setDescription] = useState(
+    initial?.description ?? ''
+  );
   const [unitPrice, setUnitPrice] = useState(initial?.unit_price ?? 0);
   const [taxRate, setTaxRate] = useState(initial?.tax_rate ?? 0.15);
-  const [defaultQty, setDefaultQty] = useState(initial?.default_quantity ?? 1);
+  const [defaultQty, setDefaultQty] = useState(
+    initial?.default_quantity ?? 1
+  );
   const [category, setCategory] = useState(initial?.category ?? 'Other');
 
   return (
@@ -1098,7 +1206,12 @@ function RequisitionForm({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            onSubmit({ requested_by_name: requestedBy, type, amount, purpose });
+            onSubmit({
+              requested_by_name: requestedBy,
+              type,
+              amount,
+              purpose,
+            });
           }}
           className="space-y-3 text-xs"
         >

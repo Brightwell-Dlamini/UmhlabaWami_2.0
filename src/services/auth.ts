@@ -1,5 +1,10 @@
+// src/services/auth.ts
 import type { User, Organization } from '../types';
-import { getSupabase, isSupabaseConfigured, tryGetSupabase } from '../lib/supabase';
+import {
+  getSupabase,
+  isSupabaseConfigured,
+  tryGetSupabase,
+} from '../lib/supabase';
 import { clearAll } from '../lib/queryClient';
 
 /**
@@ -11,12 +16,14 @@ const AUTH_ERRORS = {
   backendMissing:
     'Backend is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel project settings and redeploy.',
   invalidCredentials: 'Invalid organisation code, username, or password.',
-  orgInactive: 'This organisation is not currently active. Contact your administrator.',
+  orgInactive:
+    'This organisation is not currently active. Contact your administrator.',
   platformEmailRequired:
     'Platform admin sign-in requires your email address. Use the email, not the username.',
   sessionExpired: 'Your session has expired. Please sign in again.',
-  network:
-    'Could not reach the server. Check your connection and try again.',
+  network: 'Could not reach the server. Check your connection and try again.',
+  accountInactive:
+    'Your account is not active. Contact your organisation administrator.',
 } as const;
 
 function normaliseAuthError(raw: string): string {
@@ -43,6 +50,12 @@ function normaliseAuthError(raw: string): string {
   // Default — do not return the raw message to the UI.
   return AUTH_ERRORS.invalidCredentials;
 }
+
+/**
+ * User account statuses that must NOT be allowed to hold a signed-in session.
+ * `Pending` is allowed during registration flow only.
+ */
+const BLOCKED_USER_STATUSES = new Set(['Suspended', 'Inactive']);
 
 const SIGNOUT_TIMEOUT_MS = 2000;
 
@@ -124,6 +137,23 @@ class AuthService {
       this.notify();
       return;
     }
+
+    // Suspended / Inactive mid-session: sign out immediately so the UI
+    // never renders a workspace for a blocked account.
+    if (BLOCKED_USER_STATUSES.has(String(profile.status))) {
+      console.warn('[auth] blocked status detected', profile.status);
+      this.currentUser = null;
+      this.currentOrg = null;
+      clearAll();
+      this.notify(true);
+      try {
+        await sb.auth.signOut({ scope: 'local' });
+      } catch {
+        /* non-fatal */
+      }
+      return;
+    }
+
     this.currentUser = profile as unknown as User;
     this.currentOrg = null;
 
@@ -216,6 +246,39 @@ class AuthService {
     return { ok: true as const, sb: getSupabase() };
   }
 
+  /**
+   * After every successful signInWithPassword, verify the profile row is
+   * not Suspended/Inactive. If it is, sign out immediately and return the
+   * uniform invalid-credentials error.
+   */
+  private async verifyProfileActiveAfterSignIn(): Promise<
+    | { ok: true; profile: User }
+    | { ok: false; error: string }
+  > {
+    const sb = getSupabase();
+    const {
+      data: { user: authUser },
+    } = await sb.auth.getUser();
+    if (!authUser) {
+      return { ok: false, error: AUTH_ERRORS.invalidCredentials };
+    }
+    const { data: profile } = await sb
+      .from('profiles')
+      .select('*')
+      .eq('id', authUser.id)
+      .maybeSingle();
+    if (!profile) {
+      await sb.auth.signOut({ scope: 'local' });
+      return { ok: false, error: AUTH_ERRORS.invalidCredentials };
+    }
+    if (BLOCKED_USER_STATUSES.has(String(profile.status))) {
+      await sb.auth.signOut({ scope: 'local' });
+      // Same message as wrong password — no enumeration signal.
+      return { ok: false, error: AUTH_ERRORS.invalidCredentials };
+    }
+    return { ok: true, profile: profile as unknown as User };
+  }
+
   public async login(
     organizationCode: string,
     username: string,
@@ -233,13 +296,16 @@ class AuthService {
     }
 
     // Standard org login.
-    const { data: orgRow, error: orgErr } = await sb.rpc('lookup_organization', {
-      p_code: code,
-    });
+    const { data: orgRow, error: orgErr } = await sb.rpc(
+      'lookup_organization',
+      { p_code: code }
+    );
     if (orgErr) {
       return { success: false, error: normaliseAuthError(orgErr.message) };
     }
-    if (!orgRow) return { success: false, error: AUTH_ERRORS.invalidCredentials };
+    if (!orgRow) {
+      return { success: false, error: AUTH_ERRORS.invalidCredentials };
+    }
 
     const org = Array.isArray(orgRow) ? orgRow[0] : orgRow;
     if (org.status !== 'Active') {
@@ -267,8 +333,14 @@ class AuthService {
       return { success: false, error: normaliseAuthError(signErr.message) };
     }
 
+    // Post-sign-in status check. Signs back out if blocked.
+    const status = await this.verifyProfileActiveAfterSignIn();
+    if (!status.ok) {
+      return { success: false, error: status.error };
+    }
+
     await new Promise((r) => setTimeout(r, 200));
-    return { success: true, user: this.currentUser || undefined };
+    return { success: true, user: this.currentUser || status.profile };
   }
 
   /**
@@ -290,6 +362,11 @@ class AuthService {
     });
     if (signErr) {
       return { success: false, error: normaliseAuthError(signErr.message) };
+    }
+
+    const status = await this.verifyProfileActiveAfterSignIn();
+    if (!status.ok) {
+      return { success: false, error: status.error };
     }
 
     await new Promise((r) => setTimeout(r, 250));
