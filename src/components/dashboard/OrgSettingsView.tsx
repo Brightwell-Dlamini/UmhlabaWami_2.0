@@ -31,7 +31,14 @@ interface SettingsFormState {
   autoInvoice: boolean;
 }
 
-function initialFormFromOrg(org: Organization | null): SettingsFormState {
+interface OrgWithFinancials extends Organization {
+  escalation_rate_pct?: number;
+  grace_period_days?: number;
+  utility_markup_pct?: number;
+  auto_invoice_enabled?: boolean;
+}
+
+function initialFormFromOrg(org: OrgWithFinancials | null): SettingsFormState {
   return {
     companyName: org?.company_name ?? '',
     address: org?.address ?? '',
@@ -39,11 +46,16 @@ function initialFormFromOrg(org: Organization | null): SettingsFormState {
     phone: org?.phone ?? '',
     taxNumber: '',
     currency: 'SZL (E)',
-    escalationRate: '8.0',
-    gracePeriodDays: '7',
-    utilityMarkup: '5.0',
-    autoInvoice: true,
+    escalationRate: String(org?.escalation_rate_pct ?? 8.0),
+    gracePeriodDays: String(org?.grace_period_days ?? 7),
+    utilityMarkup: String(org?.utility_markup_pct ?? 5.0),
+    autoInvoice: org?.auto_invoice_enabled ?? true,
   };
+}
+
+function numOrNull(v: string): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 export function OrgSettingsView() {
@@ -63,7 +75,9 @@ export function OrgSettingsView() {
     enabled: !!orgId,
   });
 
-  const activeOrg: Organization | null = org ?? cachedOrg;
+  const activeOrg: OrgWithFinancials | null =
+    (org as OrgWithFinancials | undefined) ??
+    (cachedOrg as OrgWithFinancials | null);
 
   const [form, setForm] = useState<SettingsFormState>(() =>
     initialFormFromOrg(activeOrg)
@@ -96,13 +110,38 @@ export function OrgSettingsView() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!orgId) return;
+
+    // Client-side range checks mirror the SQL constraints.
+    const esc = numOrNull(form.escalationRate);
+    if (esc === null || esc < 0 || esc > 50) {
+      flash('Escalation rate must be between 0 and 50.', 'error');
+      return;
+    }
+    const grace = numOrNull(form.gracePeriodDays);
+    if (grace === null || grace < 0 || grace > 90) {
+      flash('Grace period must be between 0 and 90 days.', 'error');
+      return;
+    }
+    const markup = numOrNull(form.utilityMarkup);
+    if (markup === null || markup < 0 || markup > 50) {
+      flash('Utility markup must be between 0 and 50.', 'error');
+      return;
+    }
+
     try {
+      // Cast through `any` because orgApi.update's Pick<> type doesn't
+      // include the new columns yet. Update the API's Pick<> once you're
+      // comfortable with the column names.
       await updateOrg.mutate({
         company_name: form.companyName,
         address: form.address,
         email: form.email,
         phone: form.phone,
-      });
+        escalation_rate_pct: esc,
+        grace_period_days: Math.round(grace),
+        utility_markup_pct: markup,
+        auto_invoice_enabled: form.autoInvoice,
+      } as Parameters<typeof orgApi.update>[1]);
       flash('Organization settings saved.');
     } catch (err) {
       flash(
@@ -116,8 +155,6 @@ export function OrgSettingsView() {
   const handleSelectTier = async (tier: SubscriptionTier) => {
     if (!orgId) return;
     try {
-      // Server-side tier change only. Plan pricing/limits are the concern
-      // of subscriptionPlans.ts, not of org state.
       await updateOrg.mutate({ subscription_tier: tier });
       setShowPlanModal(false);
       flash(`Subscription tier updated to ${tier}.`);
@@ -134,7 +171,7 @@ export function OrgSettingsView() {
     if (!activeOrg) return;
     const payload = {
       exported_at: new Date().toISOString(),
-      version: '2.0.0',
+      version: '2.1.0',
       organization: activeOrg,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -360,6 +397,8 @@ export function OrgSettingsView() {
                 <input
                   type="number"
                   step="0.5"
+                  min={0}
+                  max={50}
                   value={form.escalationRate}
                   onChange={(e) =>
                     setForm({ ...form, escalationRate: e.target.value })
@@ -374,6 +413,8 @@ export function OrgSettingsView() {
                 </label>
                 <input
                   type="number"
+                  min={0}
+                  max={90}
                   value={form.gracePeriodDays}
                   onChange={(e) =>
                     setForm({ ...form, gracePeriodDays: e.target.value })
@@ -389,6 +430,8 @@ export function OrgSettingsView() {
                 <input
                   type="number"
                   step="0.5"
+                  min={0}
+                  max={50}
                   value={form.utilityMarkup}
                   onChange={(e) =>
                     setForm({ ...form, utilityMarkup: e.target.value })
@@ -404,8 +447,8 @@ export function OrgSettingsView() {
                   Automated Rent Invoice Generation
                 </div>
                 <div className="text-[11px] text-slate-500">
-                  Automatically generate recurring rent invoices on the 1st of
-                  every calendar month
+                  When enabled, a scheduled job generates recurring rent
+                  invoices on the 1st of every month
                 </div>
               </div>
               <input
@@ -427,7 +470,9 @@ export function OrgSettingsView() {
             >
               <Save className="w-4 h-4" />
               <span>
-                {updateOrg.loading ? 'Saving…' : 'Save Organization Settings'}
+                {updateOrg.loading
+                  ? 'Saving…'
+                  : 'Save Organization Settings'}
               </span>
             </button>
           </div>
@@ -440,8 +485,9 @@ export function OrgSettingsView() {
           <span>Data Export</span>
         </h2>
         <p className="text-xs text-slate-500 mt-2">
-          Download a JSON snapshot of your organisation profile. Full portfolio
-          data can be exported as CSV from the Analytics &amp; Reports view.
+          Download a JSON snapshot of your organisation profile. Full
+          portfolio data can be exported as CSV from the Analytics &amp;
+          Reports view.
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
@@ -477,7 +523,6 @@ export function OrgSettingsView() {
         </div>
       </div>
 
-      {/* Subscription Tier Modal */}
       {showPlanModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-xl border border-slate-200 dark:border-slate-700 space-y-4">

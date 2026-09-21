@@ -96,6 +96,10 @@ export const organizations = {
         | 'custom_branding_color'
         | 'monthly_fee_estimate'
         | 'subscription_tier'
+  | 'escalation_rate_pct'
+ | 'grace_period_days'
+  | 'utility_markup_pct' 
+| 'auto_invoice_enabled'
       >
     >
   ): Promise<Organization> {

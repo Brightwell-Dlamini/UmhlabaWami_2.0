@@ -1,6 +1,7 @@
 // src/services/api/invoices.ts
 import { sb, unwrap, requireOrgId } from './_helpers';
 import type { Invoice, InvoiceType, PaymentRecord } from '../../types';
+import { isPayableStatus, isSettledStatus } from '../../constants/invoiceStatus';
 
 export interface InvoiceLineInput {
   description: string;
@@ -19,10 +20,6 @@ export interface CreateInvoiceInput {
   notes?: string;
 }
 
-/**
- * Extend a YYYY-MM-DD string to the inclusive end of that UTC day.
- * Used when filtering timestamp columns by date range.
- */
 function endOfDayUtc(iso: string): string {
   if (iso.includes('T')) return iso;
   return `${iso}T23:59:59.999Z`;
@@ -84,9 +81,6 @@ export const invoices = {
       throw new Error('Payment amount must be greater than zero.');
     }
 
-    // Client-side guard: fetch fresh invoice to compute remaining balance.
-    // The RPC must ALSO re-check inside its transaction — this is defence
-    // in depth, not a substitute for a server-side check.
     const { data: invRow, error: loadErr } = await sb()
       .from('invoices')
       .select('total, amount_paid, status')
@@ -94,9 +88,16 @@ export const invoices = {
       .single();
     if (loadErr) throw new Error(loadErr.message);
 
+    if (isSettledStatus(String(invRow.status))) {
+      throw new Error('Invoice is already settled.');
+    }
+    if (!isPayableStatus(String(invRow.status))) {
+      throw new Error(`Cannot record payment on a ${invRow.status} invoice.`);
+    }
+
     const remaining = Number(invRow.total) - Number(invRow.amount_paid);
     if (remaining <= 0) {
-      throw new Error('Invoice is already fully settled.');
+      throw new Error('Invoice has no outstanding balance.');
     }
     if (args.amount > remaining + 0.01) {
       throw new Error(
@@ -141,10 +142,6 @@ export const invoices = {
 };
 
 export const payments = {
-  /**
-   * Payments for a tenant in [from, to] inclusive on both ends.
-   * `paid_at` is a timestamp, so `to` is widened to end-of-UTC-day.
-   */
   async listForTenant(
     tenantId: string,
     from: string,
