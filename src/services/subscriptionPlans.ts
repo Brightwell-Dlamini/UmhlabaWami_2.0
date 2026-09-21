@@ -1,13 +1,10 @@
-// src/services/subscriptionPlans.ts
 import type { SubscriptionTier } from '../types';
 
 export interface TierPlan {
   tier: SubscriptionTier;
   name: string;
-  /** Numeric monthly fee in SZL (E). Use priceLabel for display. */
-  monthlyFeeE: number;
-  /** Display string for pricing UI. Derived from monthlyFeeE when numeric. */
   priceLabel: string;
+  monthlyFeeE: number;
   propertyLimit: number;
   tenantLimit: number;
   userLimit: number;
@@ -18,77 +15,74 @@ export interface TierPlan {
 
 const STORAGE_KEY = 'umhlaba_subscription_plans_v1';
 
-/**
- * Canonical tier definitions. Everything in the UI must read from here
- * (RegisterOrgModal, SuperAdminPortal, OrgSettingsView).
- */
 const DEFAULTS: TierPlan[] = [
   {
     tier: 'Starter',
     name: 'Starter',
-    monthlyFeeE: 1450,
-    priceLabel: 'E1,450 / mo',
+    priceLabel: 'E999 / mo',
+    monthlyFeeE: 999,
     propertyLimit: 2,
     tenantLimit: 50,
     userLimit: 10,
     storageLimitGb: 5,
-    features: [
-      'Up to 2 centres',
-      '50 tenants',
-      '10 staff users',
-      'Basic SLA matrix',
-    ],
+    features: ['Up to 2 centres', '50 tenants', '10 staff users', 'Basic SLA'],
     active: true,
   },
   {
     tier: 'Professional',
     name: 'Professional',
-    monthlyFeeE: 3850,
-    priceLabel: 'E3,850 / mo',
+    priceLabel: 'E2,999 / mo',
+    monthlyFeeE: 2999,
     propertyLimit: 10,
     tenantLimit: 250,
     userLimit: 40,
     storageLimitGb: 25,
-    features: [
-      '10 centres',
-      '250 tenants',
-      '40 staff users',
-      'Commercial engine',
-      'Priority support',
-    ],
+    features: ['10 centres', '250 tenants', '40 staff', 'Commercial engine', 'Priority support'],
     active: true,
   },
   {
     tier: 'Enterprise',
     name: 'Enterprise',
-    monthlyFeeE: 8900,
-    priceLabel: 'E8,900 / mo',
+    priceLabel: 'Custom',
+    monthlyFeeE: 0,
     propertyLimit: 999,
     tenantLimit: 9999,
     userLimit: 500,
     storageLimitGb: 200,
-    features: [
-      'Unlimited centres',
-      'Dedicated support',
-      'Custom branding',
-      'Audit exports',
-    ],
+    features: ['Unlimited centres', 'Dedicated support', 'Custom branding', 'Audit exports'],
     active: true,
   },
 ];
+
+function normalise(p: Partial<TierPlan> & { tier: SubscriptionTier }): TierPlan {
+  const base = DEFAULTS.find((d) => d.tier === p.tier) || DEFAULTS[0];
+  const monthly =
+    typeof p.monthlyFeeE === 'number'
+      ? p.monthlyFeeE
+      : typeof (p as { monthlyFee?: number }).monthlyFee === 'number'
+        ? (p as { monthlyFee: number }).monthlyFee
+        : base.monthlyFeeE;
+  return {
+    ...base,
+    ...p,
+    tier: p.tier,
+    monthlyFeeE: monthly,
+    priceLabel:
+      p.priceLabel ||
+      (monthly > 0 ? `E${monthly.toLocaleString()} / mo` : 'Custom'),
+    active: p.active !== false,
+  };
+}
 
 function load(): TierPlan[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return structuredClone(DEFAULTS);
-    const parsed = JSON.parse(raw) as TierPlan[];
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      return structuredClone(DEFAULTS);
-    }
-    // Merge so any new fields added to DEFAULTS show up even for stored rows.
+    const parsed = JSON.parse(raw) as Partial<TierPlan>[];
+    if (!Array.isArray(parsed) || parsed.length === 0) return structuredClone(DEFAULTS);
     return DEFAULTS.map((d) => {
       const found = parsed.find((p) => p.tier === d.tier);
-      return found ? { ...d, ...found, tier: d.tier } : d;
+      return found ? normalise({ ...d, ...found, tier: d.tier }) : structuredClone(d);
     });
   } catch {
     return structuredClone(DEFAULTS);
@@ -105,18 +99,24 @@ export const subscriptionPlans = {
   },
 
   get(tier: SubscriptionTier): TierPlan {
-    return (
-      load().find((p) => p.tier === tier) ||
-      DEFAULTS.find((p) => p.tier === tier)!
-    );
+    return load().find((p) => p.tier === tier) || DEFAULTS.find((p) => p.tier === tier)!;
   },
 
-  update(
-    tier: SubscriptionTier,
-    patch: Partial<Omit<TierPlan, 'tier'>>
-  ): TierPlan[] {
+  update(tier: SubscriptionTier, patch: Partial<Omit<TierPlan, 'tier'>>): TierPlan[] {
     const plans = load().map((p) =>
-      p.tier === tier ? { ...p, ...patch, tier } : p
+      p.tier === tier
+        ? normalise({
+            ...p,
+            ...patch,
+            tier,
+            priceLabel:
+              patch.monthlyFeeE != null
+                ? patch.monthlyFeeE > 0
+                  ? `E${Number(patch.monthlyFeeE).toLocaleString()} / mo`
+                  : 'Custom'
+                : patch.priceLabel ?? p.priceLabel,
+          })
+        : p
     );
     save(plans);
     return plans;
@@ -136,24 +136,4 @@ export const subscriptionPlans = {
       storage_limit: p.storageLimitGb,
     };
   },
-
-  /** Numeric monthly fee for a tier. Used by RegisterOrgModal fee preview. */
-  monthlyFeeFor(tier: SubscriptionTier): number {
-    return this.get(tier).monthlyFeeE;
-  },
-
-  /**
-   * Live fee preview used at registration.
-   * Base tier fee + 2% of estimated monthly rent roll.
-   */
-  estimateMonthlyFee(
-    tier: SubscriptionTier,
-    estimatedMonthlyRental: number
-  ): { baseFee: number; rentRollFee: number; total: number } {
-    const baseFee = this.monthlyFeeFor(tier);
-    const rentRollFee = Math.round((estimatedMonthlyRental || 0) * 0.02);
-    return { baseFee, rentRollFee, total: baseFee + rentRollFee };
-  },
 };
-
-export type { TierPlan as SubscriptionPlan };
