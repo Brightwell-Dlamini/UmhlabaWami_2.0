@@ -139,7 +139,7 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
           { id: 'approvals', label: `Approvals (${pending.length})` },
           { id: 'organizations', label: `Organisations (${orgs.length})` },
           { id: 'subscriptions', label: 'Subscription Tiers' },
-          { id: 'listings', label: `Marketplace (${shops.length})` },
+          { id: 'listings', label: `Units (${shops.length})` },
           { id: 'audit', label: 'Audit' },
         ].map((t) => (
           <button
@@ -285,7 +285,7 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
       {activeTab === 'listings' && (
         <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5">
           <h2 className="text-sm font-bold mb-3">
-            Public marketplace — currently listed
+            Platform units (read-only overview)
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {shops.length === 0 ? (
