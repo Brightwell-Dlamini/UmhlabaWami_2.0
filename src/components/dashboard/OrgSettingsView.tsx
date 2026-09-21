@@ -17,6 +17,8 @@ import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 import { useRealtime } from '../../hooks/useRealtime';
 import type { Organization, SubscriptionTier } from '../../types';
+import { ImageSourceField } from '../ui/ImageSourceField';
+import { uploadFile } from '../../services/storage';
 
 interface SettingsFormState {
   companyName: string;
@@ -88,11 +90,15 @@ export function OrgSettingsView() {
   } | null>(null);
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const [logoUrl, setLogoUrl] = useState(activeOrg?.logo_url ?? '');
 
   useEffect(() => {
-    if (activeOrg) setForm(initialFormFromOrg(activeOrg));
+    if (activeOrg) {
+      setForm(initialFormFromOrg(activeOrg));
+      setLogoUrl(activeOrg.logo_url ?? '');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeOrg?.id, activeOrg?.company_name]);
+  }, [activeOrg?.id, activeOrg?.company_name, activeOrg?.logo_url]);
 
   const updateOrg = useSupabaseMutation({
     mutationFn: (patch: Parameters<typeof orgApi.update>[1]) =>
@@ -129,20 +135,24 @@ export function OrgSettingsView() {
     }
 
     try {
-      // Cast through `any` because orgApi.update's Pick<> type doesn't
-      // include the new columns yet. Update the API's Pick<> once you're
-      // comfortable with the column names.
       await updateOrg.mutate({
         company_name: form.companyName,
         address: form.address,
         email: form.email,
         phone: form.phone,
+        logo_url: logoUrl || undefined,
         escalation_rate_pct: esc,
         grace_period_days: Math.round(grace),
         utility_markup_pct: markup,
         auto_invoice_enabled: form.autoInvoice,
       } as Parameters<typeof orgApi.update>[1]);
       flash('Organization settings saved.');
+      try {
+        const updated = await orgApi.get(orgId);
+        auth.setCurrentOrganization(updated);
+      } catch {
+        /* non-fatal — logo still saved server-side */
+      }
     } catch (err) {
       flash(
         err instanceof Error ? err.message : 'Failed to save settings.',
@@ -213,7 +223,7 @@ export function OrgSettingsView() {
         <div className="flex items-center gap-2">
           <Building2 className="w-5 h-5 text-blue-600" />
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
-            Organization Profile &amp; Operational Settings
+            Organization Profile & Operational Settings
           </h1>
         </div>
         <p className="text-xs sm:text-sm text-slate-500 mt-1">
@@ -291,7 +301,7 @@ export function OrgSettingsView() {
           <div>
             <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2 border-b border-slate-100 dark:border-slate-700 pb-2">
               <Building2 className="w-4 h-4 text-blue-600" />
-              <span>Corporate &amp; Billing Identity</span>
+              <span>Corporate & Billing Identity</span>
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
               <div className="sm:col-span-2">
@@ -306,6 +316,28 @@ export function OrgSettingsView() {
                     setForm({ ...form, companyName: e.target.value })
                   }
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <ImageSourceField
+                  label="Organisation logo"
+                  hint="Shown on your org dashboard and in the top bar. Upload, paste a URL, or use the camera."
+                  value={logoUrl}
+                  onChange={setLogoUrl}
+                  onUploadFile={async (file) => {
+                    const { publicUrl } = await uploadFile({
+                      bucket: 'org-logos',
+                      organizationId: orgId,
+                      entityId: orgId,
+                      file,
+                    });
+                    if (!publicUrl)
+                      throw new Error(
+                        'Upload did not return a public URL. Check the org-logos bucket is public.'
+                      );
+                    return publicUrl;
+                  }}
                 />
               </div>
 
@@ -326,7 +358,7 @@ export function OrgSettingsView() {
 
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Billing &amp; Admin Email *
+                  Billing & Admin Email *
                 </label>
                 <input
                   type="email"
@@ -386,7 +418,7 @@ export function OrgSettingsView() {
           <div className="pt-2">
             <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2 border-b border-slate-100 dark:border-slate-700 pb-2">
               <Sliders className="w-4 h-4 text-blue-600" />
-              <span>Commercial Leasing &amp; Financial Rules</span>
+              <span>Commercial Leasing & Financial Rules</span>
             </h2>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
@@ -485,108 +517,47 @@ export function OrgSettingsView() {
           <span>Data Export</span>
         </h2>
         <p className="text-xs text-slate-500 mt-2">
-          Download a JSON snapshot of your organisation profile. Full
-          portfolio data can be exported as CSV from the Analytics &amp;
-          Reports view.
+          Download a JSON snapshot of your organisation profile.
         </p>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-          <button
-            onClick={handleExportBackup}
-            className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-blue-500 dark:hover:border-blue-500 bg-slate-50 dark:bg-slate-900/50 flex flex-col items-center justify-center gap-2 text-center transition group"
-            type="button"
-          >
-            <Download className="w-5 h-5 text-blue-600 group-hover:scale-110 transition-transform" />
-            <span className="font-bold text-xs text-slate-900 dark:text-white">
-              Export Organisation Profile (JSON)
-            </span>
-            <span className="text-[10px] text-slate-400">
-              Company details, tier, and code
-            </span>
-          </button>
-
-          <button
-            onClick={() => {
-              window.location.hash = 'tab=analytics_reports';
-            }}
-            className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-blue-500 dark:hover:border-blue-500 bg-slate-50 dark:bg-slate-900/50 flex flex-col items-center justify-center gap-2 text-center transition group"
-            type="button"
-          >
-            <Sliders className="w-5 h-5 text-blue-600 group-hover:scale-110 transition-transform" />
-            <span className="font-bold text-xs text-slate-900 dark:text-white">
-              Open Analytics &amp; Reports
-            </span>
-            <span className="text-[10px] text-slate-400">
-              Export tickets, invoices, and vendor CSVs
-            </span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={handleExportBackup}
+          className="mt-3 px-4 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 hover:bg-slate-50 dark:hover:bg-slate-900"
+        >
+          <Download className="w-3.5 h-3.5" /> Export organisation settings
+        </button>
       </div>
 
       {showPlanModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-xl border border-slate-200 dark:border-slate-700 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                Select Subscription Plan Tier
-              </h2>
-              <button
-                onClick={() => setShowPlanModal(false)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-white text-xs font-bold px-2 py-1"
-                type="button"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-              {plans.map((plan) => {
-                const isCurrent = currentTier === plan.tier;
-                return (
-                  <div
-                    key={plan.tier}
-                    className={`p-4 rounded-xl border flex flex-col justify-between transition ${
-                      isCurrent
-                        ? 'border-blue-600 bg-blue-50/40 dark:bg-blue-950/30 ring-2 ring-blue-500'
-                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
-                    }`}
-                  >
-                    <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
-                        {plan.tier}
-                      </span>
-                      <h3 className="font-bold text-slate-900 dark:text-white mt-1">
-                        {plan.name}
-                      </h3>
-                      <div className="mt-2 font-bold text-base text-slate-900 dark:text-white">
-                        {plan.priceLabel}
-                      </div>
-                      <ul className="mt-3 space-y-1 text-[11px] text-slate-500">
-                        {plan.features.map((feat) => (
-                          <li key={feat} className="flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
-                            <span>{feat}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    <button
-                      onClick={() => handleSelectTier(plan.tier)}
-                      disabled={isCurrent || updateOrg.loading}
-                      className={`mt-4 w-full py-2 rounded-xl font-bold transition text-center ${
-                        isCurrent
-                          ? 'bg-slate-200 dark:bg-slate-700 text-slate-500 cursor-not-allowed'
-                          : 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm disabled:opacity-60'
-                      }`}
-                      type="button"
-                    >
-                      {isCurrent ? 'Current Plan' : 'Select Plan'}
-                    </button>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-lg w-full border p-6 shadow-2xl space-y-4">
+            <h3 className="font-bold text-base">Choose subscription tier</h3>
+            <div className="space-y-2">
+              {plans.map((p) => (
+                <button
+                  key={p.tier}
+                  type="button"
+                  onClick={() => void handleSelectTier(p.tier)}
+                  className={`w-full text-left px-4 py-3 rounded-xl border text-xs ${
+                    p.tier === currentTier
+                      ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/30'
+                      : 'hover:bg-slate-50 dark:hover:bg-slate-900'
+                  }`}
+                >
+                  <div className="font-bold">{p.tier}</div>
+                  <div className="text-slate-500">
+                    Up to {p.propertyLimit} centres · {p.tenantLimit} tenants
                   </div>
-                );
-              })}
+                </button>
+              ))}
             </div>
+            <button
+              type="button"
+              onClick={() => setShowPlanModal(false)}
+              className="w-full px-4 py-2 rounded-xl border text-xs font-semibold"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}
