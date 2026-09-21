@@ -45,8 +45,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
   };
 
-  const isPlatformCode = ['SUPER', 'PLATFORM', 'ADMIN'].includes(orgCode.trim().toUpperCase());
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/75 backdrop-blur-sm">
       <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
@@ -59,11 +57,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <h3 className="font-bold text-sm text-slate-900 dark:text-white">
                 Sign In to Umhlaba Wami
               </h3>
-              <p className="text-[11px] text-slate-500">
-                {isPlatformCode
-                  ? 'Platform admin — use SUPER + email or username'
-                  : 'Use your organisation code'}
-              </p>
+              <p className="text-[11px] text-slate-500">Use your organisation code</p>
             </div>
           </div>
           <button
@@ -98,6 +92,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   className="w-full bg-transparent text-xs font-mono font-medium text-slate-900 dark:text-white uppercase focus:outline-none"
                 />
               </div>
+              <p className="mt-1 text-[10px] text-slate-500">
+                Platform owners: use code <span className="font-mono font-semibold text-violet-600">SUPER</span> with your username or email.
+              </p>
             </div>
 
             <div>
@@ -111,9 +108,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   required
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder={isPlatformCode ? 'admin@example.com or username' : 'your.username'}
+                  placeholder="your.username"
                   className="w-full bg-transparent text-xs text-slate-900 dark:text-white focus:outline-none"
-                  autoComplete="username"
                 />
               </div>
             </div>
@@ -131,7 +127,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   className="w-full bg-transparent text-xs text-slate-900 dark:text-white focus:outline-none"
-                  autoComplete="current-password"
                 />
               </div>
             </div>

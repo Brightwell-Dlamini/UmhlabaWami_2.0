@@ -138,7 +138,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'super_subscriptions', label: 'Subscription Tiers', icon: Sliders },
           { id: 'analytics_reports', label: 'Global Analytics', icon: BarChart3 },
           { id: 'audit_logs', label: 'System Audit Trail', icon: History },
-          { id: 'db_backup', label: 'Database Backup', icon: Settings },
+          { id: 'profile_settings', label: 'My Profile', icon: User },
         ];
       default:
         return [
@@ -225,7 +225,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </span>
             <span className="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-200 dark:ring-emerald-900 animate-pulse" />
           </div>
-          <p className="text-[10px] text-slate-400 truncate mt-0.5">Commercial property operations</p>
+          <p className="text-[10px] text-slate-400 truncate mt-0.5">
+              {role === 'super_admin' ? 'Platform governance' : 'Commercial property operations'}
+            </p>
         </div>
       )}
     </aside>
