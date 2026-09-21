@@ -15,6 +15,9 @@ export interface TierPlan {
 
 const STORAGE_KEY = 'umhlaba_subscription_plans_v1';
 
+/** Platform fee as a share of the organisation's monthly rent roll. */
+const RENT_ROLL_FEE_RATE = 0.02;
+
 const DEFAULTS: TierPlan[] = [
   {
     tier: 'Starter',
@@ -134,6 +137,29 @@ export const subscriptionPlans = {
       tenant_limit: p.tenantLimit,
       user_limit: p.userLimit,
       storage_limit: p.storageLimitGb,
+    };
+  },
+
+  /**
+   * Used by RegisterOrgModal fee preview.
+   * total = tier base fee + 2% of estimated monthly rent roll.
+   * Enterprise (monthlyFeeE === 0) is treated as custom / contact-sales (base 0).
+   */
+  estimateMonthlyFee(tier: SubscriptionTier, estimatedMonthlyRent = 0): {
+    baseFee: number;
+    rentRollFee: number;
+    total: number;
+    rate: number;
+  } {
+    const plan = this.get(tier);
+    const baseFee = Number(plan.monthlyFeeE) || 0;
+    const rent = Math.max(0, Number(estimatedMonthlyRent) || 0);
+    const rentRollFee = Math.round(rent * RENT_ROLL_FEE_RATE);
+    return {
+      baseFee,
+      rentRollFee,
+      total: baseFee + rentRollFee,
+      rate: RENT_ROLL_FEE_RATE,
     };
   },
 };
