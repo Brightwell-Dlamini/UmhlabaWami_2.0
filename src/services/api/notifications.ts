@@ -38,4 +38,53 @@ export const notifications = {
       .eq('read', false);
     if (error) throw new Error(error.message);
   },
+
+  async create(input: {
+    user_id: string;
+    title: string;
+    message: string;
+    type?: string;
+    link?: string | null;
+  }): Promise<NotificationItem | null> {
+    try {
+      const result = await sb()
+        .from('notifications')
+        .insert({
+          user_id: input.user_id,
+          title: input.title,
+          message: input.message,
+          type: input.type ?? 'info',
+          link: input.link ?? null,
+          read: false,
+          created_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+      if (result.error) {
+        console.warn('[notifications] create failed', result.error.message);
+        return null;
+      }
+      return result.data as unknown as NotificationItem;
+    } catch (e) {
+      console.warn('[notifications] create exception', e);
+      return null;
+    }
+  },
+
+  /** Ensure the current user has at least a welcome row so the bell is not empty forever. */
+  async ensureWelcome(): Promise<void> {
+    const user = requireUser();
+    const { count } = await sb()
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id);
+    if ((count ?? 0) > 0) return;
+    await this.create({
+      user_id: user.id,
+      title: 'Welcome to Umhlaba Wami',
+      message:
+        'You will see ticket, lease and system alerts here. This is your notification centre.',
+      type: 'system',
+    });
+  },
 };
