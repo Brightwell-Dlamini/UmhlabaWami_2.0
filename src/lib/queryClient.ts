@@ -54,28 +54,39 @@ export function subscribe(key: string, listener: Listener): () => void {
  * Both `key` and `prefix` are JSON.stringify'd arrays (or plain strings).
  * We compare segment-wise so ['invoices', 'org1'] matches prefix ['invoices']
  * but does NOT match prefix ['invoice'].
+ *
+ * Plain string prefixes such as 'shops' (from invalidateKeys) match the first
+ * segment of JSON array keys like ["shops","orgId"].
  */
 function keyMatchesPrefix(key: string, prefix: string): boolean {
   if (!prefix) return false;
   if (key === prefix) return true;
 
-  // Fast path: both JSON arrays
+  // Cache keys are typically JSON.stringify(['shops', orgId]).
+  // Mutations pass plain prefixes like 'shops' via invalidateKeys.
   try {
     const keyParts = JSON.parse(key) as unknown;
-    const prefixParts = JSON.parse(prefix) as unknown;
 
-    if (Array.isArray(keyParts) && Array.isArray(prefixParts)) {
-      if (prefixParts.length > keyParts.length) return false;
-      for (let i = 0; i < prefixParts.length; i++) {
-        if (keyParts[i] !== prefixParts[i]) return false;
+    if (Array.isArray(keyParts)) {
+      try {
+        const prefixParts = JSON.parse(prefix) as unknown;
+        if (Array.isArray(prefixParts)) {
+          if (prefixParts.length > keyParts.length) return false;
+          for (let i = 0; i < prefixParts.length; i++) {
+            if (keyParts[i] !== prefixParts[i]) return false;
+          }
+          return true;
+        }
+      } catch {
+        // prefix is a plain string (e.g. 'shops') — match first segment
+        return keyParts[0] === prefix;
       }
-      return true;
     }
   } catch {
-    // key or prefix is a plain string — fall through to string compare
+    // key is a plain string
   }
 
-  return false;
+  return key === prefix || key.startsWith(`${prefix}:`) || key.startsWith(`${prefix},`);
 }
 
 function notifyExact(key: string) {
