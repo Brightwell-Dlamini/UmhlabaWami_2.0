@@ -1,4 +1,3 @@
-// src/components/dashboard/ManagerDashboard.tsx
 import React, { useMemo, useState } from 'react';
 import {
   PlusCircle,
@@ -21,12 +20,7 @@ interface Props {
   onOpenBroadcastModal: () => void;
 }
 
-type QuickFilter =
-  | 'none'
-  | 'open'
-  | 'emergency'
-  | 'in_progress'
-  | 'awaiting';
+type QuickFilter = 'none' | 'open' | 'emergency' | 'in_progress' | 'awaiting';
 
 export const ManagerDashboard: React.FC<Props> = ({
   onViewTicket,
@@ -41,8 +35,8 @@ export const ManagerDashboard: React.FC<Props> = ({
   const [quickFilter, setQuickFilter] = useState<QuickFilter>('none');
 
   const { data: tickets = [] } = useSupabaseQuery(
-    ['tickets', 'lite', orgId],
-    () => ticketsApi.listLite(),
+    ['tickets', orgId],
+    () => ticketsApi.list(),
     { enabled: !!orgId }
   );
   const { data: shops = [] } = useSupabaseQuery(
@@ -56,8 +50,6 @@ export const ManagerDashboard: React.FC<Props> = ({
     { enabled: !!orgId }
   );
 
-  // Realtime invalidates the shared 'tickets' prefix, which covers both
-  // ['tickets', orgId] (full) and ['tickets', 'lite', orgId].
   useRealtime({
     table: 'tickets',
     filter: orgId ? `organization_id=eq.${orgId}` : undefined,
@@ -113,25 +105,35 @@ export const ManagerDashboard: React.FC<Props> = ({
 
   if (!orgId) {
     return (
-      <div className="p-6 text-slate-500 text-sm">
-        No organisation context.
-      </div>
+      <div className="p-6 text-slate-500 text-sm">No organisation context.</div>
     );
   }
 
   return (
     <div className="space-y-6 pb-12">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 inline-block">
-            Property operations
+        <div className="flex items-start gap-3 min-w-0">
+          {auth.getCurrentOrganization()?.logo_url && (
+            <img
+              src={auth.getCurrentOrganization()!.logo_url}
+              alt=""
+              className="h-12 w-12 rounded-xl object-contain border border-slate-200 dark:border-slate-700 bg-white shrink-0"
+            />
+          )}
+          <div className="min-w-0">
+            <div className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 inline-block">
+              Property operations
+            </div>
+            <h1 className="text-2xl font-bold mt-1 truncate">
+              {auth.getCurrentOrganization()?.company_name || 'Operations dashboard'}
+            </h1>
+            <p className="text-xs text-slate-500">
+              Maintenance, SLAs and occupancy
+              {auth.getCurrentOrganization()?.organization_code
+                ? ` · ${auth.getCurrentOrganization()!.organization_code}`
+                : ''}
+            </p>
           </div>
-          <h1 className="text-2xl font-bold mt-1">
-            Operations dashboard
-          </h1>
-          <p className="text-xs text-slate-500">
-            Maintenance, SLAs and occupancy
-          </p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -157,11 +159,7 @@ export const ManagerDashboard: React.FC<Props> = ({
           value={`${kpis.occupancy}%`}
           icon={Clock}
         />
-        <button
-          onClick={() => toggleQuick('open')}
-          type="button"
-          className="text-left"
-        >
+        <button onClick={() => toggleQuick('open')} type="button" className="text-left">
           <KpiCard
             label="Open"
             value={kpis.open}
@@ -221,8 +219,7 @@ export const ManagerDashboard: React.FC<Props> = ({
               (s) => s.status === 'Occupied'
             ).length;
             const openTickets = tickets.filter(
-              (t) =>
-                t.shopping_center_id === c.id && t.status !== 'Closed'
+              (t) => t.shopping_center_id === c.id && t.status !== 'Closed'
             ).length;
             const emergencies = tickets.filter(
               (t) =>
@@ -371,8 +368,8 @@ export const ManagerDashboard: React.FC<Props> = ({
                           t.priority === 'Emergency'
                             ? 'bg-red-600 text-white'
                             : t.priority === 'High'
-                            ? 'bg-amber-500 text-white'
-                            : 'bg-slate-100 dark:bg-slate-700'
+                              ? 'bg-amber-500 text-white'
+                              : 'bg-slate-100 dark:bg-slate-700'
                         }`}
                       >
                         {t.priority}
@@ -382,13 +379,10 @@ export const ManagerDashboard: React.FC<Props> = ({
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-1 text-[11px]">
                         <Clock className="w-3.5 h-3.5 text-blue-600" />
-                        {new Date(t.resolution_deadline).toLocaleTimeString(
-                          [],
-                          {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          }
-                        )}
+                        {new Date(t.resolution_deadline).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
                       </div>
                     </td>
                     <td className="px-3 py-3 text-right text-blue-600 font-semibold">
