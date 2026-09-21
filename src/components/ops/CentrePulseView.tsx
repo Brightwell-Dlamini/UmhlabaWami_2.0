@@ -1,6 +1,13 @@
+// src/components/ops/CentrePulseView.tsx
 import React from 'react';
 import {
-  Activity, Building2, Clock, Flame, Users, Wrench, CheckCircle2,
+  Activity,
+  Building2,
+  Clock,
+  Flame,
+  Users,
+  Wrench,
+  CheckCircle2,
 } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { centrePulse } from '../../services/api/centrePulse';
@@ -10,21 +17,36 @@ interface Props {
   shoppingCenterId?: string;
 }
 
+/** 60s refresh, visibility-aware (see useSupabaseQuery). */
+const REFRESH_MS = 60_000;
+
 export function CentrePulseView({ shoppingCenterId }: Props) {
   const org = auth.getCurrentOrganization();
   const orgId = org?.id ?? '';
 
-  const { data: snapshot, loading, error } = useSupabaseQuery(
+  const {
+    data: snapshot,
+    loading,
+    error,
+  } = useSupabaseQuery(
     ['centre_pulse', orgId, shoppingCenterId ?? ''],
     () => centrePulse.fetch(orgId, shoppingCenterId),
-    { enabled: !!orgId, refreshInterval: 60_000 }
+    { enabled: !!orgId, refreshInterval: REFRESH_MS }
   );
 
   if (!orgId) {
-    return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
+    return (
+      <div className="p-6 text-slate-500 text-sm">
+        No organisation context.
+      </div>
+    );
   }
   if (loading && !snapshot) {
-    return <div className="p-6 text-slate-500 text-sm">Loading Centre Pulse…</div>;
+    return (
+      <div className="p-6 text-slate-500 text-sm">
+        Loading Centre Pulse…
+      </div>
+    );
   }
   if (error && !snapshot) {
     return <div className="p-6 text-red-500 text-sm">{error.message}</div>;
@@ -89,7 +111,8 @@ export function CentrePulseView({ shoppingCenterId }: Props) {
         <div>
           <h1 className="text-2xl font-semibold">Centre Pulse</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Live operations snapshot, refreshes every minute
+            Live operations snapshot, refreshes every minute (only while
+            visible)
           </p>
         </div>
         <p className="text-xs text-slate-400">
@@ -101,14 +124,19 @@ export function CentrePulseView({ shoppingCenterId }: Props) {
         {cards.map((c) => {
           const Icon = c.icon;
           return (
-            <div key={c.label} className="rounded-xl border bg-white dark:bg-slate-900 p-4">
+            <div
+              key={c.label}
+              className="rounded-xl border bg-white dark:bg-slate-900 p-4"
+            >
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
                     {c.label}
                   </p>
                   <p className="mt-2 text-3xl font-semibold">{c.value}</p>
-                  {c.sub && <p className="mt-1 text-xs text-slate-500">{c.sub}</p>}
+                  {c.sub && (
+                    <p className="mt-1 text-xs text-slate-500">{c.sub}</p>
+                  )}
                 </div>
                 <div className={`rounded-lg p-2 ${c.tone}`}>
                   <Icon className="w-5 h-5" />

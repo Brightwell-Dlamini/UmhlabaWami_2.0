@@ -1,3 +1,4 @@
+// src/hooks/useSupabaseQuery.ts
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { getEntry, setEntry, subscribe } from '../lib/queryClient';
 
@@ -18,7 +19,8 @@ interface QueryResult<T> {
  *  - data is undefined
  *  - entry.needsRefetch is true and no fetch is in flight
  *  - refetch() is called manually
- *  - refreshInterval elapses (if enabled)
+ *  - refreshInterval elapses (only when the tab is visible)
+ *  - the tab regains focus (if refreshInterval was configured)
  *
  * Never blanks data during a refetch — stale values remain visible.
  * Safe against StrictMode double-mount.
@@ -50,7 +52,11 @@ export function useSupabaseQuery<T>(
     // Only flip loading if we have no data yet — otherwise keep stale visible.
     const current = getEntry<T>(thisKey);
     if (current.data === undefined) {
-      setEntry<T>(thisKey, { loading: true, error: null, needsRefetch: false });
+      setEntry<T>(thisKey, {
+        loading: true,
+        error: null,
+        needsRefetch: false,
+      });
     } else {
       setEntry<T>(thisKey, { needsRefetch: false, error: null });
     }
@@ -82,7 +88,7 @@ export function useSupabaseQuery<T>(
     }
   }, [enabled]);
 
-  // Reset local snapshot immediately when key changes (avoids stale-key render).
+  // Reset local snapshot immediately when key changes.
   useEffect(() => {
     setSnapshot({ ...getEntry<T>(keyStr) });
   }, [keyStr]);
@@ -95,7 +101,12 @@ export function useSupabaseQuery<T>(
       if (!mountedRef.current) return;
       const next = getEntry<T>(keyStr);
       setSnapshot({ ...next });
-      if (enabled && next.needsRefetch && !next.loading && !inFlightRef.current) {
+      if (
+        enabled &&
+        next.needsRefetch &&
+        !next.loading &&
+        !inFlightRef.current
+      ) {
         void run();
       }
     });
@@ -110,18 +121,48 @@ export function useSupabaseQuery<T>(
       void run();
     }
 
+    // Interval polling — paused while the tab is hidden.
     let interval: ReturnType<typeof setInterval> | undefined;
-    if (enabled && options.refreshInterval && options.refreshInterval > 0) {
+    const refreshMs = options.refreshInterval ?? 0;
+
+    const startInterval = () => {
+      if (interval || refreshMs <= 0 || !enabled) return;
       interval = setInterval(() => {
-        if (mountedRef.current && enabled) void run();
-      }, options.refreshInterval);
+        // Belt-and-braces: also check visibility at tick time.
+        if (document.visibilityState === 'visible') void run();
+      }, refreshMs);
+    };
+    const stopInterval = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = undefined;
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        // Immediate catch-up fetch when returning to the tab.
+        if (enabled && !inFlightRef.current) void run();
+        startInterval();
+      } else {
+        stopInterval();
+      }
+    };
+
+    if (refreshMs > 0 && enabled) {
+      if (document.visibilityState === 'visible') startInterval();
+      document.addEventListener('visibilitychange', handleVisibility);
     }
 
     return () => {
       mountedRef.current = false;
       unsub();
-      if (interval) clearInterval(interval);
+      stopInterval();
+      if (refreshMs > 0) {
+        document.removeEventListener('visibilitychange', handleVisibility);
+      }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keyStr, enabled, run, options.refreshInterval]);
 
   return {

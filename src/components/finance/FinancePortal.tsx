@@ -7,8 +7,15 @@ import { QuotesOrdersTab } from './QuotesOrdersTab';
 import { ItemsRemindersTab } from './ItemsRemindersTab';
 import type { ItemsSubTab } from './ItemsRemindersTab';
 import { CommercialEngineView } from './CommercialEngineView';
+import { RentRollView } from './RentRollView';
 
-type Tab = 'dashboard' | 'invoices' | 'quotes' | 'items' | 'engine';
+type Tab =
+  | 'dashboard'
+  | 'invoices'
+  | 'quotes'
+  | 'engine'
+  | 'rent_roll'
+  | 'items';
 
 interface PortalRoute {
   tab: Tab;
@@ -20,7 +27,7 @@ interface PortalRoute {
  * Maps the sidebar's granular item ids to the coarse tab + optional
  * sub-tab we render.
  *
- *   rent_roll             → invoices
+ *   rent_roll             → rent_roll
  *   invoices              → invoices
  *   transactions          → items / expenses
  *   expenses_ledger       → items / expenses
@@ -34,6 +41,7 @@ function resolveRoute(initialTab?: string): PortalRoute {
   if (!initialTab) return { tab: 'dashboard' };
   switch (initialTab) {
     case 'rent_roll':
+      return { tab: 'rent_roll' };
     case 'invoices':
     case 'finance_documents':
       return { tab: 'invoices' };
@@ -58,6 +66,7 @@ function resolveRoute(initialTab?: string): PortalRoute {
 
 const TAB_LABELS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' },
+  { id: 'rent_roll', label: 'Rent Roll' },
   { id: 'invoices', label: 'Invoices' },
   { id: 'quotes', label: 'Quotes & Orders' },
   { id: 'engine', label: 'Commercial Engine' },
@@ -75,7 +84,6 @@ export const FinancePortal: React.FC<{ initialTab?: string }> = ({
     initialRoute.itemsSubTab
   );
 
-  // If the parent pushes a new initialTab, follow it.
   useEffect(() => {
     const route = resolveRoute(initialTab);
     setTab(route.tab);
@@ -100,7 +108,6 @@ export const FinancePortal: React.FC<{ initialTab?: string }> = ({
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Header */}
       <div className="p-6 rounded-2xl bg-gradient-to-r from-emerald-700 to-teal-900 text-white shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="text-xs font-bold px-2 py-0.5 rounded bg-white/20 text-emerald-100 inline-block">
@@ -116,14 +123,12 @@ export const FinancePortal: React.FC<{ initialTab?: string }> = ({
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 pb-2 flex-wrap">
         {TAB_LABELS.map((t) => (
           <button
             key={t.id}
             onClick={() => {
               setTab(t.id);
-              // Reset sub-tab hint when leaving the items tab.
               if (t.id !== 'items') setItemsSubTab(undefined);
             }}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
@@ -139,6 +144,7 @@ export const FinancePortal: React.FC<{ initialTab?: string }> = ({
       </div>
 
       {tab === 'dashboard' && <FinanceDashboard />}
+      {tab === 'rent_roll' && <RentRollView />}
       {tab === 'invoices' && <InvoicesTab />}
       {tab === 'quotes' && <QuotesOrdersTab />}
       {tab === 'engine' && <CommercialEngineView />}
