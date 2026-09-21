@@ -54,9 +54,6 @@ export function subscribe(key: string, listener: Listener): () => void {
  * Both `key` and `prefix` are JSON.stringify'd arrays (or plain strings).
  * We compare segment-wise so ['invoices', 'org1'] matches prefix ['invoices']
  * but does NOT match prefix ['invoice'].
- *
- * Plain string prefixes such as 'shops' (from invalidateKeys) match the first
- * segment of JSON array keys like ["shops","orgId"].
  */
 function keyMatchesPrefix(key: string, prefix: string): boolean {
   if (!prefix) return false;

@@ -78,7 +78,7 @@ export function ImageSourceField({
             className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition ${
               mode === m.id
                 ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
-                : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                : 'border-slate-200 dark:border-slate-700 text-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
             <m.icon className="w-3.5 h-3.5" />
@@ -92,6 +92,7 @@ export function ImageSourceField({
         type="file"
         accept="image/*"
         className="hidden"
+        disabled={disabled || busy}
         onChange={(e) => void handleFile(e.target.files?.[0] ?? null)}
       />
       <input
@@ -100,6 +101,7 @@ export function ImageSourceField({
         accept="image/*"
         capture="environment"
         className="hidden"
+        disabled={disabled || busy}
         onChange={(e) => void handleFile(e.target.files?.[0] ?? null)}
       />
 
@@ -108,16 +110,16 @@ export function ImageSourceField({
           <input
             type="url"
             value={urlDraft}
-            disabled={disabled || busy}
             onChange={(e) => setUrlDraft(e.target.value)}
             placeholder="https://…"
-            className="flex-1 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+            className="flex-1 px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+            disabled={disabled || busy}
           />
           <button
             type="button"
             disabled={disabled || busy || !urlDraft.trim()}
             onClick={() => onChange(urlDraft.trim())}
-            className="px-3 py-2 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50"
+            className="px-3 py-2 rounded-xl bg-blue-600 text-white font-bold disabled:opacity-50"
           >
             Apply
           </button>
@@ -127,27 +129,27 @@ export function ImageSourceField({
       {busy && <p className="text-[10px] text-blue-600">Uploading…</p>}
       {error && <p className="text-[10px] text-red-600">{error}</p>}
 
-      {value && (
-        <div className="relative inline-block">
+      {value ? (
+        <div className="relative inline-block mt-1">
           <img
             src={value}
             alt="Preview"
-            className="h-20 w-20 rounded-xl object-contain border border-slate-200 dark:border-slate-700 bg-white"
+            className="h-16 w-16 object-contain rounded-xl border border-slate-200 dark:border-slate-700 bg-white"
           />
           <button
             type="button"
+            title="Remove"
             disabled={disabled}
             onClick={() => {
               onChange('');
               setUrlDraft('');
             }}
-            className="absolute -top-1.5 -right-1.5 p-0.5 rounded-full bg-slate-800 text-white"
-            title="Remove"
+            className="absolute -top-1.5 -right-1.5 p-0.5 rounded-full bg-red-500 text-white"
           >
             <X className="w-3 h-3" />
           </button>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
