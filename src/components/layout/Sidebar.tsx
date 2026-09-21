@@ -62,9 +62,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'tenant_overview', label: 'Dashboard', icon: LayoutDashboard },
           { id: 'tenant_tickets', label: 'My Tickets', icon: Ticket },
           { id: 'report_issue', label: 'Report Issue', icon: PlusCircle, highlight: true },
+          { id: 'tenant_finance', label: 'My Finances', icon: DollarSign },
           { id: 'messages', label: 'Messages', icon: MessageSquare },
           { id: 'tenant_documents', label: 'Documents', icon: FileText },
-          { id: 'tenant_lease', label: 'Lease & SLA', icon: FileBadge },
+          { id: 'tenant_lease', label: 'My Lease', icon: FileBadge },
           { id: 'announcements', label: 'Announcements', icon: Megaphone },
           { id: 'profile_settings', label: 'My Profile', icon: User },
         ];
