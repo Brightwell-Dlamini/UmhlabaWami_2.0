@@ -17,6 +17,7 @@ import { AnnouncementsView } from './dashboard/AnnouncementsView';
 import { MessagesView } from './dashboard/MessagesView';
 import { AnalyticsReportsView } from './dashboard/AnalyticsReportsView';
 import { TenantDocumentsView } from './dashboard/TenantDocumentsView';
+import { TenantFinanceView } from './dashboard/TenantFinanceView';
 import { OrgUsersView } from './dashboard/OrgUsersView';
 import { OrgSettingsView } from './dashboard/OrgSettingsView';
 import { CreateTicketWizard } from './tickets/CreateTicketWizard';
@@ -41,7 +42,6 @@ interface Props {
 
 const TAB_STORAGE_KEY = 'uw_sidebar_tab';
 
-/** First sidebar item for each role — landing screen after login. */
 function defaultTab(role?: UserRole): string {
   switch (role) {
     case 'tenant':
@@ -62,7 +62,6 @@ function defaultTab(role?: UserRole): string {
   }
 }
 
-/** Tabs that are valid for a role — used so #tab=units does not trap a super_admin. */
 function tabsForRole(role?: UserRole): Set<string> {
   switch (role) {
     case 'tenant':
@@ -70,6 +69,7 @@ function tabsForRole(role?: UserRole): Set<string> {
         'tenant_overview',
         'tenant_tickets',
         'report_issue',
+        'tenant_finance',
         'messages',
         'tenant_documents',
         'tenant_lease',
@@ -164,7 +164,6 @@ function isTabAllowed(tab: string, role?: UserRole): boolean {
   return tabsForRole(role).has(tab);
 }
 
-/** Restore last tab only if it belongs to this role; otherwise first menu item. */
 function readInitialTab(role?: UserRole): string {
   const fallback = defaultTab(role);
   try {
@@ -204,7 +203,6 @@ function persistTab(tab: string) {
   }
 }
 
-/** Clear hash + session tab so the next login is not stuck on another role's screen. */
 export function clearPersistedTab() {
   try {
     sessionStorage.removeItem(TAB_STORAGE_KEY);
@@ -229,12 +227,10 @@ export function OperationsApp({ currentUser, showToast }: Props) {
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [isBroadcastOpen, setIsBroadcastOpen] = useState(false);
 
-  // Persist tab so refresh / tab-return keeps the same screen.
   useEffect(() => {
     persistTab(sidebarActiveTab);
   }, [sidebarActiveTab]);
 
-  // When role or user changes, land on that role's first menu item (never reuse another role's #tab).
   const roleRef = useRef(currentUser.role);
   const userIdRef = useRef(currentUser.id);
   useEffect(() => {
@@ -248,7 +244,6 @@ export function OperationsApp({ currentUser, showToast }: Props) {
       persistTab(next);
       return;
     }
-    // Guard: if somehow an invalid tab is active for this role, reset.
     setSidebarActiveTab((prev) => {
       if (isTabAllowed(prev, currentUser.role)) return prev;
       const next = defaultTab(currentUser.role);
@@ -257,8 +252,6 @@ export function OperationsApp({ currentUser, showToast }: Props) {
     });
   }, [currentUser.role, currentUser.id]);
 
-  // Periodic SLA escalation while the tab is visible — do NOT re-run on every
-  // visibilitychange (that caused jarring UI refetches when switching Chrome tabs).
   useEffect(() => {
     if (!currentUser.organization_id) return;
     const run = () => {
@@ -267,7 +260,6 @@ export function OperationsApp({ currentUser, showToast }: Props) {
         /* non-fatal */
       });
     };
-    // One quiet pass after mount, then every 2 minutes while focused.
     const boot = setTimeout(run, 15_000);
     const id = setInterval(run, 120_000);
     return () => {
@@ -276,7 +268,6 @@ export function OperationsApp({ currentUser, showToast }: Props) {
     };
   }, [currentUser.organization_id]);
 
-  // Live emergency alert banner.
   const { data: activeEmergencies = [] } = useSupabaseQuery(
     ['emergency_broadcasts', 'active', currentUser.organization_id ?? ''],
     () => emergApi.listActive(),
@@ -332,14 +323,12 @@ export function OperationsApp({ currentUser, showToast }: Props) {
         </div>
 
         <div className="flex-1 min-w-0">
-          {/* ---- Manager / admin screens ---- */}
           {sidebarActiveTab === 'centres' && <CentresView />}
           {(sidebarActiveTab === 'units' ||
             sidebarActiveTab === 'properties') && (
             <UnitsDirectoryView onSelectShop={() => {}} />
           )}
 
-          {/* ---- Tenant flow ---- */}
           {sidebarActiveTab === 'tenant_overview' &&
             currentUser.role === 'tenant' && (
               <TenantDashboard
@@ -358,8 +347,8 @@ export function OperationsApp({ currentUser, showToast }: Props) {
           {sidebarActiveTab === 'tenant_documents' && (
             <TenantDocumentsView />
           )}
+          {sidebarActiveTab === 'tenant_finance' && <TenantFinanceView />}
 
-          {/* ---- Manager flow ---- */}
           {(sidebarActiveTab === 'manager_overview' ||
             sidebarActiveTab === 'admin_overview' ||
             sidebarActiveTab === 'overview') &&
@@ -400,7 +389,6 @@ export function OperationsApp({ currentUser, showToast }: Props) {
           {sidebarActiveTab === 'announcements' && <AnnouncementsView />}
           {sidebarActiveTab === 'analytics_reports' && <AnalyticsReportsView />}
 
-          {/* ---- Maintenance flow ---- */}
           {sidebarActiveTab === 'maintenance_jobs' && (
             <MaintenancePortal
               onViewTicket={(id) => setSelectedTicketId(id)}
@@ -409,20 +397,21 @@ export function OperationsApp({ currentUser, showToast }: Props) {
           {sidebarActiveTab === 'maintenance_completed' && (
             <TicketsListView
               onViewTicket={(id) => setSelectedTicketId(id)}
-              onOpenCreateTicket={() => setIsCreateTicketOpen(true)}
+              onOpenCreateTicket={
+                currentUser.role === 'maintenance'
+                  ? undefined
+                  : () => setIsCreateTicketOpen(true)
+              }
             />
           )}
 
-          {/* ---- Shared ---- */}
           {sidebarActiveTab === 'messages' && <MessagesView />}
           {sidebarActiveTab === 'profile_settings' && <ProfileSettingsView />}
 
-          {/* ---- Admin-specific ---- */}
           {(sidebarActiveTab === 'org_users' ||
             sidebarActiveTab === 'super_users') && <OrgUsersView />}
           {sidebarActiveTab === 'org_settings' && <OrgSettingsView />}
 
-          {/* ---- Finance ---- */}
           {(sidebarActiveTab === 'finance_overview' ||
             sidebarActiveTab === 'commercial_engine' ||
             sidebarActiveTab === 'rent_roll' ||
@@ -433,7 +422,6 @@ export function OperationsApp({ currentUser, showToast }: Props) {
             <FinancePortal initialTab={sidebarActiveTab} />
           )}
 
-          {/* ---- Super admin ---- */}
           {currentUser.role === 'super_admin' &&
             (sidebarActiveTab === 'super_overview' ||
               sidebarActiveTab === 'super_approvals' ||
