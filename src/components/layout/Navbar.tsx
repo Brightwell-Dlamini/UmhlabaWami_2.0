@@ -45,6 +45,15 @@ export const Navbar: React.FC<NavbarProps> = ({
     });
   }, []);
 
+  // Seed a welcome notification once so the bell is never permanently empty.
+  useEffect(() => {
+    if (!currentUser) return;
+    void notifApi.ensureWelcome().then(() => {
+      refetchCount();
+    }).catch(() => { /* non-fatal */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id]);
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
@@ -111,18 +120,31 @@ export const Navbar: React.FC<NavbarProps> = ({
           onClick={currentUser ? goDashboard : () => onSwitchViewMode?.('home')}
           className="flex items-center gap-2.5 min-w-0"
         >
-          <img
-            src={logoSrc}
-            alt="Umhlaba Wami"
-            className="h-9 w-auto object-contain shrink-0"
-            onError={() => setLogoSrc(LOGO_FALLBACK)}
-          />
+          {currentOrg?.logo_url ? (
+            <img
+              src={currentOrg.logo_url}
+              alt={currentOrg.company_name || 'Organisation'}
+              className="h-9 w-9 rounded-lg object-contain shrink-0 border border-slate-200 dark:border-slate-700 bg-white"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          ) : (
+            <img
+              src={logoSrc}
+              alt="Umhlaba Wami"
+              className="h-9 w-auto object-contain shrink-0"
+              onError={() => setLogoSrc(LOGO_FALLBACK)}
+            />
+          )}
           <div className="hidden sm:block text-left">
             <div className="font-display font-bold text-sm text-slate-900 dark:text-white leading-tight">
-              Umhlaba Wami
+              {currentOrg?.company_name || 'Umhlaba Wami'}
             </div>
             <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
-              Property management
+              {currentOrg?.organization_code
+                ? `Code ${currentOrg.organization_code}`
+                : 'Property management'}
             </div>
           </div>
         </button>
