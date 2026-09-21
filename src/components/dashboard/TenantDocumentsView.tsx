@@ -40,7 +40,17 @@ export const TenantDocumentsView: React.FC = () => {
 
   const myRows: DocRow[] = useMemo(() => {
     if (!currentUser) return [];
-    const myTenant = tenants.find((t) => t.user_id === currentUser.id);
+    const myTenant =
+      tenants.find((t) => t.user_id === currentUser.id) ??
+      tenants.find(
+        (t) =>
+          t.email &&
+          currentUser.email &&
+          t.email.toLowerCase() === currentUser.email.toLowerCase()
+      ) ??
+      (currentUser.shop_id
+        ? tenants.find((t) => t.shop_id === currentUser.shop_id)
+        : undefined);
     if (!myTenant) return [];
     return leases
       .filter((l) => l.tenant_id === myTenant.id)
@@ -76,12 +86,11 @@ export const TenantDocumentsView: React.FC = () => {
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Header */}
       <div>
         <div className="flex items-center gap-2">
           <FileText className="w-5 h-5 text-blue-600" />
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
-            Compliance &amp; Tenancy Documents
+            Compliance & Tenancy Documents
           </h1>
         </div>
         <p className="text-xs sm:text-sm text-slate-500 mt-1">
