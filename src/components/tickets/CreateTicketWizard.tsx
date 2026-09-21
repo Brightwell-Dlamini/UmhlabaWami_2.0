@@ -41,9 +41,33 @@ export const CreateTicketWizard: React.FC<Props> = ({ isOpen, onClose, onSuccess
     { enabled: !!user?.organization_id && isOpen }
   );
 
-  const effectiveShopId = selectedShopId || user?.shop_id || shops[0]?.id || '';
+  // Resolve the tenant first for role=tenant users — that gives us the correct shop.
+  const linkedTenant = useMemo(() => {
+    if (!user) return undefined;
+    return (
+      tenants.find((t) => t.user_id === user.id) ??
+      tenants.find(
+        (t) =>
+          t.email &&
+          user.email &&
+          t.email.toLowerCase() === user.email.toLowerCase()
+      ) ??
+      (user.shop_id ? tenants.find((t) => t.shop_id === user.shop_id) : undefined)
+    );
+  }, [tenants, user]);
+
+  const effectiveShopId =
+    selectedShopId ||
+    linkedTenant?.shop_id ||
+    user?.shop_id ||
+    (user?.role !== 'tenant' ? shops[0]?.id : '') ||
+    '';
   const shop = shops.find((s) => s.id === effectiveShopId);
-  const tenant = tenants.find((t) => t.shop_id === effectiveShopId || t.user_id === user?.id);
+  const tenant =
+    linkedTenant ??
+    tenants.find((t) => t.shop_id === effectiveShopId);
+
+  const isTenantRole = user?.role === 'tenant';
 
   const slaHours = useMemo(() => {
     switch (priority) {
@@ -78,8 +102,24 @@ export const CreateTicketWizard: React.FC<Props> = ({ isOpen, onClose, onSuccess
   };
 
   const submit = async () => {
-    if (!user || !shop || !tenant) {
-      setError('Missing shop or tenant context.');
+    if (!user) {
+      setError('You are not signed in. Please refresh and try again.');
+      return;
+    }
+    if (!tenant) {
+      setError(
+        isTenantRole
+          ? 'Your account is not linked to a tenant record yet. Ask your organisation admin to link your user to a tenant under Tenants Directory.'
+          : 'No tenant is associated with the selected unit. Create or link a tenant first.'
+      );
+      return;
+    }
+    if (!shop) {
+      setError(
+        isTenantRole
+          ? 'No unit is linked to your tenant record. Ask your organisation admin to assign a unit.'
+          : 'Select a unit (shop) before submitting the ticket.'
+      );
       return;
     }
     setSubmitting(true);
