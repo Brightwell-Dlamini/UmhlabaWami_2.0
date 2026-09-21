@@ -4,7 +4,7 @@
  * are never stuck behind a stale cache. Only offline-fallback caches the shell.
  * Hashed /assets/* files may be cached; everything else prefers the network.
  */
-const CACHE = 'umhlaba-wami-shell-v3';
+const CACHE = 'umhlaba-wami-shell-v4';
 const SHELL = ['/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
