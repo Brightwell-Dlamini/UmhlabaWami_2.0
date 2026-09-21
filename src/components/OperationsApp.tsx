@@ -41,11 +41,13 @@ interface Props {
 
 const TAB_STORAGE_KEY = 'uw_sidebar_tab';
 
+/** First sidebar item for each role — landing screen after login. */
 function defaultTab(role?: UserRole): string {
   switch (role) {
     case 'tenant':
       return 'tenant_overview';
     case 'property_manager':
+    case 'landlord':
       return 'manager_overview';
     case 'maintenance':
       return 'maintenance_jobs';
@@ -60,23 +62,126 @@ function defaultTab(role?: UserRole): string {
   }
 }
 
-/** Restore last tab from URL hash (#tab=…) or sessionStorage so refresh keeps place. */
+/** Tabs that are valid for a role — used so #tab=units does not trap a super_admin. */
+function tabsForRole(role?: UserRole): Set<string> {
+  switch (role) {
+    case 'tenant':
+      return new Set([
+        'tenant_overview',
+        'tenant_tickets',
+        'report_issue',
+        'messages',
+        'tenant_documents',
+        'tenant_lease',
+        'announcements',
+        'profile_settings',
+      ]);
+    case 'property_manager':
+    case 'landlord':
+      return new Set([
+        'manager_overview',
+        'centre_pulse',
+        'centres',
+        'units',
+        'properties',
+        'manager_tickets',
+        'sla_matrix',
+        'preventive_maintenance',
+        'maintenance_ops',
+        'tenants_list',
+        'leases',
+        'staff_schedule',
+        'vendors',
+        'finance_overview',
+        'announcements',
+        'analytics_reports',
+        'messages',
+        'profile_settings',
+      ]);
+    case 'maintenance':
+      return new Set([
+        'maintenance_jobs',
+        'staff_schedule',
+        'maintenance_completed',
+        'messages',
+        'profile_settings',
+      ]);
+    case 'finance':
+      return new Set([
+        'finance_overview',
+        'commercial_engine',
+        'rent_roll',
+        'expenses_ledger',
+        'transactions',
+        'financial_requests',
+        'finance_documents',
+        'analytics_reports',
+        'profile_settings',
+      ]);
+    case 'admin':
+      return new Set([
+        'admin_overview',
+        'overview',
+        'centre_pulse',
+        'centres',
+        'units',
+        'properties',
+        'tenants_list',
+        'leases',
+        'org_users',
+        'manager_tickets',
+        'sla_matrix',
+        'preventive_maintenance',
+        'staff_schedule',
+        'vendors',
+        'finance_overview',
+        'commercial_engine',
+        'announcements',
+        'analytics_reports',
+        'messages',
+        'org_settings',
+        'profile_settings',
+      ]);
+    case 'super_admin':
+      return new Set([
+        'super_overview',
+        'super_approvals',
+        'super_organizations',
+        'super_users',
+        'super_subscriptions',
+        'super_listings',
+        'analytics_reports',
+        'audit_logs',
+        'profile_settings',
+        'org_users',
+      ]);
+    default:
+      return new Set(['overview', 'centres', 'units', 'manager_tickets']);
+  }
+}
+
+function isTabAllowed(tab: string, role?: UserRole): boolean {
+  return tabsForRole(role).has(tab);
+}
+
+/** Restore last tab only if it belongs to this role; otherwise first menu item. */
 function readInitialTab(role?: UserRole): string {
+  const fallback = defaultTab(role);
   try {
     const hash = window.location.hash.replace(/^#/, '');
     if (hash.startsWith('tab=')) {
       const tab = decodeURIComponent(hash.slice(4));
-      if (tab) return tab;
+      if (tab && isTabAllowed(tab, role)) return tab;
     }
     const params = new URLSearchParams(hash);
     const fromParams = params.get('tab');
-    if (fromParams) return fromParams;
+    if (fromParams && isTabAllowed(fromParams, role)) return fromParams;
     const stored = sessionStorage.getItem(TAB_STORAGE_KEY);
-    if (stored) return stored;
+    if (stored && isTabAllowed(stored, role)) return stored;
   } catch {
     /* ignore */
   }
-  return defaultTab(role);
+  return fallback;
 }
 
 function persistTab(tab: string) {
@@ -99,6 +204,23 @@ function persistTab(tab: string) {
   }
 }
 
+/** Clear hash + session tab so the next login is not stuck on another role's screen. */
+export function clearPersistedTab() {
+  try {
+    sessionStorage.removeItem(TAB_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+  try {
+    const path = `${window.location.pathname}${window.location.search}`;
+    if (window.location.hash) {
+      window.history.replaceState(null, '', path);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 export function OperationsApp({ currentUser, showToast }: Props) {
   const [sidebarActiveTab, setSidebarActiveTab] = useState(() =>
     readInitialTab(currentUser.role)
@@ -112,22 +234,31 @@ export function OperationsApp({ currentUser, showToast }: Props) {
     persistTab(sidebarActiveTab);
   }, [sidebarActiveTab]);
 
-  // Only jump to role default when the *role* actually changes (e.g. promote),
-  // and only after first paint — not on initial mount.
-  const mountedRef = useRef(false);
+  // When role or user changes, land on that role's first menu item (never reuse another role's #tab).
   const roleRef = useRef(currentUser.role);
+  const userIdRef = useRef(currentUser.id);
   useEffect(() => {
-    if (!mountedRef.current) {
-      mountedRef.current = true;
+    const roleChanged = roleRef.current !== currentUser.role;
+    const userChanged = userIdRef.current !== currentUser.id;
+    if (roleChanged || userChanged) {
+      roleRef.current = currentUser.role;
+      userIdRef.current = currentUser.id;
+      const next = defaultTab(currentUser.role);
+      setSidebarActiveTab(next);
+      persistTab(next);
       return;
     }
-    if (roleRef.current !== currentUser.role) {
-      roleRef.current = currentUser.role;
-      setSidebarActiveTab(defaultTab(currentUser.role));
-    }
-  }, [currentUser.role]);
+    // Guard: if somehow an invalid tab is active for this role, reset.
+    setSidebarActiveTab((prev) => {
+      if (isTabAllowed(prev, currentUser.role)) return prev;
+      const next = defaultTab(currentUser.role);
+      persistTab(next);
+      return next;
+    });
+  }, [currentUser.role, currentUser.id]);
 
-  // Periodic SLA escalation — pauses when the tab is hidden.
+  // Periodic SLA escalation while the tab is visible — do NOT re-run on every
+  // visibilitychange (that caused jarring UI refetches when switching Chrome tabs).
   useEffect(() => {
     if (!currentUser.organization_id) return;
     const run = () => {
@@ -136,15 +267,12 @@ export function OperationsApp({ currentUser, showToast }: Props) {
         /* non-fatal */
       });
     };
-    run();
-    const id = setInterval(run, 60_000);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') run();
-    };
-    document.addEventListener('visibilitychange', onVisible);
+    // One quiet pass after mount, then every 2 minutes while focused.
+    const boot = setTimeout(run, 15_000);
+    const id = setInterval(run, 120_000);
     return () => {
+      clearTimeout(boot);
       clearInterval(id);
-      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [currentUser.organization_id]);
 
@@ -155,7 +283,7 @@ export function OperationsApp({ currentUser, showToast }: Props) {
     {
       enabled:
         !!currentUser.organization_id && currentUser.role !== 'super_admin',
-      refreshInterval: 60_000,
+      refreshInterval: 180_000,
     }
   );
 
@@ -199,6 +327,7 @@ export function OperationsApp({ currentUser, showToast }: Props) {
             onOpenCreateTicket={() => setIsCreateTicketOpen(true)}
             organizationName={auth.getCurrentOrganization()?.company_name}
             orgCode={auth.getCurrentOrganization()?.organization_code}
+            organizationLogo={auth.getCurrentOrganization()?.logo_url}
           />
         </div>
 
@@ -263,7 +392,7 @@ export function OperationsApp({ currentUser, showToast }: Props) {
           {sidebarActiveTab === 'tenants_list' && (
             <TenantsListView
               onOpenCreateTicketForShop={() => setIsCreateTicketOpen(true)}
-              onViewLeases={() => setSidebarActiveTab('units')}
+              onViewLeases={() => setSidebarActiveTab('leases')}
             />
           )}
           {sidebarActiveTab === 'staff_schedule' && <StaffScheduleView />}
