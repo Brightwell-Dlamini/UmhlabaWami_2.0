@@ -9,6 +9,12 @@ import type { StaffShift } from '../../types';
 
 export const StaffScheduleView: React.FC = () => {
   const orgId = auth.getCurrentOrganization()?.id ?? '';
+  const user = auth.getCurrentUser();
+  const canManage =
+    user?.role === 'admin' ||
+    user?.role === 'property_manager' ||
+    user?.role === 'landlord' ||
+    user?.role === 'super_admin';
   const [filterRole, setFilterRole] = useState('All');
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<StaffShift | null>(null);
@@ -73,11 +79,20 @@ export const StaffScheduleView: React.FC = () => {
     },
   });
 
-  const filtered = useMemo(
-    () =>
-      shifts.filter((s) => filterRole === 'All' || s.staff_role === filterRole),
-    [shifts, filterRole]
-  );
+  const filtered = useMemo(() => {
+    let list = shifts;
+    if (!canManage && user?.name) {
+      list = list.filter(
+        (s) =>
+          s.staff_name === user.name ||
+          (s.staff_role === 'maintenance' && user.role === 'maintenance')
+      );
+    }
+    if (filterRole !== 'All') {
+      list = list.filter((s) => s.staff_role === filterRole);
+    }
+    return list;
+  }, [shifts, filterRole, canManage, user?.name, user?.role]);
 
   if (!orgId)
     return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
@@ -87,21 +102,27 @@ export const StaffScheduleView: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-blue-600" /> Roster &amp; shifts
+            <Calendar className="w-5 h-5 text-blue-600" />{' '}
+            {canManage ? 'Roster & shifts' : 'My schedule'}
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Daily shift schedule and on-call coverage
+            {canManage
+              ? 'Daily shift schedule and on-call coverage'
+              : 'Your assigned shifts — contact your manager to change them'}
           </p>
         </div>
-        <button
-          onClick={() => {
-            setEditing(null);
-            setShowModal(true);
-          }}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
-        >
-          <PlusCircle className="w-4 h-4" /> Add shift
-        </button>
+        {canManage && (
+          <button
+            type="button"
+            onClick={() => {
+              setEditing(null);
+              setShowModal(true);
+            }}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+          >
+            <PlusCircle className="w-4 h-4" /> Add shift
+          </button>
+        )}
       </div>
 
       {feedback && (
@@ -110,27 +131,30 @@ export const StaffScheduleView: React.FC = () => {
         </div>
       )}
 
-      <div className="flex items-center gap-1 flex-wrap">
-        {['All', 'Maintenance', 'Security', 'Cleaning', 'Manager', 'Finance'].map(
-          (role) => (
-            <button
-              key={role}
-              onClick={() => setFilterRole(role)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold ${
-                filterRole === role
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              {role} (
-              {role === 'All'
-                ? shifts.length
-                : shifts.filter((s) => s.staff_role === role).length}
-              )
-            </button>
-          )
-        )}
-      </div>
+      {canManage && (
+        <div className="flex items-center gap-1 flex-wrap">
+          {['All', 'Maintenance', 'Security', 'Cleaning', 'Manager', 'Finance'].map(
+            (role) => (
+              <button
+                key={role}
+                type="button"
+                onClick={() => setFilterRole(role)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold ${
+                  filterRole === role
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700'
+                }`}
+              >
+                {role} (
+                {role === 'All'
+                  ? shifts.length
+                  : shifts.filter((s) => s.staff_role === role).length}
+                )
+              </button>
+            )
+          )}
+        </div>
+      )}
 
       <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700/60">
         {filtered.length === 0 ? (
@@ -169,30 +193,36 @@ export const StaffScheduleView: React.FC = () => {
                 <span className="text-xs text-slate-400 hidden md:inline">
                   {s.date}
                 </span>
-                <button
-                  onClick={() => {
-                    setEditing(s);
-                    setShowModal(true);
-                  }}
-                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 hover:bg-slate-100"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => {
-                    if (confirm('Delete shift?')) remove.mutate(s.id);
-                  }}
-                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-red-500 hover:bg-red-50"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {canManage && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditing(s);
+                        setShowModal(true);
+                      }}
+                      className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 hover:bg-slate-100"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm('Delete shift?')) remove.mutate(s.id);
+                      }}
+                      className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-red-500 hover:bg-red-50"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ))
         )}
       </div>
 
-      {showModal && (
+      {canManage && showModal && (
         <ShiftForm
           initial={editing}
           onCancel={() => {
@@ -247,7 +277,7 @@ function ShiftForm({
           <h3 className="font-bold text-base">
             {initial ? 'Edit shift' : 'Add shift'}
           </h3>
-          <button onClick={onCancel}>
+          <button type="button" onClick={onCancel}>
             <X className="w-5 h-5 text-slate-400" />
           </button>
         </div>
