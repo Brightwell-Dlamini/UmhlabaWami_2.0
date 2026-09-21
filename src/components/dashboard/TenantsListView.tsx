@@ -7,6 +7,7 @@ import { tenants as tenantsApi } from '../../services/api/tenants';
 import { shops as shopsApi } from '../../services/api/shops';
 import { shoppingCenters as centersApi } from '../../services/api/shoppingCenters';
 import { properties as propertiesApi } from '../../services/api/properties';
+import { profiles as profilesApi } from '../../services/api/profiles';
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 import { useRealtime } from '../../hooks/useRealtime';
@@ -30,6 +31,11 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
   const { data: shops = [] } = useSupabaseQuery(['shops', orgId], () => shopsApi.list(), { enabled: !!orgId });
   const { data: centers = [] } = useSupabaseQuery(['centers', orgId], () => centersApi.list(), { enabled: !!orgId });
   const { data: properties = [] } = useSupabaseQuery(['properties', orgId], () => propertiesApi.list(), { enabled: !!orgId });
+  const { data: portalUsers = [] } = useSupabaseQuery(
+    ['profiles', orgId, 'tenant_role'],
+    () => profilesApi.list(orgId).then((list) => list.filter((u) => u.role === 'tenant')),
+    { enabled: !!orgId }
+  );
 
   useRealtime({ table: 'tenants', filter: `organization_id=eq.${orgId}`, invalidateKeys: ['tenants', 'shops'], enabled: !!orgId });
 
@@ -71,16 +77,16 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Commercial tenants</h1>
-          <p className="text-xs text-slate-500">Occupancies, lease links, communication</p>
+          <p className="text-xs text-slate-500">Occupancies, lease links, portal login linking</p>
         </div>
         <div className="flex items-center gap-2">
           {onViewLeases && (
-            <button onClick={onViewLeases}
+            <button onClick={onViewLeases} type="button"
               className="px-3.5 py-2 bg-blue-50 dark:bg-blue-950/40 text-blue-600 border border-blue-200 rounded-xl text-xs font-semibold">
               Manage leases
             </button>
           )}
-          <button onClick={() => setShowAdd(true)}
+          <button onClick={() => setShowAdd(true)} type="button"
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5">
             <PlusCircle className="w-4 h-4" /> Add tenant
           </button>
@@ -143,6 +149,7 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
                 <th className="py-3 px-4">Contact</th>
                 <th className="py-3 px-4">Rent</th>
                 <th className="py-3 px-4">Status</th>
+                <th className="py-3 px-4">Portal</th>
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
@@ -150,6 +157,9 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
               {filtered.map((t) => {
                 const shop = shops.find((s) => s.id === t.shop_id);
                 const center = centers.find((c) => c.id === t.shopping_center_id);
+                const linked = t.user_id
+                  ? portalUsers.find((u) => u.id === t.user_id)
+                  : undefined;
                 return (
                   <tr key={t.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30">
                     <td className="py-3 px-4">
@@ -173,19 +183,26 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
                           : 'bg-amber-100 text-amber-800'
                       }`}>{t.status}</span>
                     </td>
+                    <td className="py-3 px-4 text-[11px]">
+                      {linked ? (
+                        <span className="text-emerald-600 font-semibold">{linked.name}</span>
+                      ) : (
+                        <span className="text-slate-400">Not linked</span>
+                      )}
+                    </td>
                     <td className="py-3 px-4 text-right">
                       <div className="flex justify-end gap-1.5">
-                        <button onClick={() => setEditing(t)}
+                        <button onClick={() => setEditing(t)} type="button"
                           className="p-1.5 rounded-lg border text-slate-600 hover:bg-slate-100">
                           <Edit3 className="w-3.5 h-3.5" />
                         </button>
                         {onOpenCreateTicketForShop && shop && (
-                          <button onClick={() => onOpenCreateTicketForShop(shop.id)}
+                          <button onClick={() => onOpenCreateTicketForShop(shop.id)} type="button"
                             className="px-2 py-1 text-[10px] font-bold bg-blue-50 text-blue-600 rounded-lg">
                             Log issue
                           </button>
                         )}
-                        <button onClick={() => { if (confirm(`Remove tenant ${t.business_name}?`)) remove.mutate(t.id); }}
+                        <button onClick={() => { if (confirm(`Remove tenant ${t.business_name}?`)) remove.mutate(t.id); }} type="button"
                           className="p-1.5 rounded-lg border text-red-500 hover:bg-red-50">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -204,6 +221,7 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
           centers={centers}
           shops={shops}
           properties={properties}
+          portalUsers={portalUsers}
           initial={editing}
           onCancel={() => { setShowAdd(false); setEditing(null); }}
           onSubmit={(input) => {
@@ -217,11 +235,12 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
 };
 
 function TenantForm({
-  centers, shops, properties, initial, onCancel, onSubmit,
+  centers, shops, properties, portalUsers, initial, onCancel, onSubmit,
 }: {
   centers: { id: string; name: string }[];
   shops: { id: string; shop_number: string; shopping_center_id: string; property_id: string; rental_amount: number }[];
   properties: { id: string; name: string }[];
+  portalUsers: { id: string; name: string; email: string; username?: string }[];
   initial: Tenant | null;
   onCancel: () => void;
   onSubmit: (input: Record<string, unknown>) => void;
@@ -235,6 +254,7 @@ function TenantForm({
     shopping_center_id: initial?.shopping_center_id ?? centers[0]?.id ?? '',
     shop_id: initial?.shop_id ?? '',
     status: initial?.status ?? 'Active',
+    user_id: initial?.user_id ?? '',
   });
 
   const availableShops = shops.filter((s) => s.shopping_center_id === form.shopping_center_id);
@@ -243,10 +263,10 @@ function TenantForm({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-lg w-full border p-6 shadow-2xl space-y-4">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-lg w-full border p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-base">{initial ? 'Edit tenant' : 'Register tenant'}</h3>
-          <button onClick={onCancel}><X className="w-5 h-5 text-slate-400" /></button>
+          <button type="button" onClick={onCancel}><X className="w-5 h-5 text-slate-400" /></button>
         </div>
         <form onSubmit={(e) => {
           e.preventDefault();
@@ -254,6 +274,7 @@ function TenantForm({
             ...form,
             shop_id: effectiveShopId,
             property_id: shop?.property_id ?? '',
+            user_id: form.user_id || undefined,
           });
         }} className="space-y-3 text-xs">
           <div className="grid grid-cols-2 gap-3">
@@ -321,6 +342,28 @@ function TenantForm({
                 ))}
               </select>
             </div>
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">
+              Linked portal login (role = tenant)
+            </label>
+            <select
+              value={form.user_id}
+              onChange={(e) => setForm({ ...form, user_id: e.target.value })}
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+            >
+              <option value="">— not linked —</option>
+              {portalUsers.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} ({u.email || u.username || u.id.slice(0, 8)})
+                </option>
+              ))}
+            </select>
+            <p className="text-[10px] text-slate-400 mt-1">
+              Link a Staff & Roles user (tenant role) so they can log tickets,
+              see their lease and documents. Create the user first under Staff &
+              Roles if needed.
+            </p>
           </div>
           <div className="pt-3 flex justify-end gap-2 border-t">
             <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border">Cancel</button>
