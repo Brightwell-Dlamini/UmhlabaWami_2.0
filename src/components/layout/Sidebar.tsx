@@ -41,6 +41,7 @@ interface SidebarProps {
   onToggleCollapse?: () => void;
   organizationName?: string;
   orgCode?: string;
+  organizationLogo?: string | null;
   onOpenCreateTicket?: () => void;
 }
 
@@ -52,6 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse,
   organizationName,
   orgCode,
+  organizationLogo,
 }) => {
   const getNavItems = () => {
     switch (role) {
@@ -160,15 +162,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
     >
       <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
         {!collapsed && (
-          <div className="min-w-0 pr-2">
-            <h2 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider truncate">
-              {role === 'super_admin' ? 'Super Admin Console' : organizationName || 'Umhlaba Wami'}
-            </h2>
-            {orgCode && role !== 'super_admin' && (
-              <p className="text-[11px] font-mono text-blue-600 dark:text-blue-400 truncate">
-                Code: {orgCode}
-              </p>
+          <div className="min-w-0 pr-2 flex items-center gap-2">
+            {organizationLogo && role !== 'super_admin' && (
+              <img
+                src={organizationLogo}
+                alt=""
+                className="h-8 w-8 rounded-lg object-contain border border-slate-200 dark:border-slate-700 bg-white shrink-0"
+              />
             )}
+            <div className="min-w-0">
+              <h2 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider truncate">
+                {role === 'super_admin' ? 'Super Admin Console' : organizationName || 'Umhlaba Wami'}
+              </h2>
+              {orgCode && role !== 'super_admin' && (
+                <p className="text-[11px] font-mono text-blue-600 dark:text-blue-400 truncate">
+                  Code: {orgCode}
+                </p>
+              )}
+            </div>
           </div>
         )}
         <button
