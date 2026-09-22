@@ -6,7 +6,7 @@ import {
   tryGetSupabase,
 } from '../lib/supabase';
 import { clearAll } from '../lib/queryClient';
-// Tab hash is cleared on logout via Navbar calling clearPersistedTab
+import { passwordReset } from './api/passwordReset';
 
 /**
  * All login/auth failures surface as one of these messages. They never reveal
@@ -27,6 +27,8 @@ const AUTH_ERRORS = {
     'Your account is not active. Contact your organisation administrator.',
   notPlatformAdmin:
     'This account is not a platform admin. In Supabase → profiles, set role to exactly: super_admin and status to Active.',
+  profileLoadFailed:
+    'Could not load your profile. Check your connection and try again.',
 } as const;
 
 function normaliseAuthError(raw: string): string {
@@ -54,6 +56,10 @@ function normaliseAuthError(raw: string): string {
 
 const BLOCKED_USER_STATUSES = new Set(['Suspended', 'Inactive']);
 const SIGNOUT_TIMEOUT_MS = 2000;
+/** How many times to retry a transient profile read failure. */
+const PROFILE_LOAD_MAX_ATTEMPTS = 3;
+/** Backoff between profile read attempts, in ms. */
+const PROFILE_LOAD_BACKOFF_MS = 400;
 
 function normaliseRole(role: unknown): string {
   return String(role ?? '')
@@ -81,6 +87,14 @@ function toAppRole(role: unknown): User['role'] {
   return (allowed.includes(r as (typeof allowed)[number]) ? r : 'tenant') as User['role'];
 }
 
+/** Error type surfaced when the profile genuinely cannot be read. */
+export class ProfileLoadError extends Error {
+  constructor(public readonly cause: unknown) {
+    super(AUTH_ERRORS.profileLoadFailed);
+    this.name = 'ProfileLoadError';
+  }
+}
+
 class AuthService {
   private currentUser: User | null = null;
   private currentOrg: Organization | null = null;
@@ -91,6 +105,8 @@ class AuthService {
   /** When true, onAuthStateChange must not load/clear profile — login owns the flow. */
   private loginInProgress = false;
   private profileLoadGen = 0;
+  /** Last known profile-load failure, if any. Cleared on success or logout. */
+  private _profileLoadError: ProfileLoadError | null = null;
 
   constructor() {
     this.readyPromise = new Promise((res) => (this.resolveReady = res));
@@ -99,6 +115,10 @@ class AuthService {
 
   public whenReady(): Promise<void> {
     return this.readyPromise;
+  }
+
+  public getProfileLoadError(): ProfileLoadError | null {
+    return this._profileLoadError;
   }
 
   private async bootstrap() {
@@ -114,15 +134,21 @@ class AuthService {
       const {
         data: { session },
       } = await sb.auth.getSession();
-      if (session?.user) await this.loadProfile(session.user.id);
+      if (session?.user) {
+        try {
+          await this.loadProfile(session.user.id);
+        } catch (e) {
+          console.warn('[auth] initial profile load failed', e);
+        }
+      }
 
       sb.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_OUT') {
-          // Ignore SIGNED_OUT while login is still running (e.g. failed attempt cleanup).
           if (this.loginInProgress) return;
           if (this.currentUser !== null) {
             this.currentUser = null;
             this.currentOrg = null;
+            this._profileLoadError = null;
             clearAll();
             this.notify(true);
           } else {
@@ -130,11 +156,15 @@ class AuthService {
           }
           return;
         }
-        // Login handler loads the profile itself — skip concurrent loads that
-        // race and wipe the session (the old "flash then kick to landing" bug).
         if (this.loginInProgress) return;
         if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
-          if (session?.user) await this.loadProfile(session.user.id);
+          if (session?.user) {
+            try {
+              await this.loadProfile(session.user.id);
+            } catch (e) {
+              console.warn('[auth] profile load after auth event failed', e);
+            }
+          }
         }
       });
     } catch (e) {
@@ -144,6 +174,10 @@ class AuthService {
     }
   }
 
+  /**
+   * Load profile with a small retry loop for transient errors.
+   * Throws ProfileLoadError if all attempts fail.
+   */
   private async loadProfile(userId: string, opts?: { allowClear?: boolean }) {
     const sb = tryGetSupabase();
     if (!sb) return;
@@ -151,100 +185,124 @@ class AuthService {
     const gen = ++this.profileLoadGen;
     const allowClear = opts?.allowClear !== false;
 
-    const { data: profile, error } = await sb
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle();
+    let lastErr: unknown = null;
 
-    // Stale response — a newer load started.
-    if (gen !== this.profileLoadGen) return;
-
-    if (error) {
-      console.error('[auth] profile load failed', error);
-      // Never wipe an established session on a transient read error.
-      return;
-    }
-    if (!profile) {
-      console.warn('[auth] no profile row for', userId);
-      if (!allowClear) return;
-      // Only clear if this user is the one currently shown.
-      if (this.currentUser && this.currentUser.id !== userId) return;
-      this.currentUser = null;
-      this.currentOrg = null;
-      this.notify(true);
-      return;
-    }
-
-    if (BLOCKED_USER_STATUSES.has(String(profile.status))) {
-      console.warn('[auth] blocked status detected', profile.status);
-      this.currentUser = null;
-      this.currentOrg = null;
-      clearAll();
-      this.notify(true);
-      try {
-        await sb.auth.signOut({ scope: 'local' });
-      } catch {
-        /* non-fatal */
-      }
-      return;
-    }
-
-    const normalised: User = {
-      ...(profile as unknown as User),
-      role: toAppRole(profile.role),
-    };
-
-    this.currentUser = normalised;
-    this.currentOrg = null;
-
-    if (profile.organization_id) {
-      const { data: org } = await sb
-        .from('organizations')
+    for (let attempt = 0; attempt < PROFILE_LOAD_MAX_ATTEMPTS; attempt++) {
+      const { data: profile, error } = await sb
+        .from('profiles')
         .select('*')
-        .eq('id', profile.organization_id)
+        .eq('id', userId)
         .maybeSingle();
-      if (gen !== this.profileLoadGen) return;
-      this.currentOrg = (org as unknown as Organization) || null;
-    }
 
-    // Super admins intentionally have no organisation.
-    if (!this.currentOrg && profile.email && !isSuperAdminRole(profile.role)) {
-      const { data: byOwner } = await sb
-        .from('organizations')
-        .select('*')
-        .eq('owner_auth_user_id', userId)
-        .maybeSingle();
+      // Stale response — a newer load started.
       if (gen !== this.profileLoadGen) return;
-      if (byOwner) {
-        this.currentOrg = byOwner as unknown as Organization;
-      } else {
-        const { data: byEmail } = await sb
-          .from('organizations')
-          .select('*')
-          .ilike('email', String(profile.email))
-          .eq('status', 'Active')
-          .maybeSingle();
-        if (gen !== this.profileLoadGen) return;
-        if (byEmail) this.currentOrg = byEmail as unknown as Organization;
-      }
-      if (this.currentOrg) {
-        const orgId = this.currentOrg.id;
-        await sb
-          .from('profiles')
-          .update({
-            organization_id: orgId,
-            role: profile.role || 'admin',
-            status: 'Active',
-          })
-          .eq('id', userId);
-        this.currentUser = {
-          ...(this.currentUser as User),
-          organization_id: orgId,
+
+      if (!error) {
+        // Fresh success.
+        this._profileLoadError = null;
+        if (!profile) {
+          console.warn('[auth] no profile row for', userId);
+          if (!allowClear) return;
+          if (this.currentUser && this.currentUser.id !== userId) return;
+          this.currentUser = null;
+          this.currentOrg = null;
+          this.notify(true);
+          return;
+        }
+
+        if (BLOCKED_USER_STATUSES.has(String(profile.status))) {
+          console.warn('[auth] blocked status detected', profile.status);
+          this.currentUser = null;
+          this.currentOrg = null;
+          this._profileLoadError = null;
+          clearAll();
+          this.notify(true);
+          try {
+            await sb.auth.signOut({ scope: 'local' });
+          } catch {
+            /* non-fatal */
+          }
+          return;
+        }
+
+        const normalised: User = {
+          ...(profile as unknown as User),
+          role: toAppRole(profile.role),
         };
+
+        this.currentUser = normalised;
+        this.currentOrg = null;
+
+        if (profile.organization_id) {
+          const { data: org } = await sb
+            .from('organizations')
+            .select('*')
+            .eq('id', profile.organization_id)
+            .maybeSingle();
+          if (gen !== this.profileLoadGen) return;
+          this.currentOrg = (org as unknown as Organization) || null;
+        }
+
+        if (
+          !this.currentOrg &&
+          profile.email &&
+          !isSuperAdminRole(profile.role)
+        ) {
+          const { data: byOwner } = await sb
+            .from('organizations')
+            .select('*')
+            .eq('owner_auth_user_id', userId)
+            .maybeSingle();
+          if (gen !== this.profileLoadGen) return;
+          if (byOwner) {
+            this.currentOrg = byOwner as unknown as Organization;
+          } else {
+            const { data: byEmail } = await sb
+              .from('organizations')
+              .select('*')
+              .ilike('email', String(profile.email))
+              .eq('status', 'Active')
+              .maybeSingle();
+            if (gen !== this.profileLoadGen) return;
+            if (byEmail) this.currentOrg = byEmail as unknown as Organization;
+          }
+          if (this.currentOrg) {
+            const orgId = this.currentOrg.id;
+            await sb
+              .from('profiles')
+              .update({
+                organization_id: orgId,
+                role: profile.role || 'admin',
+                status: 'Active',
+              })
+              .eq('id', userId);
+            this.currentUser = {
+              ...(this.currentUser as User),
+              organization_id: orgId,
+            };
+          }
+        }
+        this.notify();
+        return;
+      }
+
+      // Error branch — record and maybe retry.
+      lastErr = error;
+      console.warn(
+        `[auth] profile load attempt ${attempt + 1} failed`,
+        error.message
+      );
+      if (attempt < PROFILE_LOAD_MAX_ATTEMPTS - 1) {
+        await new Promise((r) => setTimeout(r, PROFILE_LOAD_BACKOFF_MS));
+        if (gen !== this.profileLoadGen) return;
       }
     }
-    this.notify();
+
+    // All attempts failed.
+    console.error('[auth] profile load failed after retries', lastErr);
+    this._profileLoadError = new ProfileLoadError(lastErr);
+    this.notify(true);
+    throw this._profileLoadError;
   }
 
   public subscribe(listener: (u: User | null) => void): () => void {
@@ -276,8 +334,6 @@ class AuthService {
   public getCurrentOrganization(): Organization | null {
     return this.currentOrg;
   }
-
-  /** Soft-update cached org (e.g. after logo or settings save) without full re-login. */
   public setCurrentOrganization(org: Organization | null) {
     this.currentOrg = org;
     this.notify(true);
@@ -330,17 +386,12 @@ class AuthService {
     return { ok: true, profile: profile as unknown as User };
   }
 
-  /**
-   * Resolve platform-admin email from email or username.
-   * Prefers RPC (works pre-auth); falls back to direct email if identifier has @.
-   */
   private async resolvePlatformEmail(identifier: string): Promise<string | null> {
     const id = identifier.trim().toLowerCase();
     if (!id) return null;
 
     const sb = getSupabase();
 
-    // Prefer security-definer RPC so username works before session exists.
     try {
       const { data, error } = await sb.rpc('resolve_platform_login_email', {
         p_identifier: id,
@@ -426,10 +477,6 @@ class AuthService {
     }
   }
 
-  /**
-   * Platform (super admin) sign-in with SUPER / PLATFORM / ADMIN code.
-   * Accepts email OR username (via resolve_platform_login_email RPC).
-   */
   private async loginPlatformAdmin(
     identifier: string,
     password: string
@@ -475,7 +522,6 @@ class AuthService {
         return { success: false, error: AUTH_ERRORS.notPlatformAdmin };
       }
 
-      // Own the session state — do not rely on onAuthStateChange.
       await this.loadProfile(status.profile.id, { allowClear: false });
 
       if (!this.currentUser || !isSuperAdminRole(this.currentUser.role)) {
@@ -493,13 +539,25 @@ class AuthService {
     }
   }
 
+  /**
+   * Forgot-password entry point. Delegates to passwordReset.sendReset,
+   * which resolves the identifier to an email server-side and always
+   * returns a generic success to avoid account enumeration.
+   */
+  public async requestPasswordReset(
+    organizationCode: string,
+    identifier: string
+  ): Promise<{ accepted: boolean; message: string }> {
+    return passwordReset.sendReset(organizationCode, identifier);
+  }
+
   public async logout() {
     this.currentUser = null;
     this.currentOrg = null;
+    this._profileLoadError = null;
     clearAll();
     this.notify(true);
 
-    // Drop role-specific navigation so the next login is not trapped on a foreign tab.
     try {
       sessionStorage.removeItem('uw_sidebar_tab');
     } catch {

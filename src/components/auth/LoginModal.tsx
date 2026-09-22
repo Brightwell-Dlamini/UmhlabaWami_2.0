@@ -1,6 +1,18 @@
 import React, { useState } from 'react';
-import { X, Lock, Building, User, KeyRound, AlertCircle, ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import {
+  Lock,
+  Building,
+  User,
+  KeyRound,
+  AlertCircle,
+  ShieldCheck,
+  Eye,
+  EyeOff,
+  Mail,
+} from 'lucide-react';
 import { auth } from '../../services/auth';
+import { Modal } from '../ui/Modal';
+import { FindOrgModal } from './FindOrgModal';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -22,8 +34,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [isCaptchaChecked, setIsCaptchaChecked] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
-
-  if (!isOpen) return null;
+  const [showFindOrg, setShowFindOrg] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,24 +59,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/75 backdrop-blur-sm">
-      <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/50">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center">
-              <Lock className="w-4 h-4" />
-            </div>
-            <div>
-              <h2 className="font-bold text-sm text-slate-900 dark:text-white">Sign in</h2>
-              <p className="text-[11px] text-slate-500">Organisation workspace access</p>
-            </div>
-          </div>
-          <button type="button" onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-600">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <form onSubmit={handleLogin} className="p-6 space-y-4">
+    <>
+      <Modal
+        open={isOpen}
+        onClose={onClose}
+        size="sm"
+        title="Sign in"
+        subtitle="Organisation workspace access"
+        icon={<Lock className="w-5 h-5 text-blue-600" />}
+      >
+        <form onSubmit={handleLogin} className="space-y-4">
           {errorMsg && (
             <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs flex items-start gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -73,9 +77,18 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           )}
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Organisation code
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Organisation code
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowFindOrg(true)}
+                className="text-[11px] font-semibold text-blue-600 hover:underline"
+              >
+                Find my code
+              </button>
+            </div>
             <div className="flex items-center px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 focus-within:ring-2 focus-within:ring-blue-600">
               <Building className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
               <input
@@ -107,9 +120,18 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Password
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Password
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowForgot(true)}
+                className="text-[11px] font-semibold text-blue-600 hover:underline"
+              >
+                Forgot password?
+              </button>
+            </div>
             <div className="flex items-center px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 focus-within:ring-2 focus-within:ring-blue-600">
               <KeyRound className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
               <input
@@ -167,7 +189,138 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </button>
           </p>
         </form>
-      </div>
-    </div>
+      </Modal>
+
+      <FindOrgModal
+        isOpen={showFindOrg}
+        onClose={() => setShowFindOrg(false)}
+        onUseCode={(code) => {
+          setOrgCode(code);
+          setShowFindOrg(false);
+        }}
+      />
+
+      <ForgotPasswordModal
+        isOpen={showForgot}
+        onClose={() => setShowForgot(false)}
+        defaultOrgCode={orgCode}
+        defaultIdentifier={username}
+      />
+    </>
   );
 };
+
+// ---------------------------------------------------------------------------
+// Forgot password
+// ---------------------------------------------------------------------------
+
+function ForgotPasswordModal({
+  isOpen,
+  onClose,
+  defaultOrgCode,
+  defaultIdentifier,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  defaultOrgCode: string;
+  defaultIdentifier: string;
+}) {
+  const [orgCode, setOrgCode] = useState(defaultOrgCode);
+  const [identifier, setIdentifier] = useState(defaultIdentifier);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<
+    | { kind: 'idle' }
+    | { kind: 'accepted'; message: string }
+    | { kind: 'error'; message: string }
+  >({ kind: 'idle' });
+
+  // Reflect parent defaults whenever the modal is opened.
+  React.useEffect(() => {
+    if (isOpen) {
+      setOrgCode((prev) => prev || defaultOrgCode);
+      setIdentifier((prev) => prev || defaultIdentifier);
+      setResult({ kind: 'idle' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setResult({ kind: 'idle' });
+    try {
+      const res = await auth.requestPasswordReset(orgCode, identifier);
+      if (res.accepted) {
+        setResult({ kind: 'accepted', message: res.message });
+      } else {
+        setResult({ kind: 'error', message: res.message });
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={isOpen}
+      onClose={onClose}
+      size="sm"
+      title="Reset your password"
+      subtitle="We'll email you a secure reset link"
+      icon={<Mail className="w-5 h-5 text-blue-600" />}
+    >
+      <form onSubmit={handleSubmit} className="space-y-3 text-xs">
+        <div>
+          <label className="block font-semibold mb-1">Organisation code</label>
+          <input
+            required
+            value={orgCode}
+            onChange={(e) => setOrgCode(e.target.value.toUpperCase())}
+            placeholder="e.g. ACME or SUPER"
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-mono uppercase"
+          />
+        </div>
+        <div>
+          <label className="block font-semibold mb-1">Username or email</label>
+          <input
+            required
+            value={identifier}
+            onChange={(e) => setIdentifier(e.target.value)}
+            placeholder="your.username or you@company.sz"
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          />
+        </div>
+
+        {result.kind === 'accepted' && (
+          <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200">
+            {result.message}
+          </div>
+        )}
+        {result.kind === 'error' && (
+          <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-800 text-red-800 dark:text-red-200">
+            {result.message}
+          </div>
+        )}
+
+        <div className="pt-3 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
+          >
+            Close
+          </button>
+          {result.kind !== 'accepted' && (
+            <button
+              type="submit"
+              disabled={busy}
+              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-60"
+            >
+              {busy ? 'Sending…' : 'Send reset link'}
+            </button>
+          )}
+        </div>
+      </form>
+    </Modal>
+  );
+}

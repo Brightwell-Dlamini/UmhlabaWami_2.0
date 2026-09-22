@@ -1,28 +1,30 @@
 import React, { useState } from 'react';
-import { User as UserIcon, Save, KeyRound } from 'lucide-react';
+import { User as UserIcon, Save, KeyRound, ShieldCheck } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { profiles as profilesApi } from '../../services/api/profiles';
 import { getSupabase } from '../../lib/supabase';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
+import { useToast } from '../ui/ToastProvider';
+import { PasswordInput } from '../ui/PasswordInput';
 
 export function ProfileSettingsView() {
   const current = auth.getCurrentUser();
+  const toast = useToast();
 
   const [name, setName] = useState(current?.name ?? '');
   const [email] = useState(current?.email ?? '');
   const [phone, setPhone] = useState(current?.phone ?? '');
-  const [message, setMessage] = useState<string | null>(null);
 
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
-  const [pwMessage, setPwMessage] = useState<string | null>(null);
   const [pwSaving, setPwSaving] = useState(false);
 
   const updateProfile = useSupabaseMutation({
     mutationFn: (patch: { name: string; phone: string }) =>
       profilesApi.updateSelf({ name: patch.name, phone: patch.phone }),
-    onSuccess: () => setMessage('Profile updated.'),
-    onError: (e) => setMessage(e.message),
+    onSuccess: () => toast.success('Profile updated'),
+    onError: (e) => toast.error('Update failed', e.message),
   });
 
   if (!current) {
@@ -38,29 +40,63 @@ export function ProfileSettingsView() {
   };
 
   const handleChangePassword = async () => {
-    setPwMessage(null);
-
+    if (!currentPassword) {
+      toast.error('Enter your current password', 'We need it to confirm it\'s you.');
+      return;
+    }
     if (newPassword.length < 8) {
-      setPwMessage('Password must be at least 8 characters.');
+      toast.error('Password too short', 'Use at least 8 characters.');
       return;
     }
     if (newPassword !== confirmNewPassword) {
-      setPwMessage('Passwords do not match.');
+      toast.error('Passwords do not match', 'Please re-enter the new password.');
+      return;
+    }
+    if (currentPassword === newPassword) {
+      toast.error('Same as current', 'Choose a different password.');
       return;
     }
 
     setPwSaving(true);
     try {
-      const { error } = await getSupabase().auth.updateUser({
-        password: newPassword,
+      const sb = getSupabase();
+      // Step 1: verify the current password by signing in with the same
+      // credentials in an isolated client. This prevents a session-hijack
+      // scenario where an attacker changes the password without proving they
+      // know the old one.
+      const { createClient } = await import('@supabase/supabase-js');
+      const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+      const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+      if (!url || !key) {
+        throw new Error('Supabase env vars missing.');
+      }
+      const isolated = createClient(url, key, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+        },
       });
+      const { error: verifyErr } = await isolated.auth.signInWithPassword({
+        email: current.email,
+        password: currentPassword,
+      });
+      if (verifyErr) {
+        throw new Error('Current password is incorrect.');
+      }
+
+      // Step 2: apply the change on the primary client.
+      const { error } = await sb.auth.updateUser({ password: newPassword });
       if (error) throw error;
-      setPwMessage('Password updated.');
+
+      toast.success('Password updated', 'You\'ll stay signed in on this device.');
+      setCurrentPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
     } catch (e) {
-      setPwMessage(
-        e instanceof Error ? e.message : 'Failed to update password.'
+      toast.error(
+        'Password change failed',
+        e instanceof Error ? e.message : 'Could not update password.'
       );
     } finally {
       setPwSaving(false);
@@ -142,10 +178,6 @@ export function ProfileSettingsView() {
           <Save className="w-4 h-4" />
           {updateProfile.loading ? 'Saving…' : 'Save changes'}
         </button>
-
-        {message && (
-          <p className="text-sm text-slate-600 dark:text-slate-300">{message}</p>
-        )}
       </div>
 
       {/* Change password */}
@@ -156,35 +188,36 @@ export function ProfileSettingsView() {
             Change password
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Choose a new password. You'll stay signed in on this device.
+            You must enter your current password to make this change.
           </p>
         </div>
 
-        <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">
-            New password
-          </label>
-          <input
-            type="password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            placeholder="At least 8 characters"
-            className="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-          />
-        </div>
+        <PasswordInput
+          label="Current password"
+          value={currentPassword}
+          onChange={(e) => setCurrentPassword(e.target.value)}
+          placeholder="Your current password"
+          autoComplete="current-password"
+          className="rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+        />
 
-        <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">
-            Confirm new password
-          </label>
-          <input
-            type="password"
-            value={confirmNewPassword}
-            onChange={(e) => setConfirmNewPassword(e.target.value)}
-            placeholder="Repeat password"
-            className="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-          />
-        </div>
+        <PasswordInput
+          label="New password"
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+          placeholder="At least 8 characters"
+          autoComplete="new-password"
+          className="rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+        />
+
+        <PasswordInput
+          label="Confirm new password"
+          value={confirmNewPassword}
+          onChange={(e) => setConfirmNewPassword(e.target.value)}
+          placeholder="Repeat new password"
+          autoComplete="new-password"
+          className="rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+        />
 
         <button
           type="button"
@@ -192,15 +225,9 @@ export function ProfileSettingsView() {
           disabled={pwSaving}
           className="inline-flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-60"
         >
-          <Save className="w-4 h-4" />
-          {pwSaving ? 'Saving…' : 'Update password'}
+          <ShieldCheck className="w-4 h-4" />
+          {pwSaving ? 'Verifying…' : 'Update password'}
         </button>
-
-        {pwMessage && (
-          <p className="text-sm text-slate-600 dark:text-slate-300">
-            {pwMessage}
-          </p>
-        )}
       </div>
     </div>
   );

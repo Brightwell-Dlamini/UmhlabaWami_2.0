@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  FileText, PlusCircle, ShoppingCart, ArrowRight, X, Trash2, Search,
+  FileText, PlusCircle, ShoppingCart, ArrowRight, Trash2, Search,
 } from 'lucide-react';
 import { auth } from '../../services/auth';
 import {
@@ -16,6 +16,10 @@ import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 import { useRealtime } from '../../hooks/useRealtime';
 import type { Tenant, Shop } from '../../types';
+import { Modal } from '../ui/Modal';
+import { useConfirm } from '../ui/ConfirmDialog';
+import { useToast } from '../ui/ToastProvider';
+import { EmptyState } from '../ui/EmptyState';
 
 type SubTab = 'quotes' | 'orders';
 
@@ -59,10 +63,12 @@ const QUOTE_TEMPLATES: {
 
 export function QuotesOrdersTab() {
   const orgId = auth.getCurrentOrganization()?.id ?? '';
+  const toast = useToast();
+  const { confirm } = useConfirm();
+
   const [subTab, setSubTab] = useState<SubTab>('quotes');
   const [showQuoteModal, setShowQuoteModal] = useState(false);
   const [showOrderModal, setShowOrderModal] = useState(false);
-  const [feedback, setFeedback] = useState('');
   const [search, setSearch] = useState('');
 
   const { data: quotes = [] } = useSupabaseQuery(
@@ -108,8 +114,7 @@ export function QuotesOrdersTab() {
     mutationFn: (input: Parameters<typeof quotesApi.create>[0]) => quotesApi.create(input),
     invalidateKeys: ['quotes'],
     onSuccess: () => {
-      setFeedback('Quote created.');
-      setTimeout(() => setFeedback(''), 3000);
+      toast.success('Quote created');
       setShowQuoteModal(false);
     },
   });
@@ -118,8 +123,7 @@ export function QuotesOrdersTab() {
     mutationFn: (input: Parameters<typeof ordersApi.create>[0]) => ordersApi.create(input),
     invalidateKeys: ['sales_orders'],
     onSuccess: () => {
-      setFeedback('Order created.');
-      setTimeout(() => setFeedback(''), 3000);
+      toast.success('Order created');
       setShowOrderModal(false);
     },
   });
@@ -128,8 +132,7 @@ export function QuotesOrdersTab() {
     mutationFn: (id: string) => quotesApi.convertToInvoice(id),
     invalidateKeys: ['quotes', 'invoices'],
     onSuccess: (inv) => {
-      setFeedback(`Quote converted to ${inv.invoice_number}.`);
-      setTimeout(() => setFeedback(''), 4000);
+      toast.success('Quote converted', `Invoice ${inv.invoice_number}`);
     },
   });
 
@@ -137,18 +140,13 @@ export function QuotesOrdersTab() {
     mutationFn: (id: string) => ordersApi.convertToInvoice(id),
     invalidateKeys: ['sales_orders', 'invoices'],
     onSuccess: (inv) => {
-      setFeedback(`Order invoiced as ${inv.invoice_number}.`);
-      setTimeout(() => setFeedback(''), 4000);
+      toast.success('Order invoiced', `Invoice ${inv.invoice_number}`);
     },
   });
 
   const removeQuote = useSupabaseMutation({
     mutationFn: (id: string) => quotesApi.remove(id),
     invalidateKeys: ['quotes'],
-    onSuccess: () => {
-      setFeedback('Quote removed.');
-      setTimeout(() => setFeedback(''), 3000);
-    },
   });
 
   const filteredQuotes = useMemo(() => {
@@ -178,7 +176,28 @@ export function QuotesOrdersTab() {
     if (org && quote) generateQuotePdf(quote, org);
   };
 
-  if (!orgId) return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
+  const handleDeleteQuote = async (quoteId: string, quoteNumber: string) => {
+    const ok = await confirm({
+      title: `Delete quote ${quoteNumber}?`,
+      message: 'The quote and its line items will be removed.',
+      confirmLabel: 'Delete quote',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await removeQuote.mutate(quoteId);
+      toast.success('Quote removed');
+    } catch (e) {
+      toast.error(
+        'Delete failed',
+        e instanceof Error ? e.message : 'Could not remove quote.'
+      );
+    }
+  };
+
+  if (!orgId) {
+    return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -206,12 +225,6 @@ export function QuotesOrdersTab() {
           </button>
         </div>
       </div>
-
-      {feedback && (
-        <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 text-emerald-800 dark:text-emerald-200 text-xs font-semibold">
-          {feedback}
-        </div>
-      )}
 
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 pb-2">
         <button
@@ -255,48 +268,61 @@ export function QuotesOrdersTab() {
               <tbody className="divide-y">
                 {filteredQuotes.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="p-8 text-center text-slate-400">No quotes yet.</td>
+                    <td colSpan={8}>
+                      <EmptyState
+                        icon={<FileText className="w-5 h-5" />}
+                        title="No quotes yet"
+                        message="Create a quote to send proposals to prospects or tenants."
+                      />
+                    </td>
                   </tr>
-                ) : filteredQuotes.map((q) => {
-                  const tenant = tenants.find((t) => t.id === q.tenant_id);
-                  const clientLabel =
-                    tenant?.business_name || q.prospect_company || q.prospect_name || '—';
-                  return (
-                    <tr key={q.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30">
-                      <td className="px-4 py-3 font-mono font-bold">{q.quote_number}</td>
-                      <td className="px-4 py-3 text-slate-500">{q.type}</td>
-                      <td className="px-4 py-3">{clientLabel}</td>
-                      <td className="px-4 py-3 text-slate-500">{q.issue_date}</td>
-                      <td className="px-4 py-3 text-slate-500">{q.valid_until ?? '—'}</td>
-                      <td className="px-4 py-3 text-right font-bold">E{q.total.toLocaleString()}</td>
-                      <td className="px-4 py-3">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700">{q.status}</span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-3">
-                          <button onClick={() => handleQuotePdf(q.id)} className="text-[11px] font-semibold text-slate-600 hover:underline">PDF</button>
-                          {q.status !== 'Converted' && q.tenant_id && (
+                ) : (
+                  filteredQuotes.map((q) => {
+                    const tenant = tenants.find((t) => t.id === q.tenant_id);
+                    const clientLabel =
+                      tenant?.business_name || q.prospect_company || q.prospect_name || '—';
+                    return (
+                      <tr key={q.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30">
+                        <td className="px-4 py-3 font-mono font-bold">{q.quote_number}</td>
+                        <td className="px-4 py-3 text-slate-500">{q.type}</td>
+                        <td className="px-4 py-3">{clientLabel}</td>
+                        <td className="px-4 py-3 text-slate-500">{q.issue_date}</td>
+                        <td className="px-4 py-3 text-slate-500">{q.valid_until ?? '—'}</td>
+                        <td className="px-4 py-3 text-right font-bold">E{q.total.toLocaleString()}</td>
+                        <td className="px-4 py-3">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700">
+                            {q.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-3">
                             <button
-                              onClick={() => convertQuote.mutate(q.id)}
-                              disabled={convertQuote.loading}
-                              className="text-[11px] font-semibold text-blue-600 hover:underline flex items-center gap-1 disabled:opacity-60"
+                              onClick={() => handleQuotePdf(q.id)}
+                              className="text-[11px] font-semibold text-slate-600 hover:underline"
                             >
-                              Convert to invoice <ArrowRight className="w-3 h-3" />
+                              PDF
                             </button>
-                          )}
-                          <button
-                            onClick={() => {
-                              if (confirm(`Delete quote ${q.quote_number}?`)) removeQuote.mutate(q.id);
-                            }}
-                            className="p-1 text-slate-400 hover:text-red-500"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                            {q.status !== 'Converted' && q.tenant_id && (
+                              <button
+                                onClick={() => convertQuote.mutate(q.id)}
+                                disabled={convertQuote.loading}
+                                className="text-[11px] font-semibold text-blue-600 hover:underline flex items-center gap-1 disabled:opacity-60"
+                              >
+                                Convert to invoice <ArrowRight className="w-3 h-3" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleDeleteQuote(q.id, q.quote_number)}
+                              className="p-1 text-slate-400 hover:text-red-500"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -321,62 +347,74 @@ export function QuotesOrdersTab() {
               <tbody className="divide-y">
                 {filteredOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="p-8 text-center text-slate-400">No orders yet.</td>
+                    <td colSpan={7}>
+                      <EmptyState
+                        icon={<ShoppingCart className="w-5 h-5" />}
+                        title="No orders yet"
+                        message="Sales orders track committed work before it's invoiced."
+                      />
+                    </td>
                   </tr>
-                ) : filteredOrders.map((o) => {
-                  const tenant = tenants.find((t) => t.id === o.tenant_id);
-                  return (
-                    <tr key={o.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30">
-                      <td className="px-4 py-3 font-mono font-bold">{o.order_number}</td>
-                      <td className="px-4 py-3">{tenant?.business_name ?? '—'}</td>
-                      <td className="px-4 py-3 text-slate-500">{o.order_date}</td>
-                      <td className="px-4 py-3 text-slate-500">{o.due_date ?? '—'}</td>
-                      <td className="px-4 py-3 text-right font-bold">E{o.total.toLocaleString()}</td>
-                      <td className="px-4 py-3">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700">{o.status}</span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {o.status !== 'Invoiced' && o.status !== 'Cancelled' && (
-                          <button
-                            onClick={() => convertOrder.mutate(o.id)}
-                            disabled={convertOrder.loading}
-                            className="text-[11px] font-semibold text-blue-600 hover:underline flex items-center gap-1 ml-auto disabled:opacity-60"
-                          >
-                            Invoice order <ArrowRight className="w-3 h-3" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                ) : (
+                  filteredOrders.map((o) => {
+                    const tenant = tenants.find((t) => t.id === o.tenant_id);
+                    return (
+                      <tr key={o.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30">
+                        <td className="px-4 py-3 font-mono font-bold">{o.order_number}</td>
+                        <td className="px-4 py-3">{tenant?.business_name ?? '—'}</td>
+                        <td className="px-4 py-3 text-slate-500">{o.order_date}</td>
+                        <td className="px-4 py-3 text-slate-500">{o.due_date ?? '—'}</td>
+                        <td className="px-4 py-3 text-right font-bold">E{o.total.toLocaleString()}</td>
+                        <td className="px-4 py-3">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700">
+                            {o.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {o.status !== 'Invoiced' && o.status !== 'Cancelled' && (
+                            <button
+                              onClick={() => convertOrder.mutate(o.id)}
+                              disabled={convertOrder.loading}
+                              className="text-[11px] font-semibold text-blue-600 hover:underline flex items-center gap-1 ml-auto disabled:opacity-60"
+                            >
+                              Invoice order <ArrowRight className="w-3 h-3" />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {showQuoteModal && (
-        <QuoteForm
-          tenants={tenants}
-          shops={shops}
-          catalog={catalog}
-          onCancel={() => setShowQuoteModal(false)}
-          onSubmit={(input) => createQuote.mutate(input as never)}
-        />
-      )}
+      <QuoteForm
+        open={showQuoteModal}
+        tenants={tenants}
+        shops={shops}
+        catalog={catalog}
+        onCancel={() => setShowQuoteModal(false)}
+        onSubmit={(input) => createQuote.mutate(input as never)}
+      />
 
-      {showOrderModal && (
-        <OrderForm
-          tenants={tenants}
-          shops={shops}
-          catalog={catalog}
-          onCancel={() => setShowOrderModal(false)}
-          onSubmit={(input) => createOrder.mutate(input as never)}
-        />
-      )}
+      <OrderForm
+        open={showOrderModal}
+        tenants={tenants}
+        shops={shops}
+        catalog={catalog}
+        onCancel={() => setShowOrderModal(false)}
+        onSubmit={(input) => createOrder.mutate(input as never)}
+      />
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Forms
+// ---------------------------------------------------------------------------
 
 interface LineDraft {
   item_id?: string;
@@ -387,12 +425,14 @@ interface LineDraft {
 }
 
 function QuoteForm({
+  open,
   tenants,
   shops,
   catalog,
   onCancel,
   onSubmit,
 }: {
+  open: boolean;
   tenants: Tenant[];
   shops: Shop[];
   catalog: InvoiceItem[];
@@ -414,11 +454,35 @@ function QuoteForm({
     return d.toISOString().slice(0, 10);
   });
   const [notes, setNotes] = useState('');
-  const [terms, setTerms] = useState('This quotation is valid for 30 days from the issue date. Acceptance is confirmed by signature and payment of the deposit.');
+  const [terms, setTerms] = useState(
+    'This quotation is valid for 30 days from the issue date. Acceptance is confirmed by signature and payment of the deposit.'
+  );
   const [lines, setLines] = useState<LineDraft[]>([
     { description: '', quantity: 1, unit_amount: 0, tax_rate: 0.15 },
   ]);
   const [templateId, setTemplateId] = useState('blank');
+
+  useEffect(() => {
+    if (!open) return;
+    // Reset to a clean state each open.
+    setType('Lease Proposal');
+    setClientMode('tenant');
+    setTenantId(tenants[0]?.id ?? '');
+    setProspectCompany('');
+    setProspectName('');
+    setProspectEmail('');
+    setProspectPhone('');
+    setShopId('');
+    setIssueDate(new Date().toISOString().slice(0, 10));
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    setValidUntil(d.toISOString().slice(0, 10));
+    setNotes('');
+    setTerms('This quotation is valid for 30 days from the issue date. Acceptance is confirmed by signature and payment of the deposit.');
+    setLines([{ description: '', quantity: 1, unit_amount: 0, tax_rate: 0.15 }]);
+    setTemplateId('blank');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const applyTemplate = (id: string) => {
     setTemplateId(id);
@@ -442,17 +506,6 @@ function QuoteForm({
   };
   const updateLine = (i: number, patch: Partial<LineDraft>) => {
     setLines(lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
-  };
-  const pickFromCatalog = (i: number, itemId: string) => {
-    const item = catalog.find((c) => c.id === itemId);
-    if (!item) return;
-    updateLine(i, {
-      item_id: item.id,
-      description: item.description || item.name,
-      unit_amount: item.unit_price,
-      tax_rate: item.tax_rate,
-      quantity: item.default_quantity,
-    });
   };
 
   const subtotal = lines.reduce((s, l) => s + l.quantity * l.unit_amount, 0);
@@ -499,161 +552,217 @@ function QuoteForm({
   });
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-2xl w-full border p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-base">New quotation</h3>
-          <button type="button" onClick={onCancel}><X className="w-5 h-5 text-slate-400" /></button>
+    <Modal open={open} onClose={onCancel} size="lg" title="New quotation">
+      <form onSubmit={submit} className="space-y-5 text-xs">
+        <div>
+          <label className="block font-semibold mb-1">Start from template</label>
+          <select
+            value={templateId}
+            onChange={(e) => applyTemplate(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+          >
+            {QUOTE_TEMPLATES.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
         </div>
-        <form onSubmit={submit} className="space-y-5 text-xs">
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
-            <label className="block font-semibold mb-1">Start from template</label>
+            <label className="block font-semibold mb-1">Document type</label>
             <select
-              value={templateId}
-              onChange={(e) => applyTemplate(e.target.value)}
+              value={type}
+              onChange={(e) => setType(e.target.value as typeof type)}
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
             >
-              {QUOTE_TEMPLATES.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
+              <option>Lease Proposal</option>
+              <option>Fitout Works</option>
+              <option>Once-off Service</option>
+              <option>Other</option>
             </select>
-            <p className="text-[10px] text-slate-400 mt-1">Pick a template to pre-fill line items — edit freely after.</p>
           </div>
+          <div>
+            <label className="block font-semibold mb-1">Issue date</label>
+            <input
+              type="date"
+              value={issueDate}
+              onChange={(e) => setIssueDate(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+            />
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">Valid until</label>
+            <input
+              type="date"
+              value={validUntil}
+              onChange={(e) => setValidUntil(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+            />
+          </div>
+        </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => setClientMode('tenant')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold ${clientMode === 'tenant' ? 'bg-blue-600 text-white' : 'border'}`}
+          >
+            Existing tenant
+          </button>
+          <button
+            type="button"
+            onClick={() => setClientMode('prospect')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold ${clientMode === 'prospect' ? 'bg-blue-600 text-white' : 'border'}`}
+          >
+            Prospect
+          </button>
+        </div>
+
+        {clientMode === 'tenant' ? (
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block font-semibold mb-1">Document type</label>
-              <select value={type} onChange={(e) => setType(e.target.value as typeof type)}
-                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border">
-                <option>Lease Proposal</option>
-                <option>Fitout Works</option>
-                <option>Once-off Service</option>
-                <option>Other</option>
+              <label className="block font-semibold mb-1">Tenant</label>
+              <select
+                value={tenantId}
+                onChange={(e) => setTenantId(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+              >
+                {tenants.map((t) => (
+                  <option key={t.id} value={t.id}>{t.business_name}</option>
+                ))}
               </select>
             </div>
             <div>
-              <label className="block font-semibold mb-1">Issue date</label>
-              <input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
+              <label className="block font-semibold mb-1">Unit (optional)</label>
+              <select
+                value={shopId}
+                onChange={(e) => setShopId(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+              >
+                <option value="">—</option>
+                {tenantShops.map((s) => (
+                  <option key={s.id} value={s.id}>Unit {s.shop_number}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Company</label>
+              <input
+                value={prospectCompany}
+                onChange={(e) => setProspectCompany(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+              />
             </div>
             <div>
-              <label className="block font-semibold mb-1">Valid until</label>
-              <input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
+              <label className="block font-semibold mb-1">Contact name</label>
+              <input
+                value={prospectName}
+                onChange={(e) => setProspectName(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Email</label>
+              <input
+                value={prospectEmail}
+                onChange={(e) => setProspectEmail(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Phone</label>
+              <input
+                value={prospectPhone}
+                onChange={(e) => setProspectPhone(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+              />
             </div>
           </div>
+        )}
 
-          <div className="flex gap-3">
-            <button type="button" onClick={() => setClientMode('tenant')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold ${clientMode === 'tenant' ? 'bg-blue-600 text-white' : 'border'}`}>
-              Existing tenant
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="font-semibold">Line items</label>
+            <button type="button" onClick={addLine} className="text-blue-600 font-semibold">
+              + Add line
             </button>
-            <button type="button" onClick={() => setClientMode('prospect')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold ${clientMode === 'prospect' ? 'bg-blue-600 text-white' : 'border'}`}>
-              Prospect
-            </button>
           </div>
-
-          {clientMode === 'tenant' ? (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block font-semibold mb-1">Tenant</label>
-                <select value={tenantId} onChange={(e) => setTenantId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border">
-                  {tenants.map((t) => <option key={t.id} value={t.id}>{t.business_name}</option>)}
-                </select>
+          {lines.map((l, i) => (
+            <div key={i} className="grid grid-cols-12 gap-2 items-end">
+              <div className="col-span-5">
+                {i === 0 && <label className="block text-[10px] mb-0.5">Description</label>}
+                <input
+                  value={l.description}
+                  onChange={(e) => updateLine(i, { description: e.target.value })}
+                  className="w-full px-2 py-1.5 rounded-lg border bg-slate-50 dark:bg-slate-900"
+                />
               </div>
-              <div>
-                <label className="block font-semibold mb-1">Unit (optional)</label>
-                <select value={shopId} onChange={(e) => setShopId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border">
-                  <option value="">—</option>
-                  {tenantShops.map((s) => <option key={s.id} value={s.id}>Unit {s.shop_number}</option>)}
-                </select>
+              <div className="col-span-2">
+                {i === 0 && <label className="block text-[10px] mb-0.5">Qty</label>}
+                <input
+                  type="number"
+                  value={l.quantity}
+                  onChange={(e) => updateLine(i, { quantity: Number(e.target.value) })}
+                  className="w-full px-2 py-1.5 rounded-lg border bg-slate-50 dark:bg-slate-900"
+                />
+              </div>
+              <div className="col-span-3">
+                {i === 0 && <label className="block text-[10px] mb-0.5">Unit price</label>}
+                <input
+                  type="number"
+                  value={l.unit_amount}
+                  onChange={(e) => updateLine(i, { unit_amount: Number(e.target.value) })}
+                  className="w-full px-2 py-1.5 rounded-lg border bg-slate-50 dark:bg-slate-900"
+                />
+              </div>
+              <div className="col-span-2 flex justify-end">
+                {lines.length > 1 && (
+                  <button type="button" onClick={() => removeLine(i)} className="text-red-500 p-1">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block font-semibold mb-1">Company</label>
-                <input value={prospectCompany} onChange={(e) => setProspectCompany(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
-              </div>
-              <div>
-                <label className="block font-semibold mb-1">Contact name</label>
-                <input value={prospectName} onChange={(e) => setProspectName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
-              </div>
-              <div>
-                <label className="block font-semibold mb-1">Email</label>
-                <input value={prospectEmail} onChange={(e) => setProspectEmail(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
-              </div>
-              <div>
-                <label className="block font-semibold mb-1">Phone</label>
-                <input value={prospectPhone} onChange={(e) => setProspectPhone(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="font-semibold">Line items</label>
-              <button type="button" onClick={addLine} className="text-blue-600 font-semibold">+ Add line</button>
-            </div>
-            {lines.map((l, i) => (
-              <div key={i} className="grid grid-cols-12 gap-2 items-end">
-                <div className="col-span-5">
-                  {i === 0 && <label className="block text-[10px] mb-0.5">Description</label>}
-                  <input value={l.description} onChange={(e) => updateLine(i, { description: e.target.value })}
-                    className="w-full px-2 py-1.5 rounded-lg border bg-slate-50 dark:bg-slate-900" />
-                </div>
-                <div className="col-span-2">
-                  {i === 0 && <label className="block text-[10px] mb-0.5">Qty</label>}
-                  <input type="number" value={l.quantity} onChange={(e) => updateLine(i, { quantity: Number(e.target.value) })}
-                    className="w-full px-2 py-1.5 rounded-lg border bg-slate-50 dark:bg-slate-900" />
-                </div>
-                <div className="col-span-3">
-                  {i === 0 && <label className="block text-[10px] mb-0.5">Unit price</label>}
-                  <input type="number" value={l.unit_amount} onChange={(e) => updateLine(i, { unit_amount: Number(e.target.value) })}
-                    className="w-full px-2 py-1.5 rounded-lg border bg-slate-50 dark:bg-slate-900" />
-                </div>
-                <div className="col-span-2 flex justify-end">
-                  {lines.length > 1 && (
-                    <button type="button" onClick={() => removeLine(i)} className="text-red-500 p-1">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-            <div className="text-right font-bold pt-2">Total: E{total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+          ))}
+          <div className="text-right font-bold pt-2">
+            Total: E{total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
           </div>
+        </div>
 
-          <div>
-            <label className="block font-semibold mb-1">Terms</label>
-            <textarea value={terms} onChange={(e) => setTerms(e.target.value)} rows={2}
-              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
-          </div>
+        <div>
+          <label className="block font-semibold mb-1">Terms</label>
+          <textarea
+            value={terms}
+            onChange={(e) => setTerms(e.target.value)}
+            rows={2}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+          />
+        </div>
 
-          <div className="flex justify-end gap-2 border-t pt-3">
-            <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border">Cancel</button>
-            <button type="submit" className="px-5 py-2 rounded-xl bg-blue-600 text-white font-bold">Create quote</button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <div className="flex justify-end gap-2 border-t pt-3">
+          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border">
+            Cancel
+          </button>
+          <button type="submit" className="px-5 py-2 rounded-xl bg-blue-600 text-white font-bold">
+            Create quote
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
 function OrderForm({
+  open,
   tenants,
-  shops,
   catalog,
   onCancel,
   onSubmit,
 }: {
+  open: boolean;
   tenants: Tenant[];
   shops: Shop[];
   catalog: InvoiceItem[];
@@ -661,15 +770,23 @@ function OrderForm({
   onSubmit: (input: Record<string, unknown>) => void;
 }) {
   const [tenantId, setTenantId] = useState(tenants[0]?.id ?? '');
-  const [shopId, setShopId] = useState('');
   const [orderDate, setOrderDate] = useState(new Date().toISOString().slice(0, 10));
   const [dueDate, setDueDate] = useState('');
-  const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<LineDraft[]>([
     { description: '', quantity: 1, unit_amount: 0, tax_rate: 0.15 },
   ]);
 
-  const addLine = () => setLines([...lines, { description: '', quantity: 1, unit_amount: 0, tax_rate: 0.15 }]);
+  useEffect(() => {
+    if (!open) return;
+    setTenantId(tenants[0]?.id ?? '');
+    setOrderDate(new Date().toISOString().slice(0, 10));
+    setDueDate('');
+    setLines([{ description: '', quantity: 1, unit_amount: 0, tax_rate: 0.15 }]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const addLine = () =>
+    setLines([...lines, { description: '', quantity: 1, unit_amount: 0, tax_rate: 0.15 }]);
   const updateLine = (i: number, patch: Partial<LineDraft>) =>
     setLines(lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
 
@@ -679,10 +796,8 @@ function OrderForm({
     if (!tenantId || validLines.length === 0) return;
     onSubmit({
       tenant_id: tenantId,
-      shop_id: shopId || undefined,
       order_date: orderDate,
       due_date: dueDate || undefined,
-      notes: notes || undefined,
       lines: validLines.map((l, i) => ({
         description: l.description,
         quantity: l.quantity,
@@ -694,52 +809,76 @@ function OrderForm({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-lg w-full border p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-base">New sales order</h3>
-          <button type="button" onClick={onCancel}><X className="w-5 h-5 text-slate-400" /></button>
+    <Modal open={open} onClose={onCancel} size="md" title="New sales order">
+      <form onSubmit={submit} className="space-y-3 text-xs">
+        <div>
+          <label className="block font-semibold mb-1">Tenant</label>
+          <select
+            value={tenantId}
+            onChange={(e) => setTenantId(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+          >
+            {tenants.map((t) => (
+              <option key={t.id} value={t.id}>{t.business_name}</option>
+            ))}
+          </select>
         </div>
-        <form onSubmit={submit} className="space-y-3 text-xs">
+        <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block font-semibold mb-1">Tenant</label>
-            <select value={tenantId} onChange={(e) => setTenantId(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border">
-              {tenants.map((t) => <option key={t.id} value={t.id}>{t.business_name}</option>)}
-            </select>
+            <label className="block font-semibold mb-1">Order date</label>
+            <input
+              type="date"
+              value={orderDate}
+              onChange={(e) => setOrderDate(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+            />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block font-semibold mb-1">Order date</label>
-              <input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Due date</label>
-              <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
-            </div>
+          <div>
+            <label className="block font-semibold mb-1">Due date</label>
+            <input
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+            />
           </div>
-          {lines.map((l, i) => (
-            <div key={i} className="grid grid-cols-6 gap-2">
-              <input placeholder="Description" value={l.description}
-                onChange={(e) => updateLine(i, { description: e.target.value })}
-                className="col-span-3 px-2 py-1.5 rounded-lg border bg-slate-50 dark:bg-slate-900" />
-              <input type="number" placeholder="Qty" value={l.quantity}
-                onChange={(e) => updateLine(i, { quantity: Number(e.target.value) })}
-                className="px-2 py-1.5 rounded-lg border bg-slate-50 dark:bg-slate-900" />
-              <input type="number" placeholder="Price" value={l.unit_amount}
-                onChange={(e) => updateLine(i, { unit_amount: Number(e.target.value) })}
-                className="col-span-2 px-2 py-1.5 rounded-lg border bg-slate-50 dark:bg-slate-900" />
-            </div>
-          ))}
-          <button type="button" onClick={addLine} className="text-blue-600 font-semibold">+ Add line</button>
-          <div className="flex justify-end gap-2 border-t pt-3">
-            <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border">Cancel</button>
-            <button type="submit" className="px-5 py-2 rounded-xl bg-blue-600 text-white font-bold">Create order</button>
+        </div>
+        {lines.map((l, i) => (
+          <div key={i} className="grid grid-cols-6 gap-2">
+            <input
+              placeholder="Description"
+              value={l.description}
+              onChange={(e) => updateLine(i, { description: e.target.value })}
+              className="col-span-3 px-2 py-1.5 rounded-lg border bg-slate-50 dark:bg-slate-900"
+            />
+            <input
+              type="number"
+              placeholder="Qty"
+              value={l.quantity}
+              onChange={(e) => updateLine(i, { quantity: Number(e.target.value) })}
+              className="px-2 py-1.5 rounded-lg border bg-slate-50 dark:bg-slate-900"
+            />
+            <input
+              type="number"
+              placeholder="Price"
+              value={l.unit_amount}
+              onChange={(e) => updateLine(i, { unit_amount: Number(e.target.value) })}
+              className="col-span-2 px-2 py-1.5 rounded-lg border bg-slate-50 dark:bg-slate-900"
+            />
           </div>
-        </form>
-      </div>
-    </div>
+        ))}
+        <button type="button" onClick={addLine} className="text-blue-600 font-semibold">
+          + Add line
+        </button>
+        <div className="flex justify-end gap-2 border-t pt-3">
+          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border">
+            Cancel
+          </button>
+          <button type="submit" className="px-5 py-2 rounded-xl bg-blue-600 text-white font-bold">
+            Create order
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }

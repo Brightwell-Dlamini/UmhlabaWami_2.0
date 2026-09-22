@@ -29,7 +29,7 @@ import { financialRequests as reqApi } from '../../services/api/financialRequest
 import { generateStatementPdf } from '../../services/pdf';
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
-import { useRealtime } from '../../hooks/useRealtime';
+import { useRealtime } from '../../hooks/useRealtime';import { useInvoiceStatusSync } from '../../hooks/useInvoiceStatusSync';
 import {
   daysBetween,
   selectOverdueInvoices,
@@ -108,6 +108,7 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
     () => centersApi.list(),
     { enabled: !!orgId }
   );
+useInvoiceStatusSync({ orgId });
 
   useRealtime({
     table: 'invoice_items',

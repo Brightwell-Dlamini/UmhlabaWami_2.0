@@ -18,7 +18,7 @@ import type { Invoice, PaymentRecord } from '../../types';
 import { Modal } from '../ui/Modal';
 import { useConfirm } from '../ui/ConfirmDialog';
 import { useToast } from '../ui/ToastProvider';
-import { EmptyState } from '../ui/EmptyState';
+import { EmptyState } from '../ui/EmptyState';import { useInvoiceStatusSync } from '../../hooks/useInvoiceStatusSync';
 
 const STATUS_FILTERS = [
   'All', 'Draft', 'Sent', 'Partially Paid', 'Paid', 'Overdue', 'Cancelled',
@@ -68,6 +68,7 @@ export function InvoicesTab() {
     () => shopsApi.list(),
     { enabled: !!orgId }
   );
+useInvoiceStatusSync({ orgId });
 
   useRealtime({
     table: 'invoices',
@@ -75,6 +76,7 @@ export function InvoicesTab() {
     invalidateKeys: ['invoices'],
     enabled: !!orgId,
   });
+
 
   const recordPayment = useSupabaseMutation({
     mutationFn: ({

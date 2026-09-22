@@ -1,11 +1,14 @@
-import React, { useMemo, useState } from 'react';
-import { Calendar, PlusCircle, CheckCircle2, Edit3, Trash2, X } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Calendar, PlusCircle, Edit3, Trash2 } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { staffShifts as shiftsApi } from '../../services/api/staffShifts';
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 import { useRealtime } from '../../hooks/useRealtime';
 import type { StaffShift } from '../../types';
+import { Modal } from '../ui/Modal';
+import { useConfirm } from '../ui/ConfirmDialog';
+import { useToast } from '../ui/ToastProvider';
 
 export const StaffScheduleView: React.FC = () => {
   const orgId = auth.getCurrentOrganization()?.id ?? '';
@@ -15,10 +18,12 @@ export const StaffScheduleView: React.FC = () => {
     user?.role === 'property_manager' ||
     user?.role === 'landlord' ||
     user?.role === 'super_admin';
+  const toast = useToast();
+  const { confirm } = useConfirm();
+
   const [filterRole, setFilterRole] = useState('All');
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<StaffShift | null>(null);
-  const [feedback, setFeedback] = useState('');
 
   const { data: shifts = [] } = useSupabaseQuery(
     ['staff_shifts', orgId],
@@ -34,24 +39,13 @@ export const StaffScheduleView: React.FC = () => {
   });
 
   const create = useSupabaseMutation({
-    mutationFn: (input: {
-      staff_name: string;
-      staff_role: string;
-      date: string;
-      shift_type: string;
-      status: string;
-      notes?: string;
-    }) => shiftsApi.create(input),
+    mutationFn: (input: Parameters<typeof shiftsApi.create>[0]) => shiftsApi.create(input),
     invalidateKeys: ['staff_shifts'],
     onSuccess: () => {
-      setFeedback('Shift scheduled.');
-      setTimeout(() => setFeedback(''), 3000);
+      toast.success('Shift scheduled');
       setShowModal(false);
     },
-    onError: (e) => {
-      setFeedback(`Failed: ${e.message}`);
-      setTimeout(() => setFeedback(''), 5000);
-    },
+    onError: (e) => toast.error('Schedule failed', e.message),
   });
 
   const update = useSupabaseMutation({
@@ -59,25 +53,36 @@ export const StaffScheduleView: React.FC = () => {
       shiftsApi.update(id, patch),
     invalidateKeys: ['staff_shifts'],
     onSuccess: () => {
-      setFeedback('Shift updated.');
-      setTimeout(() => setFeedback(''), 3000);
+      toast.success('Shift updated');
       setEditing(null);
       setShowModal(false);
     },
-    onError: (e) => {
-      setFeedback(`Failed: ${e.message}`);
-      setTimeout(() => setFeedback(''), 5000);
-    },
+    onError: (e) => toast.error('Update failed', e.message),
   });
 
   const remove = useSupabaseMutation({
     mutationFn: (id: string) => shiftsApi.remove(id),
     invalidateKeys: ['staff_shifts'],
-    onSuccess: () => {
-      setFeedback('Shift removed.');
-      setTimeout(() => setFeedback(''), 3000);
-    },
   });
+
+  const handleDelete = async (s: StaffShift) => {
+    const ok = await confirm({
+      title: `Delete shift for ${s.staff_name}?`,
+      message: 'This shift will be removed from the roster.',
+      confirmLabel: 'Delete shift',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await remove.mutate(s.id);
+      toast.success('Shift removed');
+    } catch (e) {
+      toast.error(
+        'Delete failed',
+        e instanceof Error ? e.message : 'Could not remove shift.'
+      );
+    }
+  };
 
   const filtered = useMemo(() => {
     let list = shifts;
@@ -124,12 +129,6 @@ export const StaffScheduleView: React.FC = () => {
           </button>
         )}
       </div>
-
-      {feedback && (
-        <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-xl text-xs flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4" /> {feedback}
-        </div>
-      )}
 
       {canManage && (
         <div className="flex items-center gap-1 flex-wrap">
@@ -184,15 +183,13 @@ export const StaffScheduleView: React.FC = () => {
                     s.status === 'On-Call'
                       ? 'bg-amber-100 text-amber-800'
                       : s.status === 'Completed'
-                      ? 'bg-slate-100 text-slate-600'
-                      : 'bg-emerald-100 text-emerald-800'
+                        ? 'bg-slate-100 text-slate-600'
+                        : 'bg-emerald-100 text-emerald-800'
                   }`}
                 >
                   {s.status}
                 </span>
-                <span className="text-xs text-slate-400 hidden md:inline">
-                  {s.date}
-                </span>
+                <span className="text-xs text-slate-400 hidden md:inline">{s.date}</span>
                 {canManage && (
                   <>
                     <button
@@ -207,9 +204,7 @@ export const StaffScheduleView: React.FC = () => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        if (confirm('Delete shift?')) remove.mutate(s.id);
-                      }}
+                      onClick={() => handleDelete(s)}
                       className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-red-500 hover:bg-red-50"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -222,28 +217,29 @@ export const StaffScheduleView: React.FC = () => {
         )}
       </div>
 
-      {canManage && showModal && (
-        <ShiftForm
-          initial={editing}
-          onCancel={() => {
-            setShowModal(false);
-            setEditing(null);
-          }}
-          onSubmit={(input) => {
-            if (editing) update.mutate({ id: editing.id, patch: input as never });
-            else create.mutate(input as never);
-          }}
-        />
-      )}
+      <ShiftForm
+        open={canManage && showModal}
+        initial={editing}
+        onCancel={() => {
+          setShowModal(false);
+          setEditing(null);
+        }}
+        onSubmit={(input) => {
+          if (editing) update.mutate({ id: editing.id, patch: input as never });
+          else create.mutate(input as never);
+        }}
+      />
     </div>
   );
 };
 
 function ShiftForm({
+  open,
   initial,
   onCancel,
   onSubmit,
 }: {
+  open: boolean;
   initial: StaffShift | null;
   onCancel: () => void;
   onSubmit: (input: {
@@ -270,104 +266,95 @@ function ShiftForm({
   );
   const [notes, setNotes] = useState(initial?.notes ?? '');
 
+  useEffect(() => {
+    if (!open) return;
+    setStaffName(initial?.staff_name ?? '');
+    setStaffRole(initial?.staff_role ?? 'Maintenance');
+    setDate(initial?.date ?? new Date().toISOString().slice(0, 10));
+    setShiftType(initial?.shift_type ?? 'Morning (07:00-15:00)');
+    setStatus(initial?.status ?? 'Scheduled');
+    setNotes(initial?.notes ?? '');
+  }, [open, initial?.id]);
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border border-slate-200 dark:border-slate-700 p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-base">
-            {initial ? 'Edit shift' : 'Add shift'}
-          </h3>
-          <button type="button" onClick={onCancel}>
-            <X className="w-5 h-5 text-slate-400" />
+    <Modal open={open} onClose={onCancel} size="sm" title={initial ? 'Edit shift' : 'Add shift'}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit({
+            staff_name: staffName,
+            staff_role: staffRole,
+            date,
+            shift_type: shiftType,
+            status,
+            notes: notes || undefined,
+          });
+        }}
+        className="space-y-3 text-xs"
+      >
+        <input
+          required
+          placeholder="Staff name"
+          value={staffName}
+          onChange={(e) => setStaffName(e.target.value)}
+          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+        />
+        <div className="grid grid-cols-2 gap-3">
+          <select
+            value={staffRole}
+            onChange={(e) => setStaffRole(e.target.value as StaffShift['staff_role'])}
+            className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+          >
+            <option>Maintenance</option>
+            <option>Security</option>
+            <option>Cleaning</option>
+            <option>Manager</option>
+            <option>Finance</option>
+          </select>
+          <input
+            type="date"
+            required
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+          />
+        </div>
+        <select
+          value={shiftType}
+          onChange={(e) => setShiftType(e.target.value as StaffShift['shift_type'])}
+          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+        >
+          <option>Morning (07:00-15:00)</option>
+          <option>Afternoon (14:00-22:00)</option>
+          <option>Night (22:00-07:00)</option>
+          <option>General (08:00-17:00)</option>
+        </select>
+        <select
+          value={status}
+          onChange={(e) => setStatus(e.target.value as StaffShift['status'])}
+          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+        >
+          <option>Scheduled</option>
+          <option>On-Call</option>
+          <option>Completed</option>
+          <option>Leave</option>
+        </select>
+        <textarea
+          rows={2}
+          placeholder="Notes (optional)"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+        />
+        <div className="pt-3 border-t flex justify-end gap-2">
+          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border">
+            Cancel
+          </button>
+          <button type="submit" className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold">
+            {initial ? 'Save' : 'Add'}
           </button>
         </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSubmit({
-              staff_name: staffName,
-              staff_role: staffRole,
-              date,
-              shift_type: shiftType,
-              status,
-              notes: notes || undefined,
-            });
-          }}
-          className="space-y-3 text-xs"
-        >
-          <input
-            required
-            placeholder="Staff name"
-            value={staffName}
-            onChange={(e) => setStaffName(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-          />
-          <div className="grid grid-cols-2 gap-3">
-            <select
-              value={staffRole}
-              onChange={(e) => setStaffRole(e.target.value as StaffShift['staff_role'])}
-              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-            >
-              <option>Maintenance</option>
-              <option>Security</option>
-              <option>Cleaning</option>
-              <option>Manager</option>
-              <option>Finance</option>
-            </select>
-            <input
-              type="date"
-              required
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-            />
-          </div>
-          <select
-            value={shiftType}
-            onChange={(e) =>
-              setShiftType(e.target.value as StaffShift['shift_type'])
-            }
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-          >
-            <option>Morning (07:00-15:00)</option>
-            <option>Afternoon (14:00-22:00)</option>
-            <option>Night (22:00-07:00)</option>
-            <option>General (08:00-17:00)</option>
-          </select>
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value as StaffShift['status'])}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-          >
-            <option>Scheduled</option>
-            <option>On-Call</option>
-            <option>Completed</option>
-            <option>Leave</option>
-          </select>
-          <textarea
-            rows={2}
-            placeholder="Notes (optional)"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-          />
-          <div className="pt-3 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold"
-            >
-              {initial ? 'Save' : 'Add'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+      </form>
+    </Modal>
   );
 }

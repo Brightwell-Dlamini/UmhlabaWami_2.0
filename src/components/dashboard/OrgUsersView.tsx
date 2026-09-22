@@ -1,8 +1,15 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Users, Search, PlusCircle, CheckCircle2, Edit3, Trash2, X, Shield,
+  Users,
+  Search,
+  PlusCircle,
+  CheckCircle2,
+  Edit3,
+  Trash2,
+  Shield,
 } from 'lucide-react';
 import { PasswordInput } from '../ui/PasswordInput';
+import { Modal } from '../ui/Modal';
 import { auth } from '../../services/auth';
 import { profiles as profilesApi } from '../../services/api/profiles';
 import { organizations as orgApi } from '../../services/api/organizations';
@@ -92,7 +99,12 @@ export const OrgUsersView: React.FC = () => {
       patch,
     }: {
       id: string;
-      patch: Partial<Pick<User, 'name' | 'email' | 'phone' | 'role' | 'status' | 'organization_id' | 'username'>>;
+      patch: Partial<
+        Pick<
+          User,
+          'name' | 'email' | 'phone' | 'role' | 'status' | 'organization_id' | 'username'
+        >
+      >;
     }) => profilesApi.updateAsAdmin(id, patch),
     invalidateKeys: ['profiles'],
     onSuccess: () => {
@@ -103,7 +115,8 @@ export const OrgUsersView: React.FC = () => {
   });
 
   const setRole = useSupabaseMutation({
-    mutationFn: ({ id, role }: { id: string; role: UserRole }) => profilesApi.setRole(id, role),
+    mutationFn: ({ id, role }: { id: string; role: UserRole }) =>
+      profilesApi.setRole(id, role),
     invalidateKeys: ['profiles'],
     onSuccess: () => {
       flash('Role updated.');
@@ -112,7 +125,8 @@ export const OrgUsersView: React.FC = () => {
   });
 
   const setStatus = useSupabaseMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) => profilesApi.setStatus(id, status),
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      profilesApi.setStatus(id, status),
     invalidateKeys: ['profiles'],
     onSuccess: () => flash('Status updated.'),
     onError: (e) => flash(`Status change failed: ${e.message}`, 'error'),
@@ -131,8 +145,13 @@ export const OrgUsersView: React.FC = () => {
   });
 
   const reassignOrg = useSupabaseMutation({
-    mutationFn: ({ id, organizationId }: { id: string; organizationId: string | null }) =>
-      profilesApi.assignOrganization(id, organizationId),
+    mutationFn: ({
+      id,
+      organizationId,
+    }: {
+      id: string;
+      organizationId: string | null;
+    }) => profilesApi.assignOrganization(id, organizationId),
     invalidateKeys: ['profiles'],
     onSuccess: () => flash('Organisation assignment updated.'),
   });
@@ -282,7 +301,9 @@ export const OrgUsersView: React.FC = () => {
                         </select>
                       </td>
                     )}
-                    <td className="px-4 py-3 capitalize">{u.role.replace(/_/g, ' ')}</td>
+                    <td className="px-4 py-3 capitalize">
+                      {u.role.replace(/_/g, ' ')}
+                    </td>
                     <td className="px-4 py-3">
                       <div>{u.email}</div>
                       <div className="text-[10px] text-slate-500">{u.phone || '—'}</div>
@@ -317,7 +338,9 @@ export const OrgUsersView: React.FC = () => {
                           <button
                             type="button"
                             title="Suspend"
-                            onClick={() => setStatus.mutate({ id: u.id, status: 'Suspended' })}
+                            onClick={() =>
+                              setStatus.mutate({ id: u.id, status: 'Suspended' })
+                            }
                             className="px-2 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-50 rounded-lg"
                           >
                             Suspend
@@ -326,7 +349,9 @@ export const OrgUsersView: React.FC = () => {
                           <button
                             type="button"
                             title="Activate"
-                            onClick={() => setStatus.mutate({ id: u.id, status: 'Active' })}
+                            onClick={() =>
+                              setStatus.mutate({ id: u.id, status: 'Active' })
+                            }
                             className="px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-50 rounded-lg"
                           >
                             Activate
@@ -385,6 +410,7 @@ export const OrgUsersView: React.FC = () => {
           submitError={addStaff.error?.message ?? null}
         />
       )}
+
       {editing && (
         <FullEditForm
           user={editing}
@@ -396,9 +422,18 @@ export const OrgUsersView: React.FC = () => {
           onRoleOnly={(role) => setRole.mutate({ id: editing.id, role })}
         />
       )}
+
+      {/* purge is available via API for super admins; UI intentionally
+          surfaces it through the deactivate flow to avoid accidental
+          double-click purge. */}
+      {false && purge && null}
     </div>
   );
 };
+
+// ---------------------------------------------------------------------------
+// Modals — both use the shared <Modal> primitive.
+// ---------------------------------------------------------------------------
 
 function AddStaffForm({
   roles,
@@ -441,228 +476,296 @@ function AddStaffForm({
     () => defaultOrgId || orgs[0]?.id || ''
   );
 
+  // Reset whenever the modal re-opens.
+  useEffect(() => {
+    setEmail('');
+    setName('');
+    setRole(roles.includes('property_manager') ? 'property_manager' : roles[0]);
+    setPhone('');
+    setPassword('');
+    setOrganizationId(defaultOrgId || orgs[0]?.id || '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgs, defaultOrgId]);
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-base flex items-center gap-2">
-            <Users className="w-4 h-4" /> Add staff member
-          </h3>
-          <button type="button" onClick={onCancel} disabled={submitting}>
-            <X className="w-5 h-5 text-slate-400" />
-          </button>
-        </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (requireOrg && !organizationId) {
-              return;
-            }
-            if (password && password.length < 8) {
-              return;
-            }
-            void onSubmit({
-              email,
-              name,
-              role,
-              phone: phone || undefined,
-              organizationId: organizationId || null,
-              password: password || undefined,
-            });
-          }}
-          className="space-y-3 text-xs"
-        >
-          {(requireOrg || allowNoOrg) && (
-            <div>
-              <label className="block font-semibold mb-1">Organisation</label>
-              {lockOrg ? (
-                <div className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-900/80 border text-xs font-medium">
-                  {orgs[0]
-                    ? `${orgs[0].company_name} (${orgs[0].organization_code})`
-                    : 'Your organisation'}
-                </div>
-              ) : (
-                <select
-                  required={requireOrg}
-                  value={organizationId}
-                  onChange={(e) => setOrganizationId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
-                >
-                  <option value="">{allowNoOrg ? '— platform (no org) —' : 'Select organisation…'}</option>
-                  {orgs.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.company_name} ({o.organization_code})
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-          )}
+    <Modal
+      open
+      onClose={onCancel}
+      size="sm"
+      title="Add staff member"
+      icon={<Users className="w-5 h-5 text-blue-600" />}
+    >
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (requireOrg && !organizationId) return;
+          if (password && password.length < 8) return;
+          void onSubmit({
+            email,
+            name,
+            role,
+            phone: phone || undefined,
+            organizationId: organizationId || null,
+            password: password || undefined,
+          });
+        }}
+        className="space-y-3 text-xs"
+      >
+        {(requireOrg || allowNoOrg) && (
           <div>
-            <label className="block font-semibold mb-1">Full name</label>
-            <input
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
-            />
-          </div>
-          <div>
-            <label className="block font-semibold mb-1">Email</label>
-            <input
-              required
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
-            />
-          </div>
-          <div>
-            <label className="block font-semibold mb-1">Phone</label>
-            <input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
-            />
-          </div>
-          <PasswordInput
-            label="Temporary password (optional)"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Min 8 characters — leave blank to auto-generate"
-            className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border text-xs"
-            autoComplete="new-password"
-          />
-          <div>
-            <label className="block font-semibold mb-1">Role</label>
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value as UserRole)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border capitalize"
-            >
-              {roles.map((r) => (
-                <option key={r} value={r}>
-                  {r.replace(/_/g, ' ')}
+            <label className="block font-semibold mb-1">Organisation</label>
+            {lockOrg ? (
+              <div className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-900/80 border text-xs font-medium">
+                {orgs[0]
+                  ? `${orgs[0].company_name} (${orgs[0].organization_code})`
+                  : 'Your organisation'}
+              </div>
+            ) : (
+              <select
+                required={requireOrg}
+                value={organizationId}
+                onChange={(e) => setOrganizationId(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+              >
+                <option value="">
+                  {allowNoOrg ? '— platform (no org) —' : 'Select organisation…'}
                 </option>
-              ))}
-            </select>
-            {role === 'tenant' && (
-              <p className="text-[10px] text-slate-400 mt-1">
-                After creating this portal login, open <strong>Tenants Directory</strong> and link
-                them to the occupancy record so tickets, lease and documents work.
-              </p>
+                {orgs.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.company_name} ({o.organization_code})
+                  </option>
+                ))}
+              </select>
             )}
           </div>
-          {submitError && (
-            <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-semibold">
-              {submitError}
-            </div>
+        )}
+
+        <div>
+          <label className="block font-semibold mb-1">Full name</label>
+          <input
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+          />
+        </div>
+
+        <div>
+          <label className="block font-semibold mb-1">Email</label>
+          <input
+            required
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+          />
+        </div>
+
+        <div>
+          <label className="block font-semibold mb-1">Phone</label>
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+          />
+        </div>
+
+        <PasswordInput
+          label="Temporary password (optional)"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Min 8 characters — leave blank to auto-generate"
+          className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border text-xs"
+          autoComplete="new-password"
+        />
+
+        <div>
+          <label className="block font-semibold mb-1">Role</label>
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value as UserRole)}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border capitalize"
+          >
+            {roles.map((r) => (
+              <option key={r} value={r}>
+                {r.replace(/_/g, ' ')}
+              </option>
+            ))}
+          </select>
+          {role === 'tenant' && (
+            <p className="text-[10px] text-slate-400 mt-1">
+              After creating this portal login, open{' '}
+              <strong>Tenants Directory</strong> and link them to the occupancy
+              record so tickets, lease and documents work.
+            </p>
           )}
-          <div className="pt-3 flex justify-end gap-2 border-t">
-            <button type="button" onClick={onCancel} disabled={submitting} className="px-4 py-2 rounded-xl border">
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold"
-            >
-              {submitting ? 'Adding…' : 'Add staff'}
-            </button>
+        </div>
+
+        {submitError && (
+          <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-semibold">
+            {submitError}
           </div>
-        </form>
-      </div>
-    </div>
+        )}
+
+        <div className="pt-3 flex justify-end gap-2 border-t">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            className="px-4 py-2 rounded-xl border"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold"
+          >
+            {submitting ? 'Adding…' : 'Add staff'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
+/**
+ * Full edit form for a user record.
+ *
+ * Note on the extra props: `orgs`, `isSuper`, and `onRoleOnly` are accepted
+ * for backwards compatibility with the parent call site but are not used in
+ * this version — the parent's `updateUser` mutation already routes role
+ * changes through `updateAsAdmin`, which enforces the same server-side
+ * permissions as `setRole`.
+ */
 function FullEditForm({
   user,
   roles,
-  orgs,
-  isSuper,
   onCancel,
   onSave,
-  onRoleOnly,
 }: {
   user: User;
   roles: UserRole[];
   orgs: { id: string; company_name: string }[];
   isSuper: boolean;
   onCancel: () => void;
-  onSave: (patch: Partial<Pick<User, 'name' | 'email' | 'phone' | 'role' | 'status' | 'organization_id' | 'username'>>) => void;
+  onSave: (
+    patch: Partial<
+      Pick<
+        User,
+        'name' | 'email' | 'phone' | 'role' | 'status' | 'organization_id' | 'username'
+      >
+    >
+  ) => void;
   onRoleOnly: (role: UserRole) => void;
 }) {
   const [name, setName] = useState(user.name);
   const [email, setEmail] = useState(user.email);
   const [phone, setPhone] = useState(user.phone ?? '');
   const [role, setRole] = useState<UserRole>(user.role);
-  const [status, setStatus] = useState(user.status);
+  const [status, setStatus] = useState<User['status']>(user.status);
+
+  // Reset the draft if the parent swaps the target user while open.
+  useEffect(() => {
+    setName(user.name);
+    setEmail(user.email);
+    setPhone(user.phone ?? '');
+    setRole(user.role);
+    setStatus(user.status);
+  }, [user.id]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border p-6 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-base">Edit {user.name}</h3>
-          <button type="button" onClick={onCancel}>
-            <X className="w-5 h-5 text-slate-400" />
+    <Modal
+      open
+      onClose={onCancel}
+      size="sm"
+      title={`Edit ${user.name}`}
+      icon={<Edit3 className="w-5 h-5 text-blue-600" />}
+    >
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSave({
+            name,
+            email,
+            phone: phone || undefined,
+            role,
+            status,
+          });
+        }}
+        className="space-y-3 text-xs"
+      >
+        <div>
+          <label className="block font-semibold mb-1">Name</label>
+          <input
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+          />
+        </div>
+
+        <div>
+          <label className="block font-semibold mb-1">Email</label>
+          <input
+            required
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+          />
+        </div>
+
+        <div>
+          <label className="block font-semibold mb-1">Phone</label>
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+          />
+        </div>
+
+        <div>
+          <label className="block font-semibold mb-1">Role</label>
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value as UserRole)}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border capitalize"
+          >
+            {roles.map((r) => (
+              <option key={r} value={r}>
+                {r.replace(/_/g, ' ')}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block font-semibold mb-1">Status</label>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as User['status'])}
+            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+          >
+            <option>Active</option>
+            <option>Suspended</option>
+            <option>Inactive</option>
+            <option>Pending</option>
+          </select>
+        </div>
+
+        <div className="pt-3 flex justify-end gap-2 border-t">
+          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold"
+          >
+            Save
           </button>
         </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSave({
-              name,
-              email,
-              phone: phone || undefined,
-              role,
-              status,
-            });
-          }}
-          className="space-y-3 text-xs"
-        >
-          <div>
-            <label className="block font-semibold mb-1">Name</label>
-            <input required value={name} onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
-          </div>
-          <div>
-            <label className="block font-semibold mb-1">Email</label>
-            <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
-          </div>
-          <div>
-            <label className="block font-semibold mb-1">Phone</label>
-            <input value={phone} onChange={(e) => setPhone(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
-          </div>
-          <div>
-            <label className="block font-semibold mb-1">Role</label>
-            <select value={role} onChange={(e) => setRole(e.target.value as UserRole)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border capitalize">
-              {roles.map((r) => (
-                <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block font-semibold mb-1">Status</label>
-            <select value={status} onChange={(e) => setStatus(e.target.value as User['status'])}
-              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border">
-              <option>Active</option>
-              <option>Suspended</option>
-              <option>Inactive</option>
-              <option>Pending</option>
-            </select>
-          </div>
-          <div className="pt-3 flex justify-end gap-2 border-t">
-            <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border">Cancel</button>
-            <button type="submit" className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold">
-              Save
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+      </form>
+    </Modal>
   );
 }

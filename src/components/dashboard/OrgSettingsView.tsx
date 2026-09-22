@@ -9,7 +9,7 @@ import {
   Download,
   Sliders,
   AlertTriangle,
-} from 'lucide-react';
+} from 'lucide-react';import { Modal } from '../ui/Modal';
 import { auth } from '../../services/auth';
 import { organizations as orgApi } from '../../services/api/organizations';
 import { subscriptionPlans } from '../../services/subscriptionPlans';
@@ -502,31 +502,30 @@ export function OrgSettingsView() {
         </form>
       </div>
 
-      {showPlanModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border p-6 shadow-2xl space-y-4">
-            <h3 className="font-bold">Change subscription tier</h3>
-            <div className="space-y-2">
-              {plans.map((p) => (
-                <button
-                  key={p.tier}
-                  type="button"
-                  onClick={() => void handleSelectTier(p.tier)}
-                  className={`w-full text-left p-3 rounded-xl border text-xs ${
-                    p.tier === currentTier ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40' : ''
-                  }`}
-                >
-                  <div className="font-bold">{p.tier}</div>
-                  <div className="text-slate-500">E{p.monthlyFeeE}/mo · {p.propertyLimit} centres</div>
-                </button>
-              ))}
-            </div>
-            <button type="button" onClick={() => setShowPlanModal(false)} className="w-full py-2 border rounded-xl text-xs font-semibold">
-              Close
+           <Modal
+        open={showPlanModal}
+        onClose={() => setShowPlanModal(false)}
+        size="sm"
+        title="Change subscription tier"
+      >
+        <div className="space-y-2">
+          {plans.map((p) => (
+            <button
+              key={p.tier}
+              type="button"
+              onClick={() => void handleSelectTier(p.tier)}
+              className={`w-full text-left p-3 rounded-xl border text-xs ${
+                p.tier === currentTier ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40' : ''
+              }`}
+            >
+              <div className="font-bold">{p.tier}</div>
+              <div className="text-slate-500">
+                E{p.monthlyFeeE}/mo · {p.propertyLimit} centres
+              </div>
             </button>
-          </div>
+          ))}
         </div>
-      )}
+      </Modal>
     </div>
   );
 }
