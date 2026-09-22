@@ -170,7 +170,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isCollapsed = mobile ? false : collapsed;
 
   const navList = (
-    <div className={`flex-1 overflow-y-auto py-3 px-2.5 space-y-1 ${mobile ? 'pb-8' : ''}`}>
+    <nav
+      className={`flex-1 overflow-y-auto scrollbar-thin py-2 px-2 space-y-0.5 ${
+        mobile ? 'pb-8' : ''
+      }`}
+    >
       {navItems.map((item) => {
         const Icon = item.icon;
         const isActive = activeTab === item.id;
@@ -179,90 +183,116 @@ export const Sidebar: React.FC<SidebarProps> = ({
             key={item.id}
             type="button"
             onClick={() => onTabChange(item.id)}
-            className={`w-full flex items-center gap-3 px-3 py-3 sm:py-2.5 rounded-xl text-sm sm:text-xs font-medium transition-all group relative min-h-[44px] sm:min-h-0 ${
-              isActive
-                ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20 font-semibold'
-                : item.highlight
-                ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40 font-semibold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
-            }`}
+            className={`w-full flex items-center gap-2.5 px-2.5 rounded-md text-[13px] font-medium transition-all duration-fast group relative min-h-[32px]
+              ${
+                isActive
+                  ? 'bg-accent-500/10 text-accent-500 dark:bg-accent-500/15 dark:text-accent-400'
+                  : item.highlight
+                    ? 'text-accent-500 hover:bg-accent-500/8 dark:text-accent-400 dark:hover:bg-accent-500/10'
+                    : 'text-[var(--uw-text-muted)] hover:text-[var(--uw-text)] hover:bg-[var(--uw-surface-raised)]'
+              }
+              ${mobile ? 'min-h-[40px] py-2' : ''}
+            `}
             title={isCollapsed ? item.label : undefined}
           >
+            {isActive && (
+              <span
+                aria-hidden="true"
+                className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-r-full bg-accent-500"
+              />
+            )}
             <Icon
-              className={`w-5 h-5 sm:w-4 sm:h-4 shrink-0 ${
+              className={`w-4 h-4 shrink-0 transition-colors ${
                 isActive
-                  ? 'text-white'
+                  ? 'text-accent-500 dark:text-accent-400'
                   : item.highlight
-                  ? 'text-blue-600'
-                  : 'text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200'
+                    ? 'text-accent-500 dark:text-accent-400'
+                    : 'text-[var(--uw-text-subtle)] group-hover:text-[var(--uw-text-muted)]'
               }`}
+              strokeWidth={1.75}
             />
-            {!isCollapsed && <span className="truncate">{item.label}</span>}
+            {!isCollapsed && (
+              <span className="truncate flex-1 text-left">{item.label}</span>
+            )}
             {!isCollapsed && item.badgeCount && (
-              <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500 text-white">
+              <span className="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-warning-500/15 text-warning-400 border border-warning-500/25">
                 {item.badgeCount}
               </span>
             )}
           </button>
         );
       })}
-    </div>
+    </nav>
   );
 
   if (mobile) {
     return (
-      <nav className="flex flex-col h-full bg-white dark:bg-slate-900" aria-label="Main menu">
-        <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2">
-          {organizationLogo && role !== 'super_admin' && (
+      <div className="flex flex-col h-full bg-[var(--uw-surface)]">
+        <div className="px-3 py-3 border-b border-[var(--uw-border)] flex items-center gap-2.5">
+          {organizationLogo && role !== 'super_admin' ? (
             <img
               src={organizationLogo}
               alt=""
-              className="h-9 w-9 rounded-lg object-contain border border-slate-200 dark:border-slate-700 bg-white shrink-0"
+              className="h-8 w-8 rounded-md object-contain border border-[var(--uw-border)] bg-white shrink-0"
             />
+          ) : (
+            <div className="h-8 w-8 rounded-md bg-accent-500/12 border border-accent-500/25 flex items-center justify-center text-accent-500 shrink-0">
+              <Shield className="w-4 h-4" strokeWidth={1.75} />
+            </div>
           )}
           <div className="min-w-0">
-            <h2 className="text-sm font-bold text-slate-900 dark:text-white truncate">
-              {role === 'super_admin' ? 'Super Admin' : organizationName || 'Umhlaba Wami'}
-            </h2>
+            <div className="text-[13px] font-semibold text-[var(--uw-text)] truncate">
+              {role === 'super_admin'
+                ? 'Super Admin'
+                : organizationName || 'Umhlaba Wami'}
+            </div>
             {orgCode && role !== 'super_admin' && (
-              <p className="text-[11px] font-mono text-blue-600 dark:text-blue-400">Code: {orgCode}</p>
+              <div className="text-[10px] font-mono text-[var(--uw-text-subtle)]">
+                {orgCode}
+              </div>
             )}
           </div>
         </div>
         {navList}
-        <div className="p-3 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500">
-          <span className="font-medium text-slate-600 dark:text-slate-300 capitalize">
+        <div className="px-3 py-2.5 border-t border-[var(--uw-border)]">
+          <div className="text-[10px] font-medium text-[var(--uw-text-subtle)] uppercase tracking-wider">
             {String(role || 'tenant').replace(/_/g, ' ')}
-          </span>
+          </div>
         </div>
-      </nav>
+      </div>
     );
   }
 
   return (
     <aside
-      className={`relative flex flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-all duration-300 ease-in-out shrink-0 z-30 h-full ${
-        isCollapsed ? 'w-18' : 'w-64'
-      }`}
+      className={`relative flex flex-col bg-[var(--uw-surface)] border-r border-[var(--uw-border)] transition-[width] duration-normal ease-standard shrink-0 z-30 h-full
+        ${isCollapsed ? 'w-[56px]' : 'w-[220px]'}
+      `}
     >
-      <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+      <div className="px-3 py-3 border-b border-[var(--uw-border)] flex items-center justify-between min-h-[52px]">
         {!isCollapsed && (
-          <div className="min-w-0 pr-2 flex items-center gap-2">
-            {organizationLogo && role !== 'super_admin' && (
+          <div className="min-w-0 flex items-center gap-2.5">
+            {organizationLogo && role !== 'super_admin' ? (
               <img
                 src={organizationLogo}
                 alt=""
-                className="h-8 w-8 rounded-lg object-contain border border-slate-200 dark:border-slate-700 bg-white shrink-0"
+                className="h-7 w-7 rounded-md object-contain border border-[var(--uw-border)] bg-white shrink-0"
               />
+            ) : (
+              <div className="h-7 w-7 rounded-md bg-accent-500/12 border border-accent-500/25 flex items-center justify-center text-accent-500 shrink-0">
+                <Shield className="w-3.5 h-3.5" strokeWidth={1.75} />
+              </div>
             )}
             <div className="min-w-0">
-              <h2 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider truncate">
-                {role === 'super_admin' ? 'Super Admin Console' : organizationName || 'Umhlaba Wami'}
-              </h2>
+              <div className="text-[12px] font-semibold text-[var(--uw-text)] leading-tight truncate">
+                {role === 'super_admin'
+                  ? 'Super Admin'
+                  : organizationName || 'Umhlaba Wami'}
+              </div>
               {orgCode && role !== 'super_admin' && (
-                <p className="text-[11px] font-mono text-blue-600 dark:text-blue-400 truncate">
-                  Code: {orgCode}
-                </p>
+                <div className="text-[10px] font-mono text-[var(--uw-text-subtle)] leading-tight truncate">
+                  {orgCode}
+                </div>
               )}
             </div>
           </div>
@@ -270,26 +300,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <button
           type="button"
           onClick={onToggleCollapse}
-          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition mx-auto"
+          className={`p-1.5 rounded-md text-[var(--uw-text-subtle)] hover:text-[var(--uw-text)] hover:bg-[var(--uw-surface-raised)] transition-colors duration-fast shrink-0
+            ${isCollapsed ? 'mx-auto' : ''}
+          `}
           title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
-          {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+          {isCollapsed ? (
+            <ChevronRight className="w-3.5 h-3.5" strokeWidth={2} />
+          ) : (
+            <ChevronLeft className="w-3.5 h-3.5" strokeWidth={2} />
+          )}
         </button>
       </div>
 
       {navList}
 
       {!isCollapsed && (
-        <div className="p-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 text-[11px] text-slate-500">
+        <div className="px-3 py-2.5 border-t border-[var(--uw-border)]">
           <div className="flex items-center justify-between">
-            <span className="font-medium text-slate-600 dark:text-slate-300 capitalize">
+            <span className="text-[10px] font-medium text-[var(--uw-text-subtle)] uppercase tracking-wider">
               {String(role || 'tenant').replace(/_/g, ' ')}
             </span>
-            <span className="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-200 dark:ring-emerald-900 animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-success-500 shadow-[0_0_0_3px_rgba(62,207,142,0.15)]" />
           </div>
-          <p className="text-[10px] text-slate-400 truncate mt-0.5">
-            {role === 'super_admin' ? 'Platform governance' : 'Commercial property operations'}
-          </p>
         </div>
       )}
     </aside>

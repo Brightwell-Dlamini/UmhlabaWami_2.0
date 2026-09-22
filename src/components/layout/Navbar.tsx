@@ -10,6 +10,7 @@ import {
   X,
   CheckCheck,
   Search,
+  Command as CommandIcon,
 } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { notifications as notifApi } from '../../services/api/notifications';
@@ -50,6 +51,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [logoSrc, setLogoSrc] = useState(LOGO_SRC);
   const [isMac, setIsMac] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
+  const userRef = useRef<HTMLDivElement>(null);
   const { openPalette } = useCommandPalette();
 
   useEffect(() => {
@@ -69,9 +71,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (!currentUser) return;
     void notifApi
       .ensureWelcome()
-      .then(() => {
-        refetchCount();
-      })
+      .then(() => refetchCount())
       .catch(() => {
         /* non-fatal */
       });
@@ -83,10 +83,13 @@ export const Navbar: React.FC<NavbarProps> = ({
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
         setShowNotifs(false);
       }
+      if (userRef.current && !userRef.current.contains(e.target as Node)) {
+        setShowRoleMenu(false);
+      }
     };
-    if (showNotifs) document.addEventListener('mousedown', handler);
+    document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [showNotifs]);
+  }, []);
 
   const { data: unreadCount = 0, refetch: refetchCount } = useSupabaseQuery(
     ['notifications', 'unread', currentUser?.id ?? ''],
@@ -144,19 +147,21 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const count = typeof unreadCount === 'number' ? unreadCount : 0;
   const shortcutLabel = isMac ? '⌘K' : 'Ctrl K';
+  const userInitial = (currentUser?.name || '?').charAt(0).toUpperCase();
 
   return (
-    <header className="sticky top-0 z-50 border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 flex items-center justify-between gap-3">
+    <header className="sticky top-0 z-50 border-b border-[var(--uw-border)] bg-[var(--uw-surface)]/95 backdrop-blur-md">
+      <div className="max-w-[1400px] mx-auto px-3 sm:px-5 h-12 flex items-center justify-between gap-3">
+        {/* Left: logo + org name */}
         <button
           onClick={currentUser ? goDashboard : () => onSwitchViewMode?.('home')}
-          className="flex items-center gap-2.5 min-w-0"
+          className="flex items-center gap-2.5 min-w-0 shrink-0"
         >
           {currentOrg?.logo_url ? (
             <img
               src={currentOrg.logo_url}
               alt={currentOrg.company_name || 'Organisation'}
-              className="h-9 w-9 rounded-lg object-contain shrink-0 border border-slate-200 dark:border-slate-700 bg-white"
+              className="h-6 w-6 rounded-md object-contain shrink-0 border border-[var(--uw-border)] bg-white"
               onError={(e) => {
                 (e.target as HTMLImageElement).style.display = 'none';
               }}
@@ -165,31 +170,45 @@ export const Navbar: React.FC<NavbarProps> = ({
             <img
               src={logoSrc}
               alt="Umhlaba Wami"
-              className="h-9 w-auto object-contain shrink-0"
+              className="h-6 w-auto object-contain shrink-0"
               onError={() => setLogoSrc(LOGO_FALLBACK)}
             />
           )}
           <div className="hidden sm:block text-left">
-            <div className="font-display font-bold text-sm text-slate-900 dark:text-white leading-tight">
+            <div className="font-semibold text-[13px] text-[var(--uw-text)] leading-tight truncate">
               {currentOrg?.company_name || 'Umhlaba Wami'}
-            </div>
-            <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
-              {currentOrg?.organization_code
-                ? `Code ${currentOrg.organization_code}`
-                : 'Property management'}
             </div>
           </div>
         </button>
 
-        <div className="hidden md:flex items-center gap-2">
+        {/* Centre: command palette */}
+        {currentUser && (
+          <button
+            type="button"
+            onClick={openPalette}
+            className="hidden md:flex items-center gap-2 text-xs text-[var(--uw-text-subtle)] hover:text-[var(--uw-text-muted)] px-3 h-7 rounded-md border border-[var(--uw-border)] bg-[var(--uw-surface-raised)] hover:border-[var(--uw-border-soft)] transition-colors duration-fast w-full max-w-md mx-auto"
+            title={`Search or jump to… (${shortcutLabel})`}
+            aria-label={`Open command palette (${shortcutLabel})`}
+          >
+            <Search className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
+            <span className="flex-1 text-left truncate">
+              Search or jump to…
+            </span>
+            <kbd className="kbd shrink-0">{shortcutLabel}</kbd>
+          </button>
+        )}
+
+        {/* Right: user + notifs + theme */}
+        <div className="hidden md:flex items-center gap-1 shrink-0">
           {currentUser ? (
             <>
               {currentOrg && (
-                <span className="text-[11px] font-mono text-slate-500 px-2 hidden lg:inline">
+                <span className="text-[10px] font-mono text-[var(--uw-text-subtle)] px-2 hidden lg:inline">
                   {currentOrg.organization_code}
                 </span>
               )}
 
+              {/* Notifications */}
               <div className="relative" ref={notifRef}>
                 <button
                   type="button"
@@ -197,34 +216,36 @@ export const Navbar: React.FC<NavbarProps> = ({
                     setShowNotifs((v) => !v);
                     setShowRoleMenu(false);
                   }}
-                  className="relative p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  className="relative w-7 h-7 rounded-md text-[var(--uw-text-muted)] hover:text-[var(--uw-text)] hover:bg-[var(--uw-surface-raised)] transition-colors duration-fast flex items-center justify-center"
                   title="Notifications"
                 >
-                  <Bell className="w-4 h-4" />
+                  <Bell className="w-3.5 h-3.5" strokeWidth={1.75} />
                   {count > 0 && (
-                    <span className="absolute top-0.5 right-0.5 min-w-[14px] h-3.5 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+                    <span className="absolute top-1 right-1 min-w-[12px] h-[12px] px-1 rounded-full bg-danger-500 text-white text-[8px] font-bold flex items-center justify-center ring-2 ring-[var(--uw-surface)]">
                       {count > 9 ? '9+' : count}
                     </span>
                   )}
                 </button>
 
                 {showNotifs && (
-                  <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl z-50 overflow-hidden">
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-800">
-                      <span className="text-xs font-bold">Notifications</span>
+                  <div className="absolute right-0 mt-1.5 w-80 sm:w-96 rounded-lg border border-[var(--uw-border)] bg-[var(--uw-surface)] shadow-lg z-50 overflow-hidden animate-menu-in">
+                    <div className="flex items-center justify-between px-3 py-2.5 border-b border-[var(--uw-border)]">
+                      <span className="text-xs font-semibold text-[var(--uw-text)]">
+                        Notifications
+                      </span>
                       {count > 0 && (
                         <button
                           type="button"
                           onClick={handleMarkAllRead}
-                          className="text-[10px] font-semibold text-blue-600 hover:underline flex items-center gap-1"
+                          className="text-[10px] font-medium text-accent-500 hover:text-accent-400 flex items-center gap-1"
                         >
-                          <CheckCheck className="w-3 h-3" /> Mark all read
+                          <CheckCheck className="w-3 h-3" strokeWidth={2} /> Mark all read
                         </button>
                       )}
                     </div>
-                    <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                    <div className="max-h-80 overflow-y-auto scrollbar-thin">
                       {notifList.length === 0 ? (
-                        <div className="px-4 py-10 text-center text-xs text-slate-400">
+                        <div className="px-4 py-10 text-center text-xs text-[var(--uw-text-subtle)]">
                           No notifications yet
                         </div>
                       ) : (
@@ -233,24 +254,24 @@ export const Navbar: React.FC<NavbarProps> = ({
                             key={n.id}
                             type="button"
                             onClick={() => !n.read && handleMarkRead(n.id)}
-                            className={`w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors ${
-                              !n.read
-                                ? 'bg-blue-50/50 dark:bg-blue-950/20'
-                                : ''
+                            className={`w-full text-left px-3 py-2.5 hover:bg-[var(--uw-surface-raised)] transition-colors duration-fast border-b border-[var(--uw-border)] last:border-0 ${
+                              !n.read ? 'bg-accent-500/6' : ''
                             }`}
                           >
                             <div className="flex items-start gap-2">
                               {!n.read && (
-                                <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
+                                <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-accent-500 shrink-0" />
                               )}
-                              <div className={!n.read ? '' : 'pl-3.5'}>
-                                <div className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                              <div className={!n.read ? 'min-w-0' : 'pl-3.5 min-w-0'}>
+                                <div className="text-xs font-medium text-[var(--uw-text)] leading-snug">
                                   {n.title}
                                 </div>
-                                <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
-                                  {n.message}
-                                </div>
-                                <div className="text-[10px] text-slate-400 mt-1">
+                                {n.message && (
+                                  <div className="text-[11px] text-[var(--uw-text-muted)] mt-0.5 line-clamp-2 leading-snug">
+                                    {n.message}
+                                  </div>
+                                )}
+                                <div className="text-[10px] text-[var(--uw-text-subtle)] mt-1">
                                   {n.created_at
                                     ? new Date(n.created_at).toLocaleString()
                                     : ''}
@@ -265,68 +286,62 @@ export const Navbar: React.FC<NavbarProps> = ({
                 )}
               </div>
 
+              {/* Theme toggle */}
               <button
                 onClick={onToggleDarkMode}
-                className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="w-7 h-7 rounded-md text-[var(--uw-text-muted)] hover:text-[var(--uw-text)] hover:bg-[var(--uw-surface-raised)] transition-colors duration-fast flex items-center justify-center"
                 title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
               >
                 {isDarkMode ? (
-                  <Sun className="w-4 h-4" />
+                  <Sun className="w-3.5 h-3.5" strokeWidth={1.75} />
                 ) : (
-                  <Moon className="w-4 h-4" />
+                  <Moon className="w-3.5 h-3.5" strokeWidth={1.75} />
                 )}
               </button>
 
-              {/* Global search + shortcut hint */}
-              <button
-                type="button"
-                onClick={openPalette}
-                className="hidden md:flex items-center gap-2 text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-600 transition w-56"
-                title={`Search or jump to… (${shortcutLabel})`}
-                aria-label={`Open command palette (${shortcutLabel})`}
-              >
-                <Search className="w-3.5 h-3.5 shrink-0" />
-                <span className="flex-1 text-left truncate">Search…</span>
-                <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 shrink-0">
-                  {shortcutLabel}
-                </kbd>
-              </button>
-
-              <div className="relative">
+              {/* User menu */}
+              <div className="relative" ref={userRef}>
                 <button
                   onClick={() => {
                     setShowRoleMenu((v) => !v);
                     setShowNotifs(false);
                   }}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  className="flex items-center gap-2 pl-1 pr-2 h-7 rounded-md text-xs font-medium text-[var(--uw-text)] hover:bg-[var(--uw-surface-raised)] transition-colors duration-fast"
                 >
-                  <User className="w-4 h-4" />
-                  <span className="max-w-[120px] truncate">
+                  <span className="w-6 h-6 rounded-md bg-accent-500/15 border border-accent-500/25 text-accent-500 flex items-center justify-center text-[11px] font-semibold shrink-0">
+                    {userInitial}
+                  </span>
+                  <span className="max-w-[100px] truncate hidden lg:inline">
                     {currentUser.name}
                   </span>
-                  <ChevronDown className="w-3.5 h-3.5" />
+                  <ChevronDown className="w-3 h-3 text-[var(--uw-text-subtle)]" strokeWidth={2} />
                 </button>
                 {showRoleMenu && (
-                  <div className="absolute right-0 mt-1 w-48 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg py-1 z-50">
-                    <p className="px-3 py-1.5 text-[10px] uppercase text-slate-400">
-                      {currentUser.role.replace(/_/g, ' ')}
-                    </p>
+                  <div className="absolute right-0 mt-1.5 w-52 rounded-lg border border-[var(--uw-border)] bg-[var(--uw-surface)] shadow-lg py-1 z-50 animate-menu-in">
+                    <div className="px-3 py-2 border-b border-[var(--uw-border)]">
+                      <div className="text-xs font-semibold text-[var(--uw-text)] truncate">
+                        {currentUser.name}
+                      </div>
+                      <div className="text-[10px] text-[var(--uw-text-subtle)] capitalize">
+                        {currentUser.role.replace(/_/g, ' ')}
+                      </div>
+                    </div>
                     {viewMode !== 'dashboard' && (
                       <button
                         onClick={() => {
                           goDashboard();
                           setShowRoleMenu(false);
                         }}
-                        className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800"
+                        className="w-full text-left px-3 py-1.5 text-xs text-[var(--uw-text)] hover:bg-[var(--uw-surface-raised)] transition-colors duration-fast"
                       >
                         Open workspace
                       </button>
                     )}
                     <button
                       onClick={handleLogout}
-                      className="w-full text-left px-3 py-2 text-xs text-red-600 flex items-center gap-2 hover:bg-red-50 dark:hover:bg-red-950/30"
+                      className="w-full text-left px-3 py-1.5 text-xs text-danger-500 hover:bg-danger-500/8 flex items-center gap-2 transition-colors duration-fast"
                     >
-                      <LogOut className="w-3.5 h-3.5" /> Sign out
+                      <LogOut className="w-3 h-3" strokeWidth={1.75} /> Sign out
                     </button>
                   </div>
                 )}
@@ -336,92 +351,94 @@ export const Navbar: React.FC<NavbarProps> = ({
             <>
               <button
                 onClick={onToggleDarkMode}
-                className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="w-7 h-7 rounded-md text-[var(--uw-text-muted)] hover:text-[var(--uw-text)] hover:bg-[var(--uw-surface-raised)] transition-colors duration-fast flex items-center justify-center"
               >
                 {isDarkMode ? (
-                  <Sun className="w-4 h-4" />
+                  <Sun className="w-3.5 h-3.5" strokeWidth={1.75} />
                 ) : (
-                  <Moon className="w-4 h-4" />
+                  <Moon className="w-3.5 h-3.5" strokeWidth={1.75} />
                 )}
               </button>
               <button
                 onClick={openLogin}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="px-3 h-7 rounded-md text-xs font-medium text-[var(--uw-text)] hover:bg-[var(--uw-surface-raised)] transition-colors duration-fast"
               >
                 Sign in
               </button>
               <button
                 onClick={openRegister}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700"
+                className="px-3 h-7 rounded-md text-xs font-semibold bg-accent-500 text-white hover:bg-accent-600 transition-colors duration-fast"
               >
-                Register organisation
+                Register
               </button>
             </>
           )}
         </div>
 
+        {/* Mobile */}
         <div className="flex md:hidden items-center gap-1">
           {currentUser && (
             <>
               <button
                 type="button"
                 onClick={openPalette}
-                className="p-2 rounded-lg text-slate-500"
+                className="w-7 h-7 rounded-md text-[var(--uw-text-muted)] flex items-center justify-center"
                 aria-label="Open command palette"
               >
-                <Search className="w-4 h-4" />
+                <Search className="w-3.5 h-3.5" strokeWidth={1.75} />
               </button>
               <button
                 type="button"
                 onClick={() => setShowNotifs((v) => !v)}
-                className="relative p-2 rounded-lg text-slate-500"
+                className="relative w-7 h-7 rounded-md text-[var(--uw-text-muted)] flex items-center justify-center"
               >
-                <Bell className="w-4 h-4" />
+                <Bell className="w-3.5 h-3.5" strokeWidth={1.75} />
                 {count > 0 && (
-                  <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-red-500" />
+                  <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-danger-500" />
                 )}
               </button>
             </>
           )}
           <button
             onClick={onToggleDarkMode}
-            className="p-2 rounded-lg text-slate-500"
+            className="w-7 h-7 rounded-md text-[var(--uw-text-muted)] flex items-center justify-center"
           >
             {isDarkMode ? (
-              <Sun className="w-4 h-4" />
+              <Sun className="w-3.5 h-3.5" strokeWidth={1.75} />
             ) : (
-              <Moon className="w-4 h-4" />
+              <Moon className="w-3.5 h-3.5" strokeWidth={1.75} />
             )}
           </button>
           <button
             onClick={() => setIsMenuOpen((v) => !v)}
-            className="p-2 rounded-lg text-slate-600 dark:text-slate-300"
+            className="w-7 h-7 rounded-md text-[var(--uw-text)] flex items-center justify-center"
           >
             {isMenuOpen ? (
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" strokeWidth={1.75} />
             ) : (
-              <Menu className="w-5 h-5" />
+              <Menu className="w-4 h-4" strokeWidth={1.75} />
             )}
           </button>
         </div>
       </div>
 
+      {/* Mobile notifications sheet */}
       {showNotifs && (
-        <div className="md:hidden border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 max-h-72 overflow-y-auto">
-          <div className="flex items-center justify-between px-4 py-2 border-b">
-            <span className="text-xs font-bold">Notifications</span>
+        <div className="md:hidden border-t border-[var(--uw-border)] bg-[var(--uw-surface)] max-h-72 overflow-y-auto scrollbar-thin">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--uw-border)]">
+            <span className="text-xs font-semibold">Notifications</span>
             {count > 0 && (
               <button
                 type="button"
                 onClick={handleMarkAllRead}
-                className="text-[10px] text-blue-600 font-semibold"
+                className="text-[10px] text-accent-500 font-medium"
               >
                 Mark all read
               </button>
             )}
           </div>
           {notifList.length === 0 ? (
-            <div className="px-4 py-8 text-center text-xs text-slate-400">
+            <div className="px-4 py-8 text-center text-xs text-[var(--uw-text-subtle)]">
               No notifications
             </div>
           ) : (
@@ -430,14 +447,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                 key={n.id}
                 type="button"
                 onClick={() => !n.read && handleMarkRead(n.id)}
-                className={`w-full text-left px-4 py-3 border-b border-slate-50 dark:border-slate-900 ${
-                  !n.read ? 'bg-blue-50/40' : ''
+                className={`w-full text-left px-4 py-3 border-b border-[var(--uw-border)] last:border-0 ${
+                  !n.read ? 'bg-accent-500/6' : ''
                 }`}
               >
-                <div className="text-xs font-semibold">{n.title}</div>
-                <div className="text-[11px] text-slate-500 line-clamp-2">
-                  {n.message}
-                </div>
+                <div className="text-xs font-medium">{n.title}</div>
+                {n.message && (
+                  <div className="text-[11px] text-[var(--uw-text-muted)] line-clamp-2 mt-0.5">
+                    {n.message}
+                  </div>
+                )}
               </button>
             ))
           )}
@@ -445,24 +464,32 @@ export const Navbar: React.FC<NavbarProps> = ({
       )}
 
       {isMenuOpen && (
-        <div className="md:hidden border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-4 py-3 space-y-2">
+        <div className="md:hidden border-t border-[var(--uw-border)] bg-[var(--uw-surface)] px-4 py-3 space-y-1">
           {currentUser ? (
             <>
-              <p className="text-xs text-slate-500">
-                {currentUser.name} · {currentUser.role.replace(/_/g, ' ')}
-              </p>
+              <div className="flex items-center gap-2.5 pb-2 mb-1 border-b border-[var(--uw-border)]">
+                <span className="w-7 h-7 rounded-md bg-accent-500/15 border border-accent-500/25 text-accent-500 flex items-center justify-center text-xs font-semibold">
+                  {userInitial}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-xs font-medium truncate">{currentUser.name}</div>
+                  <div className="text-[10px] text-[var(--uw-text-subtle)] capitalize">
+                    {currentUser.role.replace(/_/g, ' ')}
+                  </div>
+                </div>
+              </div>
               <button
                 onClick={() => {
                   goDashboard();
                   setIsMenuOpen(false);
                 }}
-                className="w-full text-left text-sm font-medium py-2"
+                className="w-full text-left text-xs font-medium py-2 text-[var(--uw-text)]"
               >
                 Workspace
               </button>
               <button
                 onClick={handleLogout}
-                className="w-full text-left text-sm text-red-600 py-2"
+                className="w-full text-left text-xs text-danger-500 py-2"
               >
                 Sign out
               </button>
@@ -474,7 +501,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   openLogin();
                   setIsMenuOpen(false);
                 }}
-                className="w-full text-left text-sm py-2"
+                className="w-full text-left text-xs font-medium py-2 text-[var(--uw-text)]"
               >
                 Sign in
               </button>
@@ -483,7 +510,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   openRegister();
                   setIsMenuOpen(false);
                 }}
-                className="w-full text-left text-sm font-semibold text-blue-600 py-2"
+                className="w-full text-left text-xs font-semibold text-accent-500 py-2"
               >
                 Register organisation
               </button>

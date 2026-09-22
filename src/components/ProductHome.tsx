@@ -8,7 +8,10 @@ import {
   BarChart3,
   ArrowRight,
   CheckCircle2,
+  Sparkles,
+  Command as CommandIcon,
 } from 'lucide-react';
+import { Kbd } from './ui/Kbd';
 
 interface Props {
   onSignIn: () => void;
@@ -45,7 +48,7 @@ export function ProductHome({ onSignIn, onRegisterOrganisation }: Props) {
     {
       icon: Users,
       title: 'Roles for every stakeholder',
-      body: 'Property managers, technicians, finance, tenants and organisation admins each get a focused workspace.',
+      body: 'Property managers, technicians, finance, tenants and org admins each get a focused workspace.',
     },
     {
       icon: BarChart3,
@@ -55,108 +58,155 @@ export function ProductHome({ onSignIn, onRegisterOrganisation }: Props) {
   ];
 
   return (
-    <div className="flex-1 bg-slate-50 dark:bg-slate-950">
-      <section className="relative overflow-hidden border-b border-slate-200 dark:border-slate-800">
-        <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 via-transparent to-slate-900/5 dark:from-blue-500/10 pointer-events-none" />
-        <div className="relative max-w-5xl mx-auto px-4 sm:px-6 py-16 md:py-24">
-          <div className="mb-4">
-            <img
-              src="/Umhlaba Wami logo p.png"
-              alt="Umhlaba Wami"
-              className="h-12 w-auto object-contain"
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = '/Umhlaba Wami logo.jpg';
-              }}
-            />
+    <div className="flex-1 bg-[var(--uw-bg)]">
+      {/* HERO */}
+      <section className="relative overflow-hidden border-b border-[var(--uw-border)]">
+        {/* Accent wash — subtle, not garish */}
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 pointer-events-none opacity-[0.55] dark:opacity-[0.7]"
+          style={{
+            background:
+              'radial-gradient(ellipse 60% 50% at 50% 0%, rgba(124,92,255,0.18), transparent 70%)',
+          }}
+        />
+        {/* Hairline grid */}
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 pointer-events-none opacity-[0.4] dark:opacity-[0.25]"
+          style={{
+            backgroundImage:
+              'linear-gradient(to right, var(--uw-border) 1px, transparent 1px), linear-gradient(to bottom, var(--uw-border) 1px, transparent 1px)',
+            backgroundSize: '48px 48px',
+            maskImage:
+              'radial-gradient(ellipse 70% 60% at 50% 0%, black, transparent 75%)',
+            WebkitMaskImage:
+              'radial-gradient(ellipse 70% 60% at 50% 0%, black, transparent 75%)',
+          }}
+        />
+
+        <div className="relative max-w-[1100px] mx-auto px-5 sm:px-6 py-20 md:py-28">
+          {/* Eyebrow */}
+          <div className="inline-flex items-center gap-2 px-2.5 h-6 rounded-full border border-accent-500/25 bg-accent-500/8 text-accent-500 text-[11px] font-medium mb-6">
+            <Sparkles className="w-3 h-3" strokeWidth={2} />
+            <span>Commercial property management</span>
           </div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-blue-600 dark:text-blue-400 mb-3">
-            Commercial property management
-          </p>
-          <h1 className="font-display text-3xl sm:text-4xl md:text-5xl font-bold text-slate-900 dark:text-white leading-tight max-w-3xl">
-            Run your centres day to day — tickets, tenants, units and operations in one system.
+
+          <h1 className="font-display text-4xl sm:text-5xl md:text-6xl font-semibold text-[var(--uw-text)] leading-[1.05] tracking-tighter max-w-4xl">
+            Run your centres
+            <br />
+            like a product team.
           </h1>
-          <p className="mt-5 text-base md:text-lg text-slate-600 dark:text-slate-300 max-w-2xl leading-relaxed">
-            Umhlaba Wami is built for commercial property owners and management companies.
-            Sign in to your organisation workspace. 
+
+          <p className="mt-6 text-base md:text-lg text-[var(--uw-text-muted)] max-w-2xl leading-relaxed">
+            Tickets, tenants, units, leases, and finance — one workspace for
+            commercial property operations in the Kingdom of Eswatini.
           </p>
-          <div className="mt-8 flex flex-col sm:flex-row gap-3">
+
+          <div className="mt-9 flex flex-col sm:flex-row gap-2.5">
             <button
               type="button"
               onClick={onSignIn}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-700 shadow-sm shadow-blue-600/20"
+              className="inline-flex items-center justify-center gap-2 h-control-lg rounded-lg bg-accent-500 px-5 text-sm font-semibold text-white hover:bg-accent-600 transition-colors duration-fast"
             >
               Sign in to your organisation
-              <ArrowRight className="w-4 h-4" />
+              <ArrowRight className="w-4 h-4" strokeWidth={2} />
             </button>
             <button
               type="button"
               onClick={onRegisterOrganisation}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-6 py-3 text-sm font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800"
+              className="inline-flex items-center justify-center gap-2 h-control-lg rounded-lg border border-[var(--uw-border-soft)] bg-[var(--uw-surface)] px-5 text-sm font-medium text-[var(--uw-text)] hover:bg-[var(--uw-surface-raised)] hover:border-[var(--uw-border-strong)] transition-colors duration-fast"
             >
-              Register your organisation
+              Register organisation
             </button>
           </div>
-          <ul className="mt-8 flex flex-col sm:flex-row flex-wrap gap-x-6 gap-y-2 text-sm text-slate-600 dark:text-slate-400">
-            {['Organisation-scoped multi-tenant security', 'Role-based dashboards', 'SLA-backed maintenance workflows'].map(
-              (item) => (
-                <li key={item} className="inline-flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                  {item}
-                </li>
-              )
-            )}
+
+          {/* Command hint */}
+          <div className="mt-8 flex items-center gap-2 text-xs text-[var(--uw-text-subtle)]">
+            <CommandIcon className="w-3.5 h-3.5" strokeWidth={1.75} />
+            <span>Once signed in, press</span>
+            <Kbd>⌘K</Kbd>
+            <span>to jump anywhere.</span>
+          </div>
+
+          {/* Trust strip */}
+          <ul className="mt-10 flex flex-col sm:flex-row flex-wrap gap-x-6 gap-y-2 text-xs text-[var(--uw-text-muted)]">
+            {[
+              'Organisation-scoped multi-tenant security',
+              'Role-based dashboards',
+              'SLA-backed maintenance workflows',
+            ].map((item) => (
+              <li key={item} className="inline-flex items-center gap-2">
+                <CheckCircle2
+                  className="w-3.5 h-3.5 text-success-500 shrink-0"
+                  strokeWidth={2}
+                />
+                {item}
+              </li>
+            ))}
           </ul>
         </div>
       </section>
 
-      <section className="max-w-5xl mx-auto px-4 sm:px-6 py-14 md:py-16">
-        <h2 className="font-display text-xl md:text-2xl font-semibold text-slate-900 dark:text-white">
-          What your team manages inside the platform
-        </h2>
-        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400 max-w-2xl">
-          Every capability below is for operators of commercial property — not for browsing listings as a consumer.
-        </p>
-        <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* CAPABILITIES */}
+      <section className="max-w-[1100px] mx-auto px-5 sm:px-6 py-16 md:py-20">
+        <div className="max-w-2xl">
+          <h2 className="font-display text-2xl md:text-3xl font-semibold text-[var(--uw-text)] tracking-tight">
+            What your team manages
+          </h2>
+          <p className="mt-3 text-sm text-[var(--uw-text-muted)] leading-relaxed">
+            Every capability below is for operators of commercial property —
+            not for browsing listings as a consumer.
+          </p>
+        </div>
+
+        <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {capabilities.map((c) => {
             const Icon = c.icon;
             return (
               <div
                 key={c.title}
-                className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 shadow-sm"
+                className="group relative rounded-lg border border-[var(--uw-border)] bg-[var(--uw-surface)] p-4 transition-[border-color,background-color] duration-fast hover:border-[var(--uw-border-strong)] hover:bg-[var(--uw-surface-raised)]"
               >
-                <div className="inline-flex rounded-lg bg-blue-50 dark:bg-blue-950/50 p-2 text-blue-600 dark:text-blue-400">
-                  <Icon className="w-5 h-5" />
+                <div className="inline-flex rounded-md bg-accent-500/10 border border-accent-500/20 p-1.5 text-accent-500">
+                  <Icon className="w-4 h-4" strokeWidth={1.75} />
                 </div>
-                <h3 className="mt-3 text-sm font-semibold text-slate-900 dark:text-white">{c.title}</h3>
-                <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400 leading-relaxed">{c.body}</p>
+                <h3 className="mt-3 text-sm font-semibold text-[var(--uw-text)]">
+                  {c.title}
+                </h3>
+                <p className="mt-1.5 text-xs text-[var(--uw-text-muted)] leading-relaxed">
+                  {c.body}
+                </p>
               </div>
             );
           })}
         </div>
       </section>
 
-      <section className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-12 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+      {/* CTA */}
+      <section className="border-t border-[var(--uw-border)] bg-[var(--uw-surface)]">
+        <div className="max-w-[1100px] mx-auto px-5 sm:px-6 py-14 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
           <div>
-            <h2 className="font-display text-lg font-semibold text-slate-900 dark:text-white">
+            <h2 className="font-display text-xl font-semibold text-[var(--uw-text)] tracking-tight">
               Ready to manage your portfolio?
             </h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              Use your organisation code and username to access the operations workspace.
+            <p className="mt-1.5 text-sm text-[var(--uw-text-muted)]">
+              Use your organisation code and username to access the operations
+              workspace.
             </p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-3 shrink-0">
+          <div className="flex flex-col sm:flex-row gap-2.5 shrink-0">
             <button
               type="button"
               onClick={onSignIn}
-              className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+              className="inline-flex items-center justify-center h-control rounded-lg bg-accent-500 px-4 text-sm font-semibold text-white hover:bg-accent-600 transition-colors duration-fast"
             >
               Sign in
             </button>
             <button
               type="button"
               onClick={onRegisterOrganisation}
-              className="inline-flex items-center justify-center rounded-xl border border-slate-300 dark:border-slate-600 px-5 py-2.5 text-sm font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800"
+              className="inline-flex items-center justify-center h-control rounded-lg border border-[var(--uw-border-soft)] bg-transparent px-4 text-sm font-medium text-[var(--uw-text)] hover:bg-[var(--uw-surface-raised)] hover:border-[var(--uw-border-strong)] transition-colors duration-fast"
             >
               Register organisation
             </button>
