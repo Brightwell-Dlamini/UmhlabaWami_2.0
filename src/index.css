@@ -14,36 +14,31 @@
 
   /*
    * System-wide form readability in dark mode.
-   * Many inputs only set background (dark:bg-slate-900) without text color,
-   * so typed text / placeholders / options become unreadable.
    */
   .dark input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']),
   .dark select,
   .dark textarea {
-    color: #f1f5f9; /* slate-100 — high contrast on dark surfaces */
-    background-color: #0f172a; /* slate-900 */
-    border-color: #475569; /* slate-600 — visible edge */
+    color: #f1f5f9;
+    background-color: #0f172a;
+    border-color: #475569;
   }
 
   .dark input::placeholder,
   .dark textarea::placeholder {
-    color: #94a3b8; /* slate-400 */
+    color: #94a3b8;
     opacity: 1;
   }
 
-  /* Native <select> dropdown list */
   .dark option,
   .dark optgroup {
     background-color: #0f172a;
     color: #f1f5f9;
   }
 
-  /* Labels without explicit dark:text-* still readable */
   .dark label {
-    color: #cbd5e1; /* slate-300 */
+    color: #cbd5e1;
   }
 
-  /* Autofill can force light backgrounds + dark text — override */
   .dark input:-webkit-autofill,
   .dark input:-webkit-autofill:hover,
   .dark input:-webkit-autofill:focus,
@@ -55,11 +50,10 @@
     caret-color: #f1f5f9;
   }
 
-  /* Focus ring stays visible on dark surfaces */
   .dark input:focus-visible,
   .dark select:focus-visible,
   .dark textarea:focus-visible {
-    outline-color: #3b82f6; /* blue-500 */
+    outline-color: #3b82f6;
   }
 }
 
@@ -71,7 +65,13 @@
   scrollbar-width: none;
 }
 
-/* Toast entrance — subtle slide + fade. */
+/* Mobile-friendly tables */
+@media (max-width: 1023px) {
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
 @keyframes uw-toast-in {
   from {
     opacity: 0;
