@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   Users, Search, PlusCircle, CheckCircle2, Edit3, Trash2, X, Shield,
 } from 'lucide-react';
+import { PasswordInput } from '../ui/PasswordInput';
 import { auth } from '../../services/auth';
 import { profiles as profilesApi } from '../../services/api/profiles';
 import { organizations as orgApi } from '../../services/api/organizations';
@@ -27,14 +28,13 @@ const ORG_ROLES: UserRole[] = [
   'admin',
 ];
 
-const ALL_STATUSES = ['Active', 'Suspended', 'Inactive', 'Pending'] as const;
-
 export const OrgUsersView: React.FC = () => {
   const isSuper = auth.isSuperAdmin();
   const orgId = auth.getCurrentOrganization()?.id ?? '';
   const [search, setSearch] = useState('');
   const [orgFilter, setOrgFilter] = useState<string>('all');
   const [feedback, setFeedback] = useState('');
+  const [feedbackTone, setFeedbackTone] = useState<'ok' | 'error'>('ok');
   const [showAddStaff, setShowAddStaff] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
 
@@ -54,25 +54,36 @@ export const OrgUsersView: React.FC = () => {
   useRealtime({
     table: 'profiles',
     filter: isSuper ? undefined : `organization_id=eq.${orgId}`,
-    invalidateKeys: isSuper ? ['profiles'] : ['profiles'],
+    invalidateKeys: ['profiles'],
     enabled: isSuper || !!orgId,
   });
+
+  const flash = (text: string, tone: 'ok' | 'error' = 'ok', ms = 5000) => {
+    setFeedbackTone(tone);
+    setFeedback(text);
+    setTimeout(() => setFeedback(''), ms);
+  };
 
   const addStaff = useSupabaseMutation({
     mutationFn: (args: {
       email: string;
       name: string;
       role: UserRole;
-      password: string;
       phone?: string;
       organizationId?: string | null;
+      password?: string;
     }) => profilesApi.addStaff(args),
     invalidateKeys: ['profiles'],
-    onSuccess: () => {
-      setFeedback('Staff member added.');
-      setTimeout(() => setFeedback(''), 3000);
+    onSuccess: (result) => {
+      const pwdHint = result.temporaryPassword
+        ? ` Temporary password: ${result.temporaryPassword}`
+        : result.warning
+          ? ` ${result.warning}`
+          : '';
+      flash(`Staff member added.${pwdHint}`, 'ok', 8000);
       setShowAddStaff(false);
     },
+    onError: (e) => flash(`Could not add staff: ${e.message}`, 'error', 8000),
   });
 
   const updateUser = useSupabaseMutation({
@@ -85,18 +96,17 @@ export const OrgUsersView: React.FC = () => {
     }) => profilesApi.updateAsAdmin(id, patch),
     invalidateKeys: ['profiles'],
     onSuccess: () => {
-      setFeedback('User updated.');
-      setTimeout(() => setFeedback(''), 3000);
+      flash('User updated.');
       setEditing(null);
     },
+    onError: (e) => flash(`Update failed: ${e.message}`, 'error'),
   });
 
   const setRole = useSupabaseMutation({
     mutationFn: ({ id, role }: { id: string; role: UserRole }) => profilesApi.setRole(id, role),
     invalidateKeys: ['profiles'],
     onSuccess: () => {
-      setFeedback('Role updated.');
-      setTimeout(() => setFeedback(''), 3000);
+      flash('Role updated.');
       setEditing(null);
     },
   });
@@ -104,38 +114,27 @@ export const OrgUsersView: React.FC = () => {
   const setStatus = useSupabaseMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) => profilesApi.setStatus(id, status),
     invalidateKeys: ['profiles'],
-    onSuccess: () => {
-      setFeedback('Status updated.');
-      setTimeout(() => setFeedback(''), 3000);
-    },
+    onSuccess: () => flash('Status updated.'),
+    onError: (e) => flash(`Status change failed: ${e.message}`, 'error'),
   });
 
   const remove = useSupabaseMutation({
     mutationFn: (id: string) => profilesApi.remove(id),
     invalidateKeys: ['profiles'],
-    onSuccess: () => {
-      setFeedback('User deactivated.');
-      setTimeout(() => setFeedback(''), 3000);
-    },
+    onSuccess: () => flash('User deactivated.'),
   });
 
   const purge = useSupabaseMutation({
     mutationFn: (id: string) => profilesApi.purge(id),
     invalidateKeys: ['profiles'],
-    onSuccess: () => {
-      setFeedback('User purged from organisation and deactivated.');
-      setTimeout(() => setFeedback(''), 3000);
-    },
+    onSuccess: () => flash('User purged from organisation and deactivated.'),
   });
 
   const reassignOrg = useSupabaseMutation({
     mutationFn: ({ id, organizationId }: { id: string; organizationId: string | null }) =>
       profilesApi.assignOrganization(id, organizationId),
     invalidateKeys: ['profiles'],
-    onSuccess: () => {
-      setFeedback('Organisation assignment updated.');
-      setTimeout(() => setFeedback(''), 3000);
-    },
+    onSuccess: () => flash('Organisation assignment updated.'),
   });
 
   const filtered = useMemo(() => {
@@ -172,10 +171,11 @@ export const OrgUsersView: React.FC = () => {
           <p className="text-xs text-slate-500">
             {isSuper
               ? 'Full control: create, edit, suspend, reassign, promote or deactivate every user on the platform'
-              : 'Manage admins, managers, technicians, finance'}
+              : 'Manage admins, managers, technicians, finance and tenant portal logins'}
           </p>
         </div>
         <button
+          type="button"
           onClick={() => setShowAddStaff(true)}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
         >
@@ -184,7 +184,13 @@ export const OrgUsersView: React.FC = () => {
       </div>
 
       {feedback && (
-        <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-xl text-xs flex items-center gap-2">
+        <div
+          className={`p-3 rounded-xl text-xs flex items-center gap-2 border ${
+            feedbackTone === 'error'
+              ? 'bg-red-50 border-red-300 text-red-800'
+              : 'bg-emerald-50 border-emerald-300 text-emerald-800'
+          }`}
+        >
           <CheckCircle2 className="w-4 h-4" /> {feedback}
         </div>
       )}
@@ -239,7 +245,11 @@ export const OrgUsersView: React.FC = () => {
                 </tr>
               ) : (
                 filtered.map((u) => (
-                  <tr key={u.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30">
+                  <tr
+                    key={u.id}
+                    onClick={() => setEditing(u)}
+                    className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30 cursor-pointer"
+                  >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 flex items-center justify-center font-bold text-xs">
@@ -252,7 +262,7 @@ export const OrgUsersView: React.FC = () => {
                       </div>
                     </td>
                     {isSuper && (
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <select
                           value={u.organization_id || ''}
                           onChange={(e) =>
@@ -293,7 +303,7 @@ export const OrgUsersView: React.FC = () => {
                     <td className="px-4 py-3 text-slate-500">
                       {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
                         <button
                           type="button"
@@ -332,23 +342,6 @@ export const OrgUsersView: React.FC = () => {
                         >
                           <Trash2 className="w-3.5 h-3.5 text-red-500" />
                         </button>
-                        {isSuper && (
-                          <button
-                            type="button"
-                            title="Purge (remove org + deactivate)"
-                            onClick={() => {
-                              if (
-                                confirm(
-                                  `PURGE ${u.name}? This removes organisation assignment and deactivates the account.`
-                                )
-                              )
-                                purge.mutate(u.id);
-                            }}
-                            className="px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-50 rounded-lg"
-                          >
-                            Purge
-                          </button>
-                        )}
                       </div>
                     </td>
                   </tr>
@@ -381,7 +374,15 @@ export const OrgUsersView: React.FC = () => {
           defaultOrgId={orgId}
           lockOrg={!isSuper && !!orgId}
           onCancel={() => setShowAddStaff(false)}
-          onSubmit={(args) => addStaff.mutate(args)}
+          onSubmit={async (args) => {
+            try {
+              await addStaff.mutate(args);
+            } catch {
+              /* onError flashes */
+            }
+          }}
+          submitting={addStaff.loading}
+          submitError={addStaff.error?.message ?? null}
         />
       )}
       {editing && (
@@ -408,6 +409,8 @@ function AddStaffForm({
   lockOrg,
   onCancel,
   onSubmit,
+  submitting = false,
+  submitError = null,
 }: {
   roles: UserRole[];
   orgs: { id: string; company_name: string; organization_code: string }[];
@@ -420,10 +423,12 @@ function AddStaffForm({
     email: string;
     name: string;
     role: UserRole;
-    password: string;
     phone?: string;
     organizationId?: string | null;
-  }) => void;
+    password?: string;
+  }) => void | Promise<void>;
+  submitting?: boolean;
+  submitError?: string | null;
 }) {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -432,16 +437,18 @@ function AddStaffForm({
   );
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
-  const [organizationId, setOrganizationId] = useState(defaultOrgId || '');
+  const [organizationId, setOrganizationId] = useState(
+    () => defaultOrgId || orgs[0]?.id || ''
+  );
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border p-6 shadow-2xl space-y-4">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-base flex items-center gap-2">
             <Users className="w-4 h-4" /> Add staff member
           </h3>
-          <button type="button" onClick={onCancel}>
+          <button type="button" onClick={onCancel} disabled={submitting}>
             <X className="w-5 h-5 text-slate-400" />
           </button>
         </div>
@@ -449,20 +456,18 @@ function AddStaffForm({
           onSubmit={(e) => {
             e.preventDefault();
             if (requireOrg && !organizationId) {
-              alert('Select an organisation.');
               return;
             }
-            if (!password || password.length < 8) {
-              alert('Password must be at least 8 characters.');
+            if (password && password.length < 8) {
               return;
             }
-            onSubmit({
+            void onSubmit({
               email,
               name,
               role,
-              password,
               phone: phone || undefined,
               organizationId: organizationId || null,
+              password: password || undefined,
             });
           }}
           className="space-y-3 text-xs"
@@ -471,11 +476,10 @@ function AddStaffForm({
             <div>
               <label className="block font-semibold mb-1">Organisation</label>
               {lockOrg ? (
-                <div className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 text-xs font-medium">
+                <div className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-900/80 border text-xs font-medium">
                   {orgs[0]
                     ? `${orgs[0].company_name} (${orgs[0].organization_code})`
                     : 'Your organisation'}
-                  <input type="hidden" value={organizationId} readOnly />
                 </div>
               ) : (
                 <select
@@ -521,12 +525,20 @@ function AddStaffForm({
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
             />
           </div>
+          <PasswordInput
+            label="Temporary password (optional)"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Min 8 characters — leave blank to auto-generate"
+            className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border text-xs"
+            autoComplete="new-password"
+          />
           <div>
             <label className="block font-semibold mb-1">Role</label>
             <select
               value={role}
               onChange={(e) => setRole(e.target.value as UserRole)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border capitalize"
             >
               {roles.map((r) => (
                 <option key={r} value={r}>
@@ -534,25 +546,28 @@ function AddStaffForm({
                 </option>
               ))}
             </select>
+            {role === 'tenant' && (
+              <p className="text-[10px] text-slate-400 mt-1">
+                After creating this portal login, open <strong>Tenants Directory</strong> and link
+                them to the occupancy record so tickets, lease and documents work.
+              </p>
+            )}
           </div>
-          <div>
-            <label className="block font-semibold mb-1">Temporary password</label>
-            <input
-              required
-              type="password"
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
-              placeholder="Min 8 characters"
-            />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border text-xs font-semibold">
+          {submitError && (
+            <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-semibold">
+              {submitError}
+            </div>
+          )}
+          <div className="pt-3 flex justify-end gap-2 border-t">
+            <button type="button" onClick={onCancel} disabled={submitting} className="px-4 py-2 rounded-xl border">
               Cancel
             </button>
-            <button type="submit" className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">
-              Add staff
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold"
+            >
+              {submitting ? 'Adding…' : 'Add staff'}
             </button>
           </div>
         </form>
@@ -572,49 +587,59 @@ function FullEditForm({
 }: {
   user: User;
   roles: UserRole[];
-  orgs: { id: string; company_name: string; organization_code: string }[];
+  orgs: { id: string; company_name: string }[];
   isSuper: boolean;
   onCancel: () => void;
   onSave: (patch: Partial<Pick<User, 'name' | 'email' | 'phone' | 'role' | 'status' | 'organization_id' | 'username'>>) => void;
   onRoleOnly: (role: UserRole) => void;
 }) {
-  const [name, setName] = useState(user.name || '');
-  const [email, setEmail] = useState(user.email || '');
-  const [phone, setPhone] = useState(user.phone || '');
-  const [username, setUsername] = useState(user.username || '');
+  const [name, setName] = useState(user.name);
+  const [email, setEmail] = useState(user.email);
+  const [phone, setPhone] = useState(user.phone ?? '');
   const [role, setRole] = useState<UserRole>(user.role);
-  const [status, setStatus] = useState(user.status || 'Active');
-  const [organizationId, setOrganizationId] = useState(user.organization_id || '');
+  const [status, setStatus] = useState(user.status);
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border p-6 shadow-2xl space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="font-bold text-base">Edit user</h3>
+          <h3 className="font-bold text-base">Edit {user.name}</h3>
           <button type="button" onClick={onCancel}>
             <X className="w-5 h-5 text-slate-400" />
           </button>
         </div>
-        <div className="space-y-3 text-xs">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSave({
+              name,
+              email,
+              phone: phone || undefined,
+              role,
+              status,
+            });
+          }}
+          className="space-y-3 text-xs"
+        >
           <div>
-            <label className="block font-semibold mb-1">Full name</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
+            <label className="block font-semibold mb-1">Name</label>
+            <input required value={name} onChange={(e) => setName(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
           </div>
           <div>
             <label className="block font-semibold mb-1">Email</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
-          </div>
-          <div>
-            <label className="block font-semibold mb-1">Username</label>
-            <input value={username} onChange={(e) => setUsername(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
+            <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
           </div>
           <div>
             <label className="block font-semibold mb-1">Phone</label>
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
+            <input value={phone} onChange={(e) => setPhone(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border" />
           </div>
           <div>
             <label className="block font-semibold mb-1">Role</label>
-            <select value={role} onChange={(e) => setRole(e.target.value as UserRole)} className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border">
+            <select value={role} onChange={(e) => setRole(e.target.value as UserRole)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border capitalize">
               {roles.map((r) => (
                 <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>
               ))}
@@ -622,46 +647,21 @@ function FullEditForm({
           </div>
           <div>
             <label className="block font-semibold mb-1">Status</label>
-            <select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border">
-              {ALL_STATUSES.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
+            <select value={status} onChange={(e) => setStatus(e.target.value as User['status'])}
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border">
+              <option>Active</option>
+              <option>Suspended</option>
+              <option>Inactive</option>
+              <option>Pending</option>
             </select>
           </div>
-          {isSuper && (
-            <div>
-              <label className="block font-semibold mb-1">Organisation</label>
-              <select value={organizationId} onChange={(e) => setOrganizationId(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border">
-                <option value="">— none —</option>
-                {orgs.map((o) => (
-                  <option key={o.id} value={o.id}>{o.company_name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border text-xs font-semibold">
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                onSave({
-                  name,
-                  email,
-                  phone,
-                  username,
-                  role,
-                  status,
-                  organization_id: organizationId || null,
-                })
-              }
-              className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold"
-            >
-              Save all changes
+          <div className="pt-3 flex justify-end gap-2 border-t">
+            <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border">Cancel</button>
+            <button type="submit" className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold">
+              Save
             </button>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );
