@@ -11,6 +11,56 @@
   h1, h2, h3, h4, .font-display {
     font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
   }
+
+  /*
+   * System-wide form readability in dark mode.
+   * Many inputs only set background (dark:bg-slate-900) without text color,
+   * so typed text / placeholders / options become unreadable.
+   */
+  .dark input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']),
+  .dark select,
+  .dark textarea {
+    color: #f1f5f9; /* slate-100 — high contrast on dark surfaces */
+    background-color: #0f172a; /* slate-900 */
+    border-color: #475569; /* slate-600 — visible edge */
+  }
+
+  .dark input::placeholder,
+  .dark textarea::placeholder {
+    color: #94a3b8; /* slate-400 */
+    opacity: 1;
+  }
+
+  /* Native <select> dropdown list */
+  .dark option,
+  .dark optgroup {
+    background-color: #0f172a;
+    color: #f1f5f9;
+  }
+
+  /* Labels without explicit dark:text-* still readable */
+  .dark label {
+    color: #cbd5e1; /* slate-300 */
+  }
+
+  /* Autofill can force light backgrounds + dark text — override */
+  .dark input:-webkit-autofill,
+  .dark input:-webkit-autofill:hover,
+  .dark input:-webkit-autofill:focus,
+  .dark textarea:-webkit-autofill,
+  .dark select:-webkit-autofill {
+    -webkit-text-fill-color: #f1f5f9;
+    -webkit-box-shadow: 0 0 0px 1000px #0f172a inset;
+    transition: background-color 9999s ease-in-out 0s;
+    caret-color: #f1f5f9;
+  }
+
+  /* Focus ring stays visible on dark surfaces */
+  .dark input:focus-visible,
+  .dark select:focus-visible,
+  .dark textarea:focus-visible {
+    outline-color: #3b82f6; /* blue-500 */
+  }
 }
 
 .scrollbar-none::-webkit-scrollbar {
