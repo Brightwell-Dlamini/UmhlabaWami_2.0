@@ -1,3 +1,4 @@
+// src/components/OperationsApp.tsx
 import React, { useEffect, useRef, useState } from 'react';
 import { Sidebar, getNavItemsForRole } from './layout/Sidebar';
 import { TenantDashboard } from './dashboard/TenantDashboard';
@@ -27,18 +28,22 @@ import { SlaMatrixView } from './ops/SlaMatrixView';
 import { PreventiveMaintenanceView } from './ops/PreventiveMaintenanceView';
 import { ProfileSettingsView } from './profile/ProfileSettingsView';
 import { CommandPalette } from './CommandPalette';
+import { KeyboardHelpModal } from './ui/KeyboardHelpModal';
 import { auth } from '../services/auth';
 import { emergencyBroadcasts as emergApi } from '../services/api/announcements';
 import { tickets as ticketsApi } from '../services/api/tickets';
 import { useSupabaseQuery } from '../hooks/useSupabaseQuery';
 import { useRealtime } from '../hooks/useRealtime';
+import { useCommandPalette } from '../hooks/useCommandPalette';
+import { useGlobalShortcuts } from '../hooks/useGlobalShortcuts';
+import { useOfflineQueue } from '../hooks/useOfflineQueue';
 import {
   defaultTabForRole,
   isTabAllowed,
   useTabGuard,
 } from '../hooks/useTabGuard';
 import type { User } from '../types';
-import { Menu, Radio, X } from 'lucide-react';
+import { Menu, Radio, X, CloudOff } from 'lucide-react';
 import { Z } from '../constants/zIndex';
 
 interface Props {
@@ -111,6 +116,10 @@ export function OperationsApp({ currentUser, showToast }: Props) {
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [isBroadcastOpen, setIsBroadcastOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
+
+  const { openPalette, togglePalette } = useCommandPalette();
+  const { pending: offlinePending } = useOfflineQueue();
 
   useEffect(() => {
     persistTab(sidebarActiveTab);
@@ -186,6 +195,13 @@ export function OperationsApp({ currentUser, showToast }: Props) {
     getNavItemsForRole(role).find((i) => i.id === sidebarActiveTab)?.label ??
     'Menu';
 
+  const navigateToTab = (tab: string) => {
+    if (isTabAllowed(tab, currentUser.role)) {
+      setSidebarActiveTab(tab);
+      persistTab(tab);
+    }
+  };
+
   const handleTabChange = (tab: string) => {
     if (tab === 'report_issue') {
       setIsCreateTicketOpen(true);
@@ -195,17 +211,33 @@ export function OperationsApp({ currentUser, showToast }: Props) {
     setMobileNavOpen(false);
   };
 
-  const navigateToTab = (tab: string) => {
-    if (isTabAllowed(tab, currentUser.role)) {
-      setSidebarActiveTab(tab);
-      persistTab(tab);
-    }
-  };
+  // Global keyboard shortcuts
+  useGlobalShortcuts(
+    {
+      onOpenPalette: openPalette,
+      onOpenCreateTicket: () => setIsCreateTicketOpen(true),
+      onGoDashboard: () =>
+        navigateToTab(defaultTabForRole(currentUser.role)),
+      onGoTickets: () =>
+        navigateToTab(
+          currentUser.role === 'tenant' ? 'tenant_tickets' : 'manager_tickets'
+        ),
+      onGoTenants: () => navigateToTab('tenants_list'),
+      onShowHelp: () => setIsHelpOpen(true),
+      onEscape: () => {
+        setIsHelpOpen(false);
+        setMobileNavOpen(false);
+      },
+    },
+    true
+  );
 
   return (
     <>
       {firstEmergency && (
-        <div className={`bg-red-600 text-white px-4 py-2 text-xs font-semibold shadow-md ${Z.banner}`}>
+        <div
+          className={`bg-red-600 text-white px-4 py-2 text-xs font-semibold shadow-md ${Z.banner}`}
+        >
           <div className="flex items-center gap-2 max-w-7xl mx-auto w-full">
             <Radio className="w-4 h-4 animate-pulse shrink-0" />
             <span className="font-bold uppercase tracking-wider text-[10px] bg-red-800 px-1.5 py-0.5 rounded">
@@ -214,6 +246,22 @@ export function OperationsApp({ currentUser, showToast }: Props) {
             <span className="truncate">
               <strong>{firstEmergency.headline}:</strong>{' '}
               {firstEmergency.instructions}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {offlinePending > 0 && (
+        <div
+          className={`bg-amber-500 text-amber-950 px-4 py-1.5 text-[11px] font-semibold shadow-sm ${Z.banner}`}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex items-center gap-2 max-w-7xl mx-auto w-full">
+            <CloudOff className="w-3.5 h-3.5 shrink-0" />
+            <span>
+              {offlinePending} change{offlinePending === 1 ? '' : 's'} queued —
+              will sync when back online.
             </span>
           </div>
         </div>
@@ -318,9 +366,7 @@ export function OperationsApp({ currentUser, showToast }: Props) {
           )}
           {(sidebarActiveTab === 'tenant_lease' ||
             sidebarActiveTab === 'leases') && <LeaseManagementView />}
-          {sidebarActiveTab === 'tenant_documents' && (
-            <TenantDocumentsView />
-          )}
+          {sidebarActiveTab === 'tenant_documents' && <TenantDocumentsView />}
           {sidebarActiveTab === 'tenant_finance' && <TenantFinanceView />}
 
           {(sidebarActiveTab === 'manager_overview' ||
@@ -349,9 +395,7 @@ export function OperationsApp({ currentUser, showToast }: Props) {
             <PreventiveMaintenanceView />
           )}
           {sidebarActiveTab === 'maintenance_ops' && (
-            <MaintenancePortal
-              onViewTicket={(id) => setSelectedTicketId(id)}
-            />
+            <MaintenancePortal onViewTicket={(id) => setSelectedTicketId(id)} />
           )}
           {sidebarActiveTab === 'tenants_list' && (
             <TenantsListView
@@ -365,9 +409,7 @@ export function OperationsApp({ currentUser, showToast }: Props) {
           {sidebarActiveTab === 'analytics_reports' && <AnalyticsReportsView />}
 
           {sidebarActiveTab === 'maintenance_jobs' && (
-            <MaintenancePortal
-              onViewTicket={(id) => setSelectedTicketId(id)}
-            />
+            <MaintenancePortal onViewTicket={(id) => setSelectedTicketId(id)} />
           )}
           {sidebarActiveTab === 'maintenance_completed' && (
             <TicketsListView
@@ -436,6 +478,12 @@ export function OperationsApp({ currentUser, showToast }: Props) {
       <CommandPalette
         onNavigateTab={navigateToTab}
         onOpenTicket={(id) => setSelectedTicketId(id)}
+      />
+
+      {/* Keyboard shortcuts help — "?" from anywhere */}
+      <KeyboardHelpModal
+        open={isHelpOpen}
+        onClose={() => setIsHelpOpen(false)}
       />
     </>
   );

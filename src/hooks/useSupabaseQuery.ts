@@ -1,3 +1,4 @@
+// src/hooks/useSupabaseQuery.ts
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { getEntry, setEntry, subscribe } from '../lib/queryClient';
 
@@ -10,6 +11,10 @@ interface QueryResult<T> {
   data: T | undefined;
   loading: boolean;
   error: Error | null;
+  /** True when the cache holds stale data that is queued for refetch. */
+  isStale: boolean;
+  /** Epoch ms of the last successful fetch. 0 if never fetched. */
+  lastFetchedAt: number;
   refetch: () => Promise<T | undefined>;
 }
 
@@ -19,6 +24,7 @@ interface QueryResult<T> {
  *  - entry.needsRefetch is true and no fetch is in flight
  *  - refetch() is called manually
  *  - refreshInterval elapses (if enabled)
+ *  - the window regains focus and the last fetch is older than 30s
  *
  * Never blanks data during a refetch — stale values remain visible.
  * Safe against StrictMode double-mount.
@@ -33,6 +39,7 @@ export function useSupabaseQuery<T>(
   const enabled = options.enabled ?? true;
 
   const [snapshot, setSnapshot] = useState(() => getEntry<T>(keyStr));
+  const lastFetchedRef = useRef<number>(0);
 
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
@@ -58,6 +65,7 @@ export function useSupabaseQuery<T>(
     try {
       const data = await fetcherRef.current();
       if (!mountedRef.current || keyRef.current !== thisKey) return data;
+      lastFetchedRef.current = Date.now();
       setEntry<T>(thisKey, {
         data,
         loading: false,
@@ -143,10 +151,30 @@ export function useSupabaseQuery<T>(
     };
   }, [keyStr, enabled, run, options.refreshInterval]);
 
+  // Focus refetch: when the window regains focus and cached data is older
+  // than 30s, refresh in the background. Never blanks existing data.
+  useEffect(() => {
+    if (!enabled) return;
+    const onFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
+      if (Date.now() - lastFetchedRef.current < 30_000) return;
+      const entry = getEntry<T>(keyRef.current);
+      if (entry.data === undefined) return;
+      if (inFlightRef.current) return;
+      void run();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [enabled, run]);
+
   return {
     data: snapshot.data,
     loading: snapshot.loading,
     error: snapshot.error,
+    isStale: !!snapshot.needsRefetch,
+    lastFetchedAt: lastFetchedRef.current,
     refetch: run,
   };
 }
