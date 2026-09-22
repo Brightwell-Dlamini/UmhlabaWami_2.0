@@ -7,6 +7,7 @@ import { tickets as ticketsApi } from '../../services/api/tickets';
 import { shops as shopsApi } from '../../services/api/shops';
 import { tenants as tenantsApi } from '../../services/api/tenants';
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
+import { invalidate } from '../../lib/queryClient';
 import type { TicketPriority, TicketCategory } from '../../types';
 
 interface Props {
@@ -41,7 +42,6 @@ export const CreateTicketWizard: React.FC<Props> = ({ isOpen, onClose, onSuccess
     { enabled: !!user?.organization_id && isOpen }
   );
 
-  // Resolve the tenant first for role=tenant users — that gives us the correct shop.
   const linkedTenant = useMemo(() => {
     if (!user) return undefined;
     return (
@@ -137,6 +137,9 @@ export const CreateTicketWizard: React.FC<Props> = ({ isOpen, onClose, onSuccess
         category,
         before_images: uploadedImages,
       });
+      // Refresh every tickets list/detail without requiring a full page reload
+      invalidate('tickets');
+      invalidate('notifications');
       onSuccess(ticket.ticket_number);
       onClose();
     } catch (e) {
