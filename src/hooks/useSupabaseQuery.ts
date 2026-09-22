@@ -24,11 +24,11 @@ interface QueryResult<T> {
  *  - entry.needsRefetch is true and no fetch is in flight
  *  - refetch() is called manually
  *  - refreshInterval elapses (if enabled)
- *  - the window regains focus and the last fetch is older than 30s
  *
  * Never blanks data during a refetch — stale values remain visible.
  * Safe against StrictMode double-mount.
  * Never auto-refetches while the browser tab is hidden.
+ * Does not refetch on window focus / tab switch (preserves UI state).
  */
 export function useSupabaseQuery<T>(
   key: readonly unknown[],
@@ -150,24 +150,6 @@ export function useSupabaseQuery<T>(
       document.removeEventListener('visibilitychange', onVis);
     };
   }, [keyStr, enabled, run, options.refreshInterval]);
-
-  // Focus refetch: when the window regains focus and cached data is older
-  // than 30s, refresh in the background. Never blanks existing data.
-  useEffect(() => {
-    if (!enabled) return;
-    const onFocus = () => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-        return;
-      }
-      if (Date.now() - lastFetchedRef.current < 30_000) return;
-      const entry = getEntry<T>(keyRef.current);
-      if (entry.data === undefined) return;
-      if (inFlightRef.current) return;
-      void run();
-    };
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [enabled, run]);
 
   return {
     data: snapshot.data,
