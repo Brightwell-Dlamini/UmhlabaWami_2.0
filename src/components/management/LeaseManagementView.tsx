@@ -1,7 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  FileBadge, Edit3, Trash2, ShieldCheck,
-} from 'lucide-react';
+import { FileBadge, Edit3, Trash2, ShieldCheck } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { leases as leasesApi } from '../../services/api/leases';
 import { tenants as tenantsApi } from '../../services/api/tenants';
@@ -13,6 +11,7 @@ import type { Lease } from '../../types';
 import { Modal } from '../ui/Modal';
 import { useConfirm } from '../ui/ConfirmDialog';
 import { useToast } from '../ui/ToastProvider';
+import { EntityAuditTrail } from '../audit/EntityAuditTrail';
 
 export const LeaseManagementView: React.FC = () => {
   const orgId = auth.getCurrentOrganization()?.id ?? '';
@@ -26,11 +25,28 @@ export const LeaseManagementView: React.FC = () => {
   const [editing, setEditing] = useState<Lease | null>(null);
   const [reading, setReading] = useState<Lease | null>(null);
 
-  const { data: leases = [] } = useSupabaseQuery(['leases', orgId], () => leasesApi.list(), { enabled: !!orgId });
-  const { data: tenants = [] } = useSupabaseQuery(['tenants', orgId], () => tenantsApi.list(), { enabled: !!orgId });
-  const { data: shops = [] } = useSupabaseQuery(['shops', orgId], () => shopsApi.list(), { enabled: !!orgId });
+  const { data: leases = [] } = useSupabaseQuery(
+    ['leases', orgId],
+    () => leasesApi.list(),
+    { enabled: !!orgId }
+  );
+  const { data: tenants = [] } = useSupabaseQuery(
+    ['tenants', orgId],
+    () => tenantsApi.list(),
+    { enabled: !!orgId }
+  );
+  const { data: shops = [] } = useSupabaseQuery(
+    ['shops', orgId],
+    () => shopsApi.list(),
+    { enabled: !!orgId }
+  );
 
-  useRealtime({ table: 'leases', filter: `organization_id=eq.${orgId}`, invalidateKeys: ['leases'], enabled: !!orgId });
+  useRealtime({
+    table: 'leases',
+    filter: `organization_id=eq.${orgId}`,
+    invalidateKeys: ['leases'],
+    enabled: !!orgId,
+  });
 
   const myTenant = useMemo(() => {
     if (!user) return undefined;
@@ -42,7 +58,9 @@ export const LeaseManagementView: React.FC = () => {
           user.email &&
           t.email.toLowerCase() === user.email.toLowerCase()
       ) ??
-      (user.shop_id ? tenants.find((t) => t.shop_id === user.shop_id) : undefined)
+      (user.shop_id
+        ? tenants.find((t) => t.shop_id === user.shop_id)
+        : undefined)
     );
   }, [tenants, user]);
 
@@ -53,7 +71,8 @@ export const LeaseManagementView: React.FC = () => {
   }, [leases, isTenant, myTenant]);
 
   const create = useSupabaseMutation({
-    mutationFn: (input: Parameters<typeof leasesApi.create>[0]) => leasesApi.create(input),
+    mutationFn: (input: Parameters<typeof leasesApi.create>[0]) =>
+      leasesApi.create(input),
     invalidateKeys: ['leases'],
     onSuccess: () => {
       toast.success('Lease created');
@@ -62,7 +81,8 @@ export const LeaseManagementView: React.FC = () => {
     onError: (e) => toast.error('Create failed', e.message),
   });
   const update = useSupabaseMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: Partial<Lease> }) => leasesApi.update(id, patch),
+    mutationFn: ({ id, patch }: { id: string; patch: Partial<Lease> }) =>
+      leasesApi.update(id, patch),
     invalidateKeys: ['leases'],
     onSuccess: () => {
       toast.success('Lease updated');
@@ -75,7 +95,8 @@ export const LeaseManagementView: React.FC = () => {
     invalidateKeys: ['leases'],
   });
   const sign = useSupabaseMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) => leasesApi.sign(id, name),
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      leasesApi.sign(id, name),
     invalidateKeys: ['leases'],
     onSuccess: () => toast.success('Lease signed'),
     onError: (e) => toast.error('Sign failed', e.message),
@@ -101,7 +122,11 @@ export const LeaseManagementView: React.FC = () => {
     }
   };
 
-  if (!orgId) return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
+  if (!orgId) {
+    return (
+      <div className="p-6 text-slate-500 text-sm">No organisation context.</div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-12">
@@ -153,8 +178,13 @@ export const LeaseManagementView: React.FC = () => {
             <tbody className="divide-y">
               {visibleLeases.length === 0 ? (
                 <tr>
-                  <td colSpan={isTenant ? 7 : 8} className="p-8 text-center text-slate-400 text-xs">
-                    {isTenant ? 'No lease on file for you yet.' : 'No leases yet.'}
+                  <td
+                    colSpan={isTenant ? 7 : 8}
+                    className="p-8 text-center text-slate-400 text-xs"
+                  >
+                    {isTenant
+                      ? 'No lease on file for you yet.'
+                      : 'No leases yet.'}
                   </td>
                 </tr>
               ) : (
@@ -162,21 +192,37 @@ export const LeaseManagementView: React.FC = () => {
                   const tenant = tenants.find((t) => t.id === l.tenant_id);
                   const shop = shops.find((s) => s.id === l.shop_id);
                   return (
-                    <tr key={l.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30">
+                    <tr
+                      key={l.id}
+                      className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30"
+                    >
                       {!isTenant && (
                         <td className="px-4 py-3">
-                          <div className="font-bold">{tenant?.business_name ?? '—'}</div>
-                          <div className="text-[10px] text-slate-400">{tenant?.contact_person}</div>
+                          <div className="font-bold">
+                            {tenant?.business_name ?? '—'}
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            {tenant?.contact_person}
+                          </div>
                         </td>
                       )}
-                      <td className="px-4 py-3 font-mono text-[11px]">Unit {shop?.shop_number ?? '—'}</td>
-                      <td className="px-4 py-3">{l.start_date} → {l.end_date}</td>
-                      <td className="px-4 py-3 font-bold">E{l.rental_amount.toLocaleString()}</td>
-                      <td className="px-4 py-3">E{(l.deposit ?? 0).toLocaleString()}</td>
+                      <td className="px-4 py-3 font-mono text-[11px]">
+                        Unit {shop?.shop_number ?? '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        {l.start_date} → {l.end_date}
+                      </td>
+                      <td className="px-4 py-3 font-bold">
+                        E{l.rental_amount.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3">
+                        E{(l.deposit ?? 0).toLocaleString()}
+                      </td>
                       <td className="px-4 py-3">
                         {l.is_digitally_signed ? (
                           <span className="flex items-center gap-1 text-[11px] text-emerald-600 font-semibold">
-                            <ShieldCheck className="w-3.5 h-3.5" /> {l.signer_name ?? 'Signed'}
+                            <ShieldCheck className="w-3.5 h-3.5" />{' '}
+                            {l.signer_name ?? 'Signed'}
                           </span>
                         ) : (
                           <button
@@ -184,8 +230,10 @@ export const LeaseManagementView: React.FC = () => {
                               sign.mutate({
                                 id: l.id,
                                 name: isTenant
-                                  ? (user?.name ?? tenant?.contact_person ?? 'Tenant')
-                                  : (tenant?.contact_person ?? 'Tenant'),
+                                  ? user?.name ??
+                                    tenant?.contact_person ??
+                                    'Tenant'
+                                  : tenant?.contact_person ?? 'Tenant',
                               })
                             }
                             className="text-[11px] font-bold text-blue-600 hover:underline"
@@ -242,7 +290,9 @@ export const LeaseManagementView: React.FC = () => {
       <LeaseTermsModal
         open={!!reading}
         lease={reading}
-        tenant={reading ? tenants.find((t) => t.id === reading.tenant_id) : undefined}
+        tenant={
+          reading ? tenants.find((t) => t.id === reading.tenant_id) : undefined
+        }
         shop={reading ? shops.find((s) => s.id === reading.shop_id) : undefined}
         onClose={() => setReading(null)}
       />
@@ -281,7 +331,11 @@ function LeaseTermsModal({
   onClose: () => void;
 }) {
   if (!lease) {
-    return <Modal open={false} onClose={onClose}><div /></Modal>;
+    return (
+      <Modal open={false} onClose={onClose}>
+        <div />
+      </Modal>
+    );
   }
 
   const raw =
@@ -296,25 +350,39 @@ function LeaseTermsModal({
       onClose={onClose}
       size="lg"
       title={lease.document_title}
-      subtitle={`${tenant?.business_name ?? 'Tenant'} · Unit ${shop?.shop_number ?? '—'} · ${lease.start_date} → ${lease.end_date}`}
+      subtitle={`${tenant?.business_name ?? 'Tenant'} · Unit ${
+        shop?.shop_number ?? '—'
+      } · ${lease.start_date} → ${lease.end_date}`}
     >
       <div className="space-y-4 text-xs">
         <div className="grid grid-cols-3 gap-3">
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border">
-            <div className="text-[10px] uppercase text-slate-400 font-semibold">Monthly rent</div>
-            <div className="font-bold mt-0.5">E{lease.rental_amount.toLocaleString()}</div>
+            <div className="text-[10px] uppercase text-slate-400 font-semibold">
+              Monthly rent
+            </div>
+            <div className="font-bold mt-0.5">
+              E{lease.rental_amount.toLocaleString()}
+            </div>
           </div>
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border">
-            <div className="text-[10px] uppercase text-slate-400 font-semibold">Deposit</div>
-            <div className="font-bold mt-0.5">E{(lease.deposit ?? 0).toLocaleString()}</div>
+            <div className="text-[10px] uppercase text-slate-400 font-semibold">
+              Deposit
+            </div>
+            <div className="font-bold mt-0.5">
+              E{(lease.deposit ?? 0).toLocaleString()}
+            </div>
           </div>
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border">
-            <div className="text-[10px] uppercase text-slate-400 font-semibold">Status</div>
+            <div className="text-[10px] uppercase text-slate-400 font-semibold">
+              Status
+            </div>
             <div className="font-bold mt-0.5">{lease.renewal_status}</div>
           </div>
         </div>
         <div>
-          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Lease terms</h4>
+          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+            Lease terms
+          </h4>
           {terms ? (
             <div className="prose prose-sm dark:prose-invert max-w-none text-xs whitespace-pre-wrap leading-relaxed p-4 rounded-xl bg-slate-50 dark:bg-slate-900 border max-h-80 overflow-y-auto">
               {terms}
@@ -327,6 +395,12 @@ function LeaseTermsModal({
             </div>
           )}
         </div>
+
+        {/* Change history */}
+        <div className="pt-3 border-t border-slate-200 dark:border-slate-700">
+          <EntityAuditTrail entityId={lease.id} entityType="lease" />
+        </div>
+
         <div className="flex justify-end">
           <button
             type="button"
@@ -350,8 +424,18 @@ function LeaseForm({
   onSubmit,
 }: {
   open: boolean;
-  tenants: { id: string; business_name: string; contact_person: string; shop_id: string }[];
-  shops: { id: string; shop_number: string; rental_amount: number; deposit_amount: number }[];
+  tenants: {
+    id: string;
+    business_name: string;
+    contact_person: string;
+    shop_id: string;
+  }[];
+  shops: {
+    id: string;
+    shop_number: string;
+    rental_amount: number;
+    deposit_amount: number;
+  }[];
   initial: Lease | null;
   onCancel: () => void;
   onSubmit: (input: Record<string, unknown>) => void;
@@ -360,10 +444,13 @@ function LeaseForm({
     tenant_id: initial?.tenant_id ?? tenants[0]?.id ?? '',
     shop_id: initial?.shop_id ?? tenants[0]?.shop_id ?? shops[0]?.id ?? '',
     start_date: initial?.start_date ?? new Date().toISOString().slice(0, 10),
-    end_date: initial?.end_date ?? new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10),
+    end_date:
+      initial?.end_date ??
+      new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10),
     rental_amount: initial?.rental_amount ?? 15000,
     deposit: initial?.deposit ?? 30000,
-    renewal_status: (initial?.renewal_status ?? 'Active') as Lease['renewal_status'],
+    renewal_status: (initial?.renewal_status ??
+      'Active') as Lease['renewal_status'],
     document_title: initial?.document_title ?? '',
     terms_body: initial?.terms_body ?? '',
   });
@@ -374,17 +461,26 @@ function LeaseForm({
       tenant_id: initial?.tenant_id ?? tenants[0]?.id ?? '',
       shop_id: initial?.shop_id ?? tenants[0]?.shop_id ?? shops[0]?.id ?? '',
       start_date: initial?.start_date ?? new Date().toISOString().slice(0, 10),
-      end_date: initial?.end_date ?? new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10),
+      end_date:
+        initial?.end_date ??
+        new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10),
       rental_amount: initial?.rental_amount ?? 15000,
       deposit: initial?.deposit ?? 30000,
-      renewal_status: (initial?.renewal_status ?? 'Active') as Lease['renewal_status'],
+      renewal_status: (initial?.renewal_status ??
+        'Active') as Lease['renewal_status'],
       document_title: initial?.document_title ?? '',
       terms_body: initial?.terms_body ?? '',
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initial?.id]);
 
   return (
-    <Modal open={open} onClose={onCancel} size="md" title={initial ? 'Edit lease' : 'Draft lease'}>
+    <Modal
+      open={open}
+      onClose={onCancel}
+      size="md"
+      title={initial ? 'Edit lease' : 'Draft lease'}
+    >
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -399,12 +495,18 @@ function LeaseForm({
               value={form.tenant_id}
               onChange={(e) => {
                 const t = tenants.find((x) => x.id === e.target.value);
-                setForm({ ...form, tenant_id: e.target.value, shop_id: t?.shop_id ?? form.shop_id });
+                setForm({
+                  ...form,
+                  tenant_id: e.target.value,
+                  shop_id: t?.shop_id ?? form.shop_id,
+                });
               }}
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
             >
               {tenants.map((t) => (
-                <option key={t.id} value={t.id}>{t.business_name}</option>
+                <option key={t.id} value={t.id}>
+                  {t.business_name}
+                </option>
               ))}
             </select>
           </div>
@@ -424,7 +526,9 @@ function LeaseForm({
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
             >
               {shops.map((s) => (
-                <option key={s.id} value={s.id}>Unit {s.shop_number}</option>
+                <option key={s.id} value={s.id}>
+                  Unit {s.shop_number}
+                </option>
               ))}
             </select>
           </div>
@@ -458,7 +562,9 @@ function LeaseForm({
               type="number"
               required
               value={form.rental_amount}
-              onChange={(e) => setForm({ ...form, rental_amount: Number(e.target.value) })}
+              onChange={(e) =>
+                setForm({ ...form, rental_amount: Number(e.target.value) })
+              }
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
             />
           </div>
@@ -468,7 +574,9 @@ function LeaseForm({
               type="number"
               required
               value={form.deposit}
-              onChange={(e) => setForm({ ...form, deposit: Number(e.target.value) })}
+              onChange={(e) =>
+                setForm({ ...form, deposit: Number(e.target.value) })
+              }
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
             />
           </div>
@@ -476,11 +584,19 @@ function LeaseForm({
             <label className="block font-semibold mb-1">Status</label>
             <select
               value={form.renewal_status}
-              onChange={(e) => setForm({ ...form, renewal_status: e.target.value as Lease['renewal_status'] })}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  renewal_status: e.target.value as Lease['renewal_status'],
+                })
+              }
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
             >
-              <option>Active</option><option>Pending Renewal</option>
-              <option>Renewed</option><option>Expired</option><option>Terminated</option>
+              <option>Active</option>
+              <option>Pending Renewal</option>
+              <option>Renewed</option>
+              <option>Expired</option>
+              <option>Terminated</option>
             </select>
           </div>
         </div>
@@ -489,7 +605,9 @@ function LeaseForm({
           <input
             required
             value={form.document_title}
-            onChange={(e) => setForm({ ...form, document_title: e.target.value })}
+            onChange={(e) =>
+              setForm({ ...form, document_title: e.target.value })
+            }
             placeholder="Commercial lease — Unit G-14"
             className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
           />
@@ -506,8 +624,17 @@ function LeaseForm({
           />
         </div>
         <div className="pt-3 flex justify-end gap-2 border-t">
-          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border">Cancel</button>
-          <button type="submit" className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 rounded-xl border"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold"
+          >
             {initial ? 'Save' : 'Create lease'}
           </button>
         </div>

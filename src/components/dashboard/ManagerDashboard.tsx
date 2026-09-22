@@ -10,14 +10,20 @@ import { auth } from '../../services/auth';
 import { tickets as ticketsApi } from '../../services/api/tickets';
 import { shops as shopsApi } from '../../services/api/shops';
 import { shoppingCenters as centersApi } from '../../services/api/shoppingCenters';
+import { tenants as tenantsApi } from '../../services/api/tenants';
+import { invoices as invoiceApi } from '../../services/api/invoices';
+import { leases as leasesApi } from '../../services/api/leases';
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useRealtime } from '../../hooks/useRealtime';
 import { KpiCard } from './TenantDashboard';
+import { OnboardingChecklist } from '../onboarding/OnboardingChecklist';
 
 interface Props {
   onViewTicket: (id: string) => void;
   onOpenCreateTicket: () => void;
   onOpenBroadcastModal: () => void;
+  /** Optional — passed from OperationsApp, used by the onboarding checklist. */
+  onNavigate?: (tab: string) => void;
 }
 
 type QuickFilter = 'none' | 'open' | 'emergency' | 'in_progress' | 'awaiting';
@@ -26,8 +32,15 @@ export const ManagerDashboard: React.FC<Props> = ({
   onViewTicket,
   onOpenCreateTicket,
   onOpenBroadcastModal,
+  onNavigate,
 }) => {
   const orgId = auth.getCurrentOrganization()?.id ?? '';
+  const currentUser = auth.getCurrentUser();
+  const canSeeOnboarding =
+    !!currentUser &&
+    (currentUser.role === 'admin' ||
+      currentUser.role === 'property_manager' ||
+      currentUser.role === 'landlord');
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -48,6 +61,21 @@ export const ManagerDashboard: React.FC<Props> = ({
     ['centers', orgId],
     () => centersApi.list(),
     { enabled: !!orgId }
+  );
+  const { data: tenants = [] } = useSupabaseQuery(
+    ['tenants', orgId],
+    () => tenantsApi.list(),
+    { enabled: !!orgId && canSeeOnboarding }
+  );
+  const { data: allInvoices = [] } = useSupabaseQuery(
+    ['invoices', orgId],
+    () => invoiceApi.list(),
+    { enabled: !!orgId && canSeeOnboarding }
+  );
+  const { data: allLeases = [] } = useSupabaseQuery(
+    ['leases', orgId],
+    () => leasesApi.list(),
+    { enabled: !!orgId && canSeeOnboarding }
   );
 
   useRealtime({
@@ -74,23 +102,33 @@ export const ManagerDashboard: React.FC<Props> = ({
   const attention = useMemo(() => {
     const items: { id: string; label: string; tone: string }[] = [];
     const emergencies = tickets.filter(
-      (t) => t.priority === 'Emergency' && t.status !== 'Closed' && t.status !== 'Resolved'
+      (t) =>
+        t.priority === 'Emergency' &&
+        t.status !== 'Closed' &&
+        t.status !== 'Resolved'
     );
     const overdue = tickets.filter((t) => {
       if (t.status === 'Resolved' || t.status === 'Closed') return false;
-      return t.resolution_deadline && new Date(t.resolution_deadline).getTime() < Date.now();
+      return (
+        t.resolution_deadline &&
+        new Date(t.resolution_deadline).getTime() < Date.now()
+      );
     });
     const awaiting = tickets.filter((t) => t.status === 'Resolved');
     if (emergencies.length)
       items.push({
         id: 'em',
-        label: `${emergencies.length} emergency ticket${emergencies.length === 1 ? '' : 's'} need action`,
+        label: `${emergencies.length} emergency ticket${
+          emergencies.length === 1 ? '' : 's'
+        } need action`,
         tone: 'red',
       });
     if (overdue.length)
       items.push({
         id: 'ov',
-        label: `${overdue.length} ticket${overdue.length === 1 ? '' : 's'} past SLA deadline`,
+        label: `${overdue.length} ticket${
+          overdue.length === 1 ? '' : 's'
+        } past SLA deadline`,
         tone: 'amber',
       });
     if (awaiting.length)
@@ -142,11 +180,26 @@ export const ManagerDashboard: React.FC<Props> = ({
 
   return (
     <div className="space-y-6 pb-12">
+      {/* Onboarding — only for admins/managers/landlords, hidden once complete or dismissed */}
+      {canSeeOnboarding && onNavigate && (
+        <OnboardingChecklist
+          centerCount={centers.length}
+          unitCount={shops.length}
+          tenantCount={tenants.length}
+          leaseCount={allLeases.length}
+          invoiceCount={allInvoices.length}
+          onNavigate={onNavigate}
+          storageKey={orgId}
+        />
+      )}
+
       {attention.length > 0 && (
         <div className="rounded-2xl border border-amber-200 dark:border-amber-900/50 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-950/30 p-4 space-y-2">
           <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200">
             <AlertTriangle className="w-4 h-4" />
-            <span className="text-xs font-bold uppercase tracking-wider">Needs attention</span>
+            <span className="text-xs font-bold uppercase tracking-wider">
+              Needs attention
+            </span>
           </div>
           <ul className="space-y-1">
             {attention.map((a) => (
@@ -181,7 +234,8 @@ export const ManagerDashboard: React.FC<Props> = ({
               Property operations
             </div>
             <h1 className="text-2xl font-bold mt-1 truncate">
-              {auth.getCurrentOrganization()?.company_name || 'Operations dashboard'}
+              {auth.getCurrentOrganization()?.company_name ||
+                'Operations dashboard'}
             </h1>
             <p className="text-xs text-slate-500">
               Maintenance, SLAs and occupancy
@@ -211,27 +265,69 @@ export const ManagerDashboard: React.FC<Props> = ({
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiCard label="Occupancy" value={`${kpis.occupancy}%`} icon={Clock} />
-        <button onClick={() => toggleQuick('open')} type="button" className="text-left">
-          <KpiCard label="Open" value={kpis.open} icon={AlertTriangle} highlight={quickFilter === 'open'} />
+        <button
+          onClick={() => toggleQuick('open')}
+          type="button"
+          className="text-left"
+        >
+          <KpiCard
+            label="Open"
+            value={kpis.open}
+            icon={AlertTriangle}
+            highlight={quickFilter === 'open'}
+          />
         </button>
-        <button onClick={() => toggleQuick('emergency')} type="button" className="text-left">
-          <KpiCard label="Emergencies" value={kpis.emergency} icon={AlertTriangle} highlight={quickFilter === 'emergency'} />
+        <button
+          onClick={() => toggleQuick('emergency')}
+          type="button"
+          className="text-left"
+        >
+          <KpiCard
+            label="Emergencies"
+            value={kpis.emergency}
+            icon={AlertTriangle}
+            highlight={quickFilter === 'emergency'}
+          />
         </button>
-        <button onClick={() => toggleQuick('in_progress')} type="button" className="text-left">
-          <KpiCard label="In progress" value={kpis.inProgress} icon={Clock} highlight={quickFilter === 'in_progress'} />
+        <button
+          onClick={() => toggleQuick('in_progress')}
+          type="button"
+          className="text-left"
+        >
+          <KpiCard
+            label="In progress"
+            value={kpis.inProgress}
+            icon={Clock}
+            highlight={quickFilter === 'in_progress'}
+          />
         </button>
-        <button onClick={() => toggleQuick('awaiting')} type="button" className="text-left">
-          <KpiCard label="Awaiting confirm" value={kpis.awaiting} icon={AlertTriangle} highlight={quickFilter === 'awaiting'} />
+        <button
+          onClick={() => toggleQuick('awaiting')}
+          type="button"
+          className="text-left"
+        >
+          <KpiCard
+            label="Awaiting confirm"
+            value={kpis.awaiting}
+            icon={AlertTriangle}
+            highlight={quickFilter === 'awaiting'}
+          />
         </button>
         <KpiCard label="Tenant CSAT" value="4.9 ★" icon={AlertTriangle} />
       </div>
 
       <div className="space-y-3">
-        <h2 className="text-sm font-bold uppercase tracking-wider">Managed centres</h2>
+        <h2 className="text-sm font-bold uppercase tracking-wider">
+          Managed centres
+        </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {centers.map((c) => {
-            const cShops = shops.filter((s) => s.shopping_center_id === c.id);
-            const occupied = cShops.filter((s) => s.status === 'Occupied').length;
+            const cShops = shops.filter(
+              (s) => s.shopping_center_id === c.id
+            );
+            const occupied = cShops.filter(
+              (s) => s.status === 'Occupied'
+            ).length;
             const openTickets = tickets.filter(
               (t) => t.shopping_center_id === c.id && t.status !== 'Closed'
             ).length;
@@ -241,7 +337,9 @@ export const ManagerDashboard: React.FC<Props> = ({
                 t.priority === 'Emergency' &&
                 t.status !== 'Closed'
             ).length;
-            const occ = cShops.length ? Math.round((occupied / cShops.length) * 100) : 0;
+            const occ = cShops.length
+              ? Math.round((occupied / cShops.length) * 100)
+              : 0;
             const hot = emergencies >= 2;
             return (
               <div
@@ -252,11 +350,17 @@ export const ManagerDashboard: React.FC<Props> = ({
               >
                 <div className="flex items-center gap-3">
                   {c.image && (
-                    <img src={c.image} alt="" className="w-12 h-12 rounded-xl object-cover" />
+                    <img
+                      src={c.image}
+                      alt=""
+                      className="w-12 h-12 rounded-xl object-cover"
+                    />
                   )}
                   <div className="min-w-0">
                     <h3 className="font-bold text-sm truncate">{c.name}</h3>
-                    <p className="text-xs text-slate-500 truncate">{c.location}</p>
+                    <p className="text-xs text-slate-500 truncate">
+                      {c.location}
+                    </p>
                   </div>
                 </div>
                 <div>
@@ -265,7 +369,10 @@ export const ManagerDashboard: React.FC<Props> = ({
                     <strong>{occ}%</strong>
                   </div>
                   <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-                    <div className="h-full bg-blue-600" style={{ width: `${occ}%` }} />
+                    <div
+                      className="h-full bg-blue-600"
+                      style={{ width: `${occ}%` }}
+                    />
                   </div>
                 </div>
                 <div className="flex justify-between text-[11px] text-slate-500">
@@ -342,7 +449,10 @@ export const ManagerDashboard: React.FC<Props> = ({
             <tbody className="divide-y">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-3 py-8 text-center text-slate-400">
+                  <td
+                    colSpan={6}
+                    className="px-3 py-8 text-center text-slate-400"
+                  >
                     No tickets match the current filters.
                   </td>
                 </tr>
@@ -353,10 +463,14 @@ export const ManagerDashboard: React.FC<Props> = ({
                     onClick={() => onViewTicket(t.id)}
                     className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/40"
                   >
-                    <td className="px-3 py-3 font-mono font-bold">{t.ticket_number}</td>
+                    <td className="px-3 py-3 font-mono font-bold">
+                      {t.ticket_number}
+                    </td>
                     <td className="px-3 py-3">
                       <div className="font-semibold">{t.title}</div>
-                      <div className="text-[10px] text-slate-400">{t.category}</div>
+                      <div className="text-[10px] text-slate-400">
+                        {t.category}
+                      </div>
                     </td>
                     <td className="px-3 py-3">
                       <span
@@ -381,7 +495,9 @@ export const ManagerDashboard: React.FC<Props> = ({
                         })}
                       </div>
                     </td>
-                    <td className="px-3 py-3 text-right text-blue-600 font-semibold">Manage →</td>
+                    <td className="px-3 py-3 text-right text-blue-600 font-semibold">
+                      Manage →
+                    </td>
                   </tr>
                 ))
               )}

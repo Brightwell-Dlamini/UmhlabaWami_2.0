@@ -26,6 +26,7 @@ import { CentrePulseView } from './ops/CentrePulseView';
 import { SlaMatrixView } from './ops/SlaMatrixView';
 import { PreventiveMaintenanceView } from './ops/PreventiveMaintenanceView';
 import { ProfileSettingsView } from './profile/ProfileSettingsView';
+import { CommandPalette } from './CommandPalette';
 import { auth } from '../services/auth';
 import { emergencyBroadcasts as emergApi } from '../services/api/announcements';
 import { tickets as ticketsApi } from '../services/api/tickets';
@@ -110,14 +111,10 @@ export function OperationsApp({ currentUser, showToast }: Props) {
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [isBroadcastOpen, setIsBroadcastOpen] = useState(false);
 
-  // Persist whenever the tab changes.
   useEffect(() => {
     persistTab(sidebarActiveTab);
   }, [sidebarActiveTab]);
 
-  // Guard: any tab that isn't permitted for this role snaps back to the
-  // role's default. Fires for URL hash, sessionStorage restore, and
-  // programmatic setSidebarActiveTab calls that bypass the nav.
   useTabGuard(sidebarActiveTab, currentUser.role, (safe) => {
     setSidebarActiveTab(safe);
   });
@@ -174,10 +171,19 @@ export function OperationsApp({ currentUser, showToast }: Props) {
 
   const firstEmergency = activeEmergencies[0];
 
+  const navigateToTab = (tab: string) => {
+    if (isTabAllowed(tab, currentUser.role)) {
+      setSidebarActiveTab(tab);
+      persistTab(tab);
+    }
+  };
+
   return (
     <>
       {firstEmergency && (
-        <div className={`bg-red-600 text-white px-4 py-2 text-xs font-semibold shadow-md ${Z.banner}`}>
+        <div
+          className={`bg-red-600 text-white px-4 py-2 text-xs font-semibold shadow-md ${Z.banner}`}
+        >
           <div className="flex items-center gap-2 max-w-7xl mx-auto w-full">
             <Radio className="w-4 h-4 animate-pulse shrink-0" />
             <span className="font-bold uppercase tracking-wider text-[10px] bg-red-800 px-1.5 py-0.5 rounded">
@@ -198,7 +204,7 @@ export function OperationsApp({ currentUser, showToast }: Props) {
             activeTab={sidebarActiveTab}
             onTabChange={(tab) => {
               if (tab === 'report_issue') setIsCreateTicketOpen(true);
-              else setSidebarActiveTab(tab);
+              else navigateToTab(tab);
             }}
             onOpenCreateTicket={() => setIsCreateTicketOpen(true)}
             organizationName={auth.getCurrentOrganization()?.company_name}
@@ -245,6 +251,7 @@ export function OperationsApp({ currentUser, showToast }: Props) {
                 onViewTicket={(id) => setSelectedTicketId(id)}
                 onOpenCreateTicket={() => setIsCreateTicketOpen(true)}
                 onOpenBroadcastModal={() => setIsBroadcastOpen(true)}
+                onNavigate={navigateToTab}
               />
             )}
           {sidebarActiveTab === 'centre_pulse' && <CentrePulseView />}
@@ -340,6 +347,12 @@ export function OperationsApp({ currentUser, showToast }: Props) {
         isOpen={isBroadcastOpen}
         onClose={() => setIsBroadcastOpen(false)}
         onSent={() => showToast('Broadcast sent', 'Centre alert is now active.')}
+      />
+
+      {/* Global command palette — Ctrl/Cmd-K from anywhere */}
+      <CommandPalette
+        onNavigateTab={navigateToTab}
+        onOpenTicket={(id) => setSelectedTicketId(id)}
       />
     </>
   );

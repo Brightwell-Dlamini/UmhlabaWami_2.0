@@ -9,11 +9,18 @@ import {
   CheckCircle2,
   Clock,
   Loader2,
+  X,
+  User,
 } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { tickets as ticketsApi } from '../../services/api/tickets';
+import { profiles as profilesApi } from '../../services/api/profiles';
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
+import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 import { useRealtime } from '../../hooks/useRealtime';
+import { useConfirm } from '../ui/ConfirmDialog';
+import { useToast } from '../ui/ToastProvider';
+import { Modal } from '../ui/Modal';
 
 interface Props {
   onViewTicket: (id: string) => void;
@@ -43,19 +50,37 @@ const CHIP_TONES: Record<StatusChip['tone'], { text: string; bg: string }> = {
   emerald: { text: 'text-emerald-600 dark:text-emerald-400', bg: 'hover:border-emerald-400' },
 };
 
-export const TicketsListView: React.FC<Props> = ({ onViewTicket, onOpenCreateTicket }) => {
+export const TicketsListView: React.FC<Props> = ({
+  onViewTicket,
+  onOpenCreateTicket,
+}) => {
   const currentUser = auth.getCurrentUser();
   const orgId = currentUser?.organization_id ?? '';
+  const toast = useToast();
+  const { confirm } = useConfirm();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
   const [priorityFilter, setPriorityFilter] = useState<string>('All');
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showBulkAssign, setShowBulkAssign] = useState(false);
+
+  const canBulk = currentUser?.role === 'admin' || currentUser?.role === 'property_manager' || currentUser?.role === 'super_admin';
 
   const { data: allTickets = [], loading, error } = useSupabaseQuery(
     ['tickets', 'lite', orgId],
     () => ticketsApi.listLite(),
     { enabled: !!orgId }
+  );
+
+  const { data: technicians = [] } = useSupabaseQuery(
+    ['profiles', 'technicians', orgId],
+    () =>
+      profilesApi
+        .list()
+        .then((list) => list.filter((u) => u.role === 'maintenance')),
+    { enabled: !!orgId && canBulk }
   );
 
   useRealtime({
@@ -90,14 +115,46 @@ export const TicketsListView: React.FC<Props> = ({ onViewTicket, onOpenCreateTic
   const counts = useMemo(
     () => ({
       open: allTickets.filter((t) => t.status === 'Open').length,
-      emergency: allTickets.filter((t) => t.priority === 'Emergency' && t.status !== 'Closed').length,
+      emergency: allTickets.filter(
+        (t) => t.priority === 'Emergency' && t.status !== 'Closed'
+      ).length,
       progress: allTickets.filter((t) => t.status === 'In Progress').length,
-      resolved: allTickets.filter((t) => t.status === 'Resolved' || t.status === 'Closed').length,
+      resolved: allTickets.filter(
+        (t) => t.status === 'Resolved' || t.status === 'Closed'
+      ).length,
     }),
     [allTickets]
   );
 
+  // ----- Bulk mutations -----
+  const bulkAssign = useSupabaseMutation({
+    mutationFn: async ({ ids, techId, techName }: { ids: string[]; techId: string; techName: string }) => {
+      const results = await Promise.allSettled(
+        ids.map((id) => ticketsApi.assign(id, techId, techName))
+      );
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      return { total: ids.length, failed };
+    },
+    invalidateKeys: ['tickets', 'notifications'],
+  });
+
+  const bulkResolve = useSupabaseMutation({
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(
+        ids.map((id) =>
+          ticketsApi.resolve(id, {
+            repair_notes: 'Bulk-resolved by operations.',
+          })
+        )
+      );
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      return { total: ids.length, failed };
+    },
+    invalidateKeys: ['tickets', 'notifications', 'finance_transactions'],
+  });
+
   const handleChipClick = (chip: StatusChip) => {
+    setSelected(new Set());
     if (chip.priority) {
       setPriorityFilter(chip.priority);
       setStatusFilter('All');
@@ -112,10 +169,77 @@ export const TicketsListView: React.FC<Props> = ({ onViewTicket, onOpenCreateTic
     setPriorityFilter('All');
     setCategoryFilter('All');
     setSearchQuery('');
+    setSelected(new Set());
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllVisible = () => {
+    if (selected.size === displayedTickets.length && displayedTickets.length > 0) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(displayedTickets.map((t) => t.id)));
+    }
+  };
+
+  const clearSelection = () => setSelected(new Set());
+
+  const handleBulkAssign = async (techId: string, techName: string) => {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    try {
+      const res = await bulkAssign.mutate({ ids, techId, techName });
+      if (res.failed === 0) {
+        toast.success(`Assigned ${res.total} ticket${res.total === 1 ? '' : 's'}`, `to ${techName}.`);
+      } else {
+        toast.info('Partial success', `${res.total - res.failed} of ${res.total} assigned to ${techName}.`);
+      }
+      clearSelection();
+      setShowBulkAssign(false);
+    } catch (e) {
+      toast.error('Bulk assign failed', e instanceof Error ? e.message : 'Try again.');
+    }
+  };
+
+  const handleBulkResolve = async () => {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    const ok = await confirm({
+      title: `Mark ${ids.length} ticket${ids.length === 1 ? '' : 's'} as resolved?`,
+      message:
+        'Tenants will be prompted to confirm. Tickets already resolved or closed will be skipped.',
+      confirmLabel: 'Resolve all',
+      tone: 'warning',
+    });
+    if (!ok) return;
+    try {
+      const res = await bulkResolve.mutate(ids);
+      if (res.failed === 0) {
+        toast.success(`Resolved ${res.total} ticket${res.total === 1 ? '' : 's'}`);
+      } else {
+        toast.info('Partial success', `${res.total - res.failed} of ${res.total} resolved.`);
+      }
+      clearSelection();
+    } catch (e) {
+      toast.error('Bulk resolve failed', e instanceof Error ? e.message : 'Try again.');
+    }
   };
 
   const hasActiveFilters =
-    statusFilter !== 'All' || priorityFilter !== 'All' || categoryFilter !== 'All' || searchQuery.trim() !== '';
+    statusFilter !== 'All' ||
+    priorityFilter !== 'All' ||
+    categoryFilter !== 'All' ||
+    searchQuery.trim() !== '';
+
+  const allVisibleSelected =
+    displayedTickets.length > 0 && selected.size === displayedTickets.length;
 
   return (
     <div className="space-y-6 pb-12">
@@ -148,10 +272,10 @@ export const TicketsListView: React.FC<Props> = ({ onViewTicket, onOpenCreateTic
             chip.key === 'open'
               ? counts.open
               : chip.key === 'emergency'
-              ? counts.emergency
-              : chip.key === 'progress'
-              ? counts.progress
-              : counts.resolved;
+                ? counts.emergency
+                : chip.key === 'progress'
+                  ? counts.progress
+                  : counts.resolved;
           const tone = CHIP_TONES[chip.tone];
           return (
             <button
@@ -182,27 +306,90 @@ export const TicketsListView: React.FC<Props> = ({ onViewTicket, onOpenCreateTic
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-2.5 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-2.5 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          >
             <option value="All">All Statuses</option>
-            <option>Open</option><option>In Progress</option><option>Resolved</option><option>Closed</option><option>Reopened</option>
+            <option>Open</option>
+            <option>In Progress</option>
+            <option>Resolved</option>
+            <option>Closed</option>
+            <option>Reopened</option>
           </select>
-          <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}
-            className="px-2.5 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+          <select
+            value={priorityFilter}
+            onChange={(e) => setPriorityFilter(e.target.value)}
+            className="px-2.5 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          >
             <option value="All">All Priorities</option>
-            <option>Emergency</option><option>High</option><option>Medium</option><option>Low</option>
+            <option>Emergency</option>
+            <option>High</option>
+            <option>Medium</option>
+            <option>Low</option>
           </select>
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
-            className="px-2.5 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="px-2.5 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          >
             <option value="All">All Categories</option>
-            <option>Plumbing</option><option>Electrical</option><option>Air Conditioning</option>
-            <option>Water Leak</option><option>Structural Damage</option><option>Security</option>
+            <option>Plumbing</option>
+            <option>Electrical</option>
+            <option>Air Conditioning</option>
+            <option>Water Leak</option>
+            <option>Structural Damage</option>
+            <option>Security</option>
           </select>
           {hasActiveFilters && (
-            <button onClick={clearFilters} className="px-3 py-2 text-xs font-semibold text-slate-600" type="button">Clear</button>
+            <button
+              onClick={clearFilters}
+              className="px-3 py-2 text-xs font-semibold text-slate-600"
+              type="button"
+            >
+              Clear
+            </button>
           )}
         </div>
       </div>
+
+      {/* Bulk action bar */}
+      {canBulk && selected.size > 0 && (
+        <div className="p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/50 flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="p-1 rounded-lg text-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900/50"
+              aria-label="Clear selection"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <span className="text-xs font-bold text-blue-900 dark:text-blue-200">
+              {selected.size} ticket{selected.size === 1 ? '' : 's'} selected
+            </span>
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              type="button"
+              onClick={() => setShowBulkAssign(true)}
+              disabled={bulkAssign.loading}
+              className="px-3 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-xl flex items-center gap-1.5"
+            >
+              <User className="w-3.5 h-3.5" /> Assign
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkResolve}
+              disabled={bulkResolve.loading}
+              className="px-3 py-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl flex items-center gap-1.5"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" /> Resolve
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
         {loading && displayedTickets.length === 0 ? (
@@ -212,75 +399,198 @@ export const TicketsListView: React.FC<Props> = ({ onViewTicket, onOpenCreateTic
         ) : error ? (
           <div className="p-12 text-center text-red-500 text-xs">{error.message}</div>
         ) : displayedTickets.length === 0 ? (
-          <div className="p-12 text-center text-slate-400 text-xs">No tickets match your filter criteria.</div>
-        ) : (
-          <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
-            {displayedTickets.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => onViewTicket(t.id)}
-                className="w-full text-left p-4 hover:bg-slate-50/80 dark:hover:bg-slate-700/40 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                type="button"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <span className="font-mono text-[10px] font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">
-                      {t.ticket_number}
-                    </span>
-                    <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                        t.priority === 'Emergency'
-                          ? 'bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300'
-                          : t.priority === 'High'
-                          ? 'bg-orange-100 text-orange-800'
-                          : t.priority === 'Medium'
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-slate-100 text-slate-600'
-                      }`}
-                    >
-                      {t.priority}
-                    </span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
-                      {t.status}
-                    </span>
-                  </div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">{t.title}</h3>
-                  <p className="text-xs text-slate-500 truncate mt-0.5">{t.description}</p>
-                </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <div className="text-right">
-                    <div className="text-[10px] text-slate-500">SLA</div>
-                    <div
-                      className={`text-[11px] font-bold ${
-                        t.sla_status === 'Compliant'
-                          ? 'text-emerald-600'
-                          : t.sla_status === 'Warning'
-                          ? 'text-amber-600'
-                          : 'text-red-600'
-                      }`}
-                    >
-                      {t.sla_status}
-                    </div>
-                    {t.resolution_deadline &&
-                      t.status !== 'Resolved' &&
-                      t.status !== 'Closed' && (
-                        <div className="text-[10px] text-slate-400 mt-0.5">
-                          {(() => {
-                            const hrs = Math.round(
-                              (new Date(t.resolution_deadline).getTime() - Date.now()) / 3600000
-                            );
-                            return hrs >= 0 ? `${hrs}h left` : `${Math.abs(hrs)}h overdue`;
-                          })()}
-                        </div>
-                      )}
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-slate-400" />
-                </div>
-              </button>
-            ))}
+          <div className="p-12 text-center text-slate-400 text-xs">
+            No tickets match your filter criteria.
           </div>
+        ) : (
+          <>
+            {canBulk && (
+              <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900/40 border-b border-slate-100 dark:border-slate-700/60 flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  onChange={toggleAllVisible}
+                  className="w-3.5 h-3.5 rounded"
+                  aria-label="Select all visible tickets"
+                />
+                <span className="text-[11px] text-slate-500">
+                  {allVisibleSelected
+                    ? 'Deselect all'
+                    : `Select all ${displayedTickets.length}`}
+                </span>
+              </div>
+            )}
+            <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
+              {displayedTickets.map((t) => (
+                <div
+                  key={t.id}
+                  className={`flex items-stretch ${
+                    selected.has(t.id) ? 'bg-blue-50/60 dark:bg-blue-950/20' : ''
+                  }`}
+                >
+                  {canBulk && (
+                    <div className="pl-4 flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(t.id)}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          toggleSelected(t.id);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-3.5 h-3.5 rounded"
+                        aria-label={`Select ${t.ticket_number}`}
+                      />
+                    </div>
+                  )}
+                  <button
+                    onClick={() => onViewTicket(t.id)}
+                    className="flex-1 text-left p-4 hover:bg-slate-50/80 dark:hover:bg-slate-700/40 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    type="button"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2 mb-1">
+                        <span className="font-mono text-[10px] font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">
+                          {t.ticket_number}
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            t.priority === 'Emergency'
+                              ? 'bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300'
+                              : t.priority === 'High'
+                                ? 'bg-orange-100 text-orange-800'
+                                : t.priority === 'Medium'
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {t.priority}
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                          {t.status}
+                        </span>
+                      </div>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                        {t.title}
+                      </h3>
+                      <p className="text-xs text-slate-500 truncate mt-0.5">
+                        {t.description}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <div className="text-right">
+                        <div className="text-[10px] text-slate-500">SLA</div>
+                        <div
+                          className={`text-[11px] font-bold ${
+                            t.sla_status === 'Compliant'
+                              ? 'text-emerald-600'
+                              : t.sla_status === 'Warning'
+                                ? 'text-amber-600'
+                                : 'text-red-600'
+                          }`}
+                        >
+                          {t.sla_status}
+                        </div>
+                        {t.resolution_deadline &&
+                          t.status !== 'Resolved' &&
+                          t.status !== 'Closed' && (
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              {(() => {
+                                const hrs = Math.round(
+                                  (new Date(t.resolution_deadline).getTime() - Date.now()) / 3600000
+                                );
+                                return hrs >= 0 ? `${hrs}h left` : `${Math.abs(hrs)}h overdue`;
+                              })()}
+                            </div>
+                          )}
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-slate-400" />
+                    </div>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
+
+      {/* Bulk-assign modal */}
+      <BulkAssignModal
+        open={showBulkAssign}
+        technicians={technicians}
+        busy={bulkAssign.loading}
+        count={selected.size}
+        onCancel={() => setShowBulkAssign(false)}
+        onAssign={handleBulkAssign}
+      />
     </div>
   );
 };
+
+// ---------------------------------------------------------------------------
+// Bulk assign modal
+// ---------------------------------------------------------------------------
+
+function BulkAssignModal({
+  open,
+  technicians,
+  busy,
+  count,
+  onCancel,
+  onAssign,
+}: {
+  open: boolean;
+  technicians: { id: string; name: string }[];
+  busy: boolean;
+  count: number;
+  onCancel: () => void;
+  onAssign: (techId: string, techName: string) => void;
+}) {
+  const [techId, setTechId] = useState('');
+  React.useEffect(() => {
+    if (open) setTechId('');
+  }, [open]);
+
+  const tech = technicians.find((t) => t.id === techId);
+
+  return (
+    <Modal
+      open={open}
+      onClose={onCancel}
+      size="sm"
+      title={`Assign ${count} ticket${count === 1 ? '' : 's'}`}
+      icon={<User className="w-5 h-5 text-blue-600" />}
+    >
+      <div className="space-y-3 text-xs">
+        <p className="text-slate-500">
+          Pick a technician. Tickets already closed or resolved will be skipped automatically.
+        </p>
+        <select
+          value={techId}
+          onChange={(e) => setTechId(e.target.value)}
+          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+        >
+          <option value="">-- Choose technician --</option>
+          {technicians.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+        <div className="pt-3 border-t flex justify-end gap-2">
+          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border">
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!tech || busy}
+            onClick={() => tech && onAssign(tech.id, tech.name)}
+            className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold"
+          >
+            {busy ? 'Assigning…' : 'Assign all'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}

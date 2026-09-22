@@ -5,6 +5,8 @@ import {
   Trash2,
   Download,
   Search,
+  Send,
+  X,
 } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { invoices as invoiceApi } from '../../services/api/invoices';
@@ -14,11 +16,13 @@ import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 import { useRealtime } from '../../hooks/useRealtime';
 import { generateInvoicePdf } from '../../services/pdf';
+import { useInvoiceStatusSync } from '../../hooks/useInvoiceStatusSync';
+import { downloadCsv } from '../../services/api/_export';
 import type { Invoice, PaymentRecord } from '../../types';
 import { Modal } from '../ui/Modal';
 import { useConfirm } from '../ui/ConfirmDialog';
 import { useToast } from '../ui/ToastProvider';
-import { EmptyState } from '../ui/EmptyState';import { useInvoiceStatusSync } from '../../hooks/useInvoiceStatusSync';
+import { EmptyState } from '../ui/EmptyState';
 
 const STATUS_FILTERS = [
   'All', 'Draft', 'Sent', 'Partially Paid', 'Paid', 'Overdue', 'Cancelled',
@@ -52,6 +56,9 @@ export function InvoicesTab() {
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState<PaymentRecord['method']>('EFT');
   const [payRef, setPayRef] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  useInvoiceStatusSync({ orgId });
 
   const { data: invoices = [] } = useSupabaseQuery(
     ['invoices', orgId],
@@ -68,7 +75,6 @@ export function InvoicesTab() {
     () => shopsApi.list(),
     { enabled: !!orgId }
   );
-useInvoiceStatusSync({ orgId });
 
   useRealtime({
     table: 'invoices',
@@ -76,7 +82,6 @@ useInvoiceStatusSync({ orgId });
     invalidateKeys: ['invoices'],
     enabled: !!orgId,
   });
-
 
   const recordPayment = useSupabaseMutation({
     mutationFn: ({
@@ -133,6 +138,25 @@ useInvoiceStatusSync({ orgId });
       return true;
     });
   }, [invoices, statusFilter, search]);
+
+  const allVisibleSelected =
+    filtered.length > 0 && selected.size === filtered.length;
+
+  const toggleSelected = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllVisible = () => {
+    if (allVisibleSelected) setSelected(new Set());
+    else setSelected(new Set(filtered.map((i) => i.id)));
+  };
+
+  const clearSelection = () => setSelected(new Set());
 
   const handlePdf = (inv: Invoice) => {
     const currentOrg = auth.getCurrentOrganization();
@@ -196,7 +220,8 @@ useInvoiceStatusSync({ orgId });
   const handleDelete = async (inv: Invoice) => {
     const ok = await confirm({
       title: `Delete invoice ${inv.invoice_number}?`,
-      message: 'This cannot be undone. Payment history attached to this invoice will be orphaned.',
+      message:
+        'This cannot be undone. Payment history attached to this invoice will be orphaned.',
       confirmLabel: 'Delete invoice',
       tone: 'danger',
     });
@@ -212,6 +237,51 @@ useInvoiceStatusSync({ orgId });
     }
   };
 
+  const handleExportSelected = () => {
+    const rows = invoices.filter((i) => selected.has(i.id));
+    if (rows.length === 0) return;
+    downloadCsv(
+      `invoices-selected-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        ['Invoice', 'Tenant', 'Unit', 'Issue Date', 'Due Date', 'Status', 'Total', 'Paid', 'Balance'],
+        ...rows.map((i) => [
+          i.invoice_number,
+          i.tenant_name,
+          i.shop_number ?? '',
+          i.issue_date,
+          i.due_date,
+          i.status,
+          i.total,
+          i.amount_paid,
+          i.total - i.amount_paid,
+        ]),
+      ]
+    );
+    toast.success(`Exported ${rows.length} invoice${rows.length === 1 ? '' : 's'}`);
+    clearSelection();
+  };
+
+  const handleExportAll = () => {
+    downloadCsv(
+      `invoices-all-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        ['Invoice', 'Tenant', 'Unit', 'Issue Date', 'Due Date', 'Status', 'Total', 'Paid', 'Balance'],
+        ...filtered.map((i) => [
+          i.invoice_number,
+          i.tenant_name,
+          i.shop_number ?? '',
+          i.issue_date,
+          i.due_date,
+          i.status,
+          i.total,
+          i.amount_paid,
+          i.total - i.amount_paid,
+        ]),
+      ]
+    );
+    toast.success(`Exported ${filtered.length} invoice${filtered.length === 1 ? '' : 's'}`);
+  };
+
   if (!orgId) {
     return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
   }
@@ -221,17 +291,28 @@ useInvoiceStatusSync({ orgId });
       <div className="p-4 border-b bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-center justify-between flex-wrap gap-3">
         <div>
           <h3 className="font-bold text-sm">Invoices</h3>
-          <p className="text-xs text-slate-500">Generate, send, and reconcile invoices for your tenants</p>
+          <p className="text-xs text-slate-500">
+            Generate, send, and reconcile invoices for your tenants
+          </p>
         </div>
-        <button
-          onClick={handleBulkGenerate}
-          disabled={bulkGenerate.loading}
-          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl flex items-center gap-1.5"
-          type="button"
-        >
-          <PlusCircle className="w-4 h-4" />
-          {bulkGenerate.loading ? 'Generating…' : 'Generate rent invoices'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExportAll}
+            className="px-3 py-1.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-xl flex items-center gap-1.5 hover:bg-slate-100 dark:hover:bg-slate-600"
+            type="button"
+          >
+            <Download className="w-3.5 h-3.5" /> Export all
+          </button>
+          <button
+            onClick={handleBulkGenerate}
+            disabled={bulkGenerate.loading}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl flex items-center gap-1.5"
+            type="button"
+          >
+            <PlusCircle className="w-4 h-4" />
+            {bulkGenerate.loading ? 'Generating…' : 'Generate rent invoices'}
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
@@ -251,16 +332,66 @@ useInvoiceStatusSync({ orgId });
           className="px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
         >
           {STATUS_FILTERS.map((s) => (
-            <option key={s} value={s}>{s === 'All' ? 'All statuses' : s}</option>
+            <option key={s} value={s}>
+              {s === 'All' ? 'All statuses' : s}
+            </option>
           ))}
         </select>
       </div>
+
+      {selected.size > 0 && (
+        <div className="p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/50 flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="p-1 rounded-lg text-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900/50"
+              aria-label="Clear selection"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <span className="text-xs font-bold text-blue-900 dark:text-blue-200">
+              {selected.size} invoice{selected.size === 1 ? '' : 's'} selected
+            </span>
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              type="button"
+              onClick={handleExportSelected}
+              className="px-3 py-1.5 text-xs font-bold bg-white dark:bg-slate-800 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 rounded-xl flex items-center gap-1.5"
+            >
+              <Download className="w-3.5 h-3.5" /> Export CSV
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                toast.info(
+                  'Reminders queued',
+                  `${selected.size} reminder${selected.size === 1 ? '' : 's'} will be sent. (Wire to reminders API in Phase 6.)`
+                )
+              }
+              className="px-3 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl flex items-center gap-1.5"
+            >
+              <Send className="w-3.5 h-3.5" /> Send reminders
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 dark:bg-slate-900/60 text-[10px] uppercase text-slate-500">
               <tr>
+                <th className="px-4 py-3 w-8">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={toggleAllVisible}
+                    className="w-3.5 h-3.5 rounded"
+                    aria-label="Select all visible invoices"
+                  />
+                </th>
                 <th className="px-4 py-3">Invoice</th>
                 <th className="px-4 py-3">Tenant</th>
                 <th className="px-4 py-3">Unit</th>
@@ -275,7 +406,7 @@ useInvoiceStatusSync({ orgId });
             <tbody className="divide-y">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={10}>
                     <EmptyState
                       icon={<FileText className="w-5 h-5" />}
                       title="No invoices match your filters"
@@ -285,23 +416,57 @@ useInvoiceStatusSync({ orgId });
                 </tr>
               ) : (
                 filtered.map((inv) => (
-                  <tr key={inv.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30">
-                    <td className="px-4 py-3 font-mono text-[11px] font-bold">{inv.invoice_number}</td>
+                  <tr
+                    key={inv.id}
+                    className={`hover:bg-slate-50/60 dark:hover:bg-slate-700/30 ${
+                      selected.has(inv.id) ? 'bg-blue-50/60 dark:bg-blue-950/20' : ''
+                    }`}
+                  >
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(inv.id)}
+                        onChange={() => toggleSelected(inv.id)}
+                        className="w-3.5 h-3.5 rounded"
+                        aria-label={`Select ${inv.invoice_number}`}
+                      />
+                    </td>
+                    <td className="px-4 py-3 font-mono text-[11px] font-bold">
+                      {inv.invoice_number}
+                    </td>
                     <td className="px-4 py-3">{inv.tenant_name}</td>
                     <td className="px-4 py-3">{inv.shop_number ?? '—'}</td>
                     <td className="px-4 py-3 text-slate-500">{inv.issue_date}</td>
                     <td className="px-4 py-3 text-slate-500">{inv.due_date}</td>
                     <td className="px-4 py-3">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusTone(inv.status)}`}>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusTone(inv.status)}`}
+                      >
                         {inv.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right font-bold tabular-nums">E{inv.total.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">E{inv.amount_paid.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right font-bold tabular-nums">
+                      E{inv.total.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      E{inv.amount_paid.toLocaleString()}
+                    </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-3">
-                        <button onClick={() => handlePdf(inv)} className="text-[11px] font-semibold text-slate-600 hover:underline" type="button">PDF</button>
-                        <button onClick={() => setViewingInvoice(inv)} className="text-[11px] font-semibold text-blue-600 hover:underline" type="button">View</button>
+                        <button
+                          onClick={() => handlePdf(inv)}
+                          className="text-[11px] font-semibold text-slate-600 hover:underline"
+                          type="button"
+                        >
+                          PDF
+                        </button>
+                        <button
+                          onClick={() => setViewingInvoice(inv)}
+                          className="text-[11px] font-semibold text-blue-600 hover:underline"
+                          type="button"
+                        >
+                          View
+                        </button>
                         {inv.status !== 'Paid' && inv.status !== 'Cancelled' && (
                           <button
                             onClick={() => openPayModal(inv)}
@@ -312,7 +477,12 @@ useInvoiceStatusSync({ orgId });
                             Record payment
                           </button>
                         )}
-                        <button onClick={() => handleDelete(inv)} disabled={deleteInvoice.loading} className="p-1 text-slate-400 hover:text-red-500" type="button">
+                        <button
+                          onClick={() => handleDelete(inv)}
+                          disabled={deleteInvoice.loading}
+                          className="p-1 text-slate-400 hover:text-red-500"
+                          type="button"
+                        >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -326,7 +496,11 @@ useInvoiceStatusSync({ orgId });
       </div>
 
       {viewingInvoice && (
-        <InvoiceViewer invoice={viewingInvoice} shops={shops} onClose={() => setViewingInvoice(null)} />
+        <InvoiceViewer
+          invoice={viewingInvoice}
+          shops={shops}
+          onClose={() => setViewingInvoice(null)}
+        />
       )}
 
       <Modal
@@ -356,7 +530,9 @@ useInvoiceStatusSync({ orgId });
                   onChange={(e) => setPayAmount(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
                 />
-                <p className="text-[10px] text-slate-400 mt-1">Enter less than the balance for a partial payment.</p>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Enter less than the balance for a partial payment.
+                </p>
               </div>
               <div>
                 <label className="block font-semibold mb-1">Method</label>
@@ -381,7 +557,13 @@ useInvoiceStatusSync({ orgId });
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-2 border-t">
-              <button type="button" onClick={() => setPayModal(null)} className="px-4 py-2 rounded-xl border text-xs font-semibold">Cancel</button>
+              <button
+                type="button"
+                onClick={() => setPayModal(null)}
+                className="px-4 py-2 rounded-xl border text-xs font-semibold"
+              >
+                Cancel
+              </button>
               <button
                 type="button"
                 onClick={() => void handleRecordPayment()}
@@ -463,16 +645,22 @@ function InvoiceViewer({
               {invoice.lines.map((l) => (
                 <tr key={l.id}>
                   <td className="p-2.5">{l.description}</td>
-                  <td className="p-2.5 text-right font-semibold">E{l.amount.toLocaleString()}</td>
+                  <td className="p-2.5 text-right font-semibold">
+                    E{l.amount.toLocaleString()}
+                  </td>
                 </tr>
               ))}
               <tr className="bg-slate-50 dark:bg-slate-800/40 font-bold">
                 <td className="p-2.5 text-right">Total</td>
-                <td className="p-2.5 text-right text-blue-600">E{invoice.total.toLocaleString()}</td>
+                <td className="p-2.5 text-right text-blue-600">
+                  E{invoice.total.toLocaleString()}
+                </td>
               </tr>
               <tr className="bg-slate-50 dark:bg-slate-800/40">
                 <td className="p-2.5 text-right text-slate-500">Paid</td>
-                <td className="p-2.5 text-right">E{invoice.amount_paid.toLocaleString()}</td>
+                <td className="p-2.5 text-right">
+                  E{invoice.amount_paid.toLocaleString()}
+                </td>
               </tr>
               {invoice.total - invoice.amount_paid > 0 && (
                 <tr className="bg-amber-50 dark:bg-amber-950/40 font-bold">
@@ -489,7 +677,9 @@ function InvoiceViewer({
           <div className="font-bold">Banking details</div>
           <div>Bank: {bank.bank}</div>
           {bank.accountName && <div>Account name: {bank.accountName}</div>}
-          <div>Account #: {bank.account} • Branch: {bank.branch}</div>
+          <div>
+            Account #: {bank.account} • Branch: {bank.branch}
+          </div>
           <div className="text-slate-400">Ref: {invoice.invoice_number}</div>
         </div>
         <div className="flex justify-end gap-2 pt-2 border-t">
