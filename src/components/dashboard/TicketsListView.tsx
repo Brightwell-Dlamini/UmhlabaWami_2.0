@@ -30,60 +30,20 @@ type StatusChip = {
 };
 
 const STATUS_CHIPS: StatusChip[] = [
-  {
-    key: 'open',
-    label: 'Open Tickets',
-    value: 'Open',
-    tone: 'amber',
-    icon: AlertTriangle,
-  },
-  {
-    key: 'emergency',
-    label: 'Active Emergencies',
-    value: null,
-    priority: 'Emergency',
-    tone: 'red',
-    icon: AlertTriangle,
-  },
-  {
-    key: 'progress',
-    label: 'In Progress',
-    value: 'In Progress',
-    tone: 'blue',
-    icon: Clock,
-  },
-  {
-    key: 'resolved',
-    label: 'Resolved / Closed',
-    value: 'Resolved',
-    tone: 'emerald',
-    icon: CheckCircle2,
-  },
+  { key: 'open', label: 'Open Tickets', value: 'Open', tone: 'amber', icon: AlertTriangle },
+  { key: 'emergency', label: 'Active Emergencies', value: null, priority: 'Emergency', tone: 'red', icon: AlertTriangle },
+  { key: 'progress', label: 'In Progress', value: 'In Progress', tone: 'blue', icon: Clock },
+  { key: 'resolved', label: 'Resolved / Closed', value: 'Resolved', tone: 'emerald', icon: CheckCircle2 },
 ];
 
 const CHIP_TONES: Record<StatusChip['tone'], { text: string; bg: string }> = {
-  amber: {
-    text: 'text-amber-600 dark:text-amber-400',
-    bg: 'hover:border-amber-400',
-  },
-  red: {
-    text: 'text-red-600 dark:text-red-400',
-    bg: 'hover:border-red-400',
-  },
-  blue: {
-    text: 'text-blue-600 dark:text-blue-400',
-    bg: 'hover:border-blue-400',
-  },
-  emerald: {
-    text: 'text-emerald-600 dark:text-emerald-400',
-    bg: 'hover:border-emerald-400',
-  },
+  amber: { text: 'text-amber-600 dark:text-amber-400', bg: 'hover:border-amber-400' },
+  red: { text: 'text-red-600 dark:text-red-400', bg: 'hover:border-red-400' },
+  blue: { text: 'text-blue-600 dark:text-blue-400', bg: 'hover:border-blue-400' },
+  emerald: { text: 'text-emerald-600 dark:text-emerald-400', bg: 'hover:border-emerald-400' },
 };
 
-export const TicketsListView: React.FC<Props> = ({
-  onViewTicket,
-  onOpenCreateTicket,
-}) => {
+export const TicketsListView: React.FC<Props> = ({ onViewTicket, onOpenCreateTicket }) => {
   const currentUser = auth.getCurrentUser();
   const orgId = currentUser?.organization_id ?? '';
 
@@ -109,17 +69,12 @@ export const TicketsListView: React.FC<Props> = ({
     return allTickets.filter((t) => {
       if (currentUser?.role === 'tenant') {
         const mineByUser = t.created_by_user_id === currentUser.id;
-        const mineByShop =
-          !!currentUser.shop_id && t.shop_id === currentUser.shop_id;
+        const mineByShop = !!currentUser.shop_id && t.shop_id === currentUser.shop_id;
         if (!mineByUser && !mineByShop) return false;
       }
       if (statusFilter !== 'All' && t.status !== statusFilter) return false;
-      if (priorityFilter !== 'All' && t.priority !== priorityFilter) {
-        return false;
-      }
-      if (categoryFilter !== 'All' && t.category !== categoryFilter) {
-        return false;
-      }
+      if (priorityFilter !== 'All' && t.priority !== priorityFilter) return false;
+      if (categoryFilter !== 'All' && t.category !== categoryFilter) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         return (
@@ -130,25 +85,14 @@ export const TicketsListView: React.FC<Props> = ({
       }
       return true;
     });
-  }, [
-    allTickets,
-    currentUser,
-    statusFilter,
-    priorityFilter,
-    categoryFilter,
-    searchQuery,
-  ]);
+  }, [allTickets, currentUser, statusFilter, priorityFilter, categoryFilter, searchQuery]);
 
   const counts = useMemo(
     () => ({
       open: allTickets.filter((t) => t.status === 'Open').length,
-      emergency: allTickets.filter(
-        (t) => t.priority === 'Emergency' && t.status !== 'Closed'
-      ).length,
+      emergency: allTickets.filter((t) => t.priority === 'Emergency' && t.status !== 'Closed').length,
       progress: allTickets.filter((t) => t.status === 'In Progress').length,
-      resolved: allTickets.filter(
-        (t) => t.status === 'Resolved' || t.status === 'Closed'
-      ).length,
+      resolved: allTickets.filter((t) => t.status === 'Resolved' || t.status === 'Closed').length,
     }),
     [allTickets]
   );
@@ -171,10 +115,7 @@ export const TicketsListView: React.FC<Props> = ({
   };
 
   const hasActiveFilters =
-    statusFilter !== 'All' ||
-    priorityFilter !== 'All' ||
-    categoryFilter !== 'All' ||
-    searchQuery.trim() !== '';
+    statusFilter !== 'All' || priorityFilter !== 'All' || categoryFilter !== 'All' || searchQuery.trim() !== '';
 
   return (
     <div className="space-y-6 pb-12">
@@ -183,15 +124,13 @@ export const TicketsListView: React.FC<Props> = ({
           <div className="flex items-center gap-2">
             <TicketIcon className="w-5 h-5 text-blue-600" />
             <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
-              Tickets &amp; SLA Operations Desk
+              Tickets & SLA Operations Desk
             </h1>
           </div>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Track, assign, and resolve commercial maintenance requests with
-            live SLA monitoring
+            Track, assign, and resolve commercial maintenance requests with live SLA monitoring
           </p>
         </div>
-
         <button
           onClick={onOpenCreateTicket}
           className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs sm:text-sm font-semibold shadow-md shadow-blue-500/20 transition flex items-center justify-center gap-2"
@@ -222,14 +161,10 @@ export const TicketsListView: React.FC<Props> = ({
               type="button"
             >
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-slate-500 font-medium">
-                  {chip.label}
-                </span>
+                <span className="text-xs text-slate-500 font-medium">{chip.label}</span>
                 <Icon className={`w-4 h-4 ${tone.text}`} />
               </div>
-              <div className={`text-2xl font-bold ${tone.text}`}>
-                {value}
-              </div>
+              <div className={`text-2xl font-bold ${tone.text}`}>{value}</div>
             </button>
           );
         })}
@@ -246,52 +181,25 @@ export const TicketsListView: React.FC<Props> = ({
             className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
           />
         </div>
-
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-2.5 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-          >
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-2.5 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
             <option value="All">All Statuses</option>
-            <option>Open</option>
-            <option>In Progress</option>
-            <option>Resolved</option>
-            <option>Closed</option>
-            <option>Reopened</option>
+            <option>Open</option><option>In Progress</option><option>Resolved</option><option>Closed</option><option>Reopened</option>
           </select>
-          <select
-            value={priorityFilter}
-            onChange={(e) => setPriorityFilter(e.target.value)}
-            className="px-2.5 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-          >
+          <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}
+            className="px-2.5 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
             <option value="All">All Priorities</option>
-            <option>Emergency</option>
-            <option>High</option>
-            <option>Medium</option>
-            <option>Low</option>
+            <option>Emergency</option><option>High</option><option>Medium</option><option>Low</option>
           </select>
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="px-2.5 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-          >
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
+            className="px-2.5 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
             <option value="All">All Categories</option>
-            <option>Plumbing</option>
-            <option>Electrical</option>
-            <option>Air Conditioning</option>
-            <option>Water Leak</option>
-            <option>Structural Damage</option>
-            <option>Security</option>
+            <option>Plumbing</option><option>Electrical</option><option>Air Conditioning</option>
+            <option>Water Leak</option><option>Structural Damage</option><option>Security</option>
           </select>
           {hasActiveFilters && (
-            <button
-              onClick={clearFilters}
-              className="px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
-              type="button"
-            >
-              Clear
-            </button>
+            <button onClick={clearFilters} className="px-3 py-2 text-xs font-semibold text-slate-600" type="button">Clear</button>
           )}
         </div>
       </div>
@@ -302,13 +210,9 @@ export const TicketsListView: React.FC<Props> = ({
             <Loader2 className="w-4 h-4 animate-spin" /> Loading tickets…
           </div>
         ) : error ? (
-          <div className="p-12 text-center text-red-500 text-xs">
-            {error.message}
-          </div>
+          <div className="p-12 text-center text-red-500 text-xs">{error.message}</div>
         ) : displayedTickets.length === 0 ? (
-          <div className="p-12 text-center text-slate-400 text-xs">
-            No tickets match your filter criteria.
-          </div>
+          <div className="p-12 text-center text-slate-400 text-xs">No tickets match your filter criteria.</div>
         ) : (
           <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
             {displayedTickets.map((t) => (
@@ -340,12 +244,8 @@ export const TicketsListView: React.FC<Props> = ({
                       {t.status}
                     </span>
                   </div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                    {t.title}
-                  </h3>
-                  <p className="text-xs text-slate-500 truncate mt-0.5">
-                    {t.description}
-                  </p>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">{t.title}</h3>
+                  <p className="text-xs text-slate-500 truncate mt-0.5">{t.description}</p>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
                   <div className="text-right">
@@ -361,6 +261,18 @@ export const TicketsListView: React.FC<Props> = ({
                     >
                       {t.sla_status}
                     </div>
+                    {t.resolution_deadline &&
+                      t.status !== 'Resolved' &&
+                      t.status !== 'Closed' && (
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          {(() => {
+                            const hrs = Math.round(
+                              (new Date(t.resolution_deadline).getTime() - Date.now()) / 3600000
+                            );
+                            return hrs >= 0 ? `${hrs}h left` : `${Math.abs(hrs)}h overdue`;
+                          })()}
+                        </div>
+                      )}
                   </div>
                   <ChevronRight className="w-4 h-4 text-slate-400" />
                 </div>
