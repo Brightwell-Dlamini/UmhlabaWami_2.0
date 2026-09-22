@@ -41,8 +41,9 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
 
   const create = useSupabaseMutation({
     mutationFn: (input: Parameters<typeof tenantsApi.create>[0]) => tenantsApi.create(input),
-    invalidateKeys: ['tenants', 'shops'],
+    invalidateKeys: ['tenants', 'shops', 'profiles'],
     onSuccess: (t) => { setFeedback(`Tenant "${t.business_name}" registered.`); setTimeout(() => setFeedback(''), 3000); setShowAdd(false); },
+    onError: (e) => { setFeedback(`Failed: ${e.message}`); setTimeout(() => setFeedback(''), 6000); },
   });
   const update = useSupabaseMutation({
     mutationFn: ({ id, patch }: { id: string; patch: Partial<Tenant> }) => tenantsApi.update(id, patch),
@@ -77,7 +78,7 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Commercial tenants</h1>
-          <p className="text-xs text-slate-500">Occupancies, lease links, portal login linking</p>
+          <p className="text-xs text-slate-500">Occupancies, lease links, portal login — create both in one step</p>
         </div>
         <div className="flex items-center gap-2">
           {onViewLeases && (
@@ -94,7 +95,9 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
       </div>
 
       {feedback && (
-        <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-xl text-xs flex items-center gap-2">
+        <div className={`p-3 rounded-xl text-xs flex items-center gap-2 border ${
+          /fail/i.test(feedback) ? 'bg-red-50 border-red-300 text-red-800' : 'bg-emerald-50 border-emerald-300 text-emerald-800'
+        }`}>
           <CheckCircle2 className="w-4 h-4" /> {feedback}
         </div>
       )}
@@ -157,11 +160,10 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
               {filtered.map((t) => {
                 const shop = shops.find((s) => s.id === t.shop_id);
                 const center = centers.find((c) => c.id === t.shopping_center_id);
-                const linked = t.user_id
-                  ? portalUsers.find((u) => u.id === t.user_id)
-                  : undefined;
+                const linked = t.user_id ? portalUsers.find((u) => u.id === t.user_id) : undefined;
                 return (
-                  <tr key={t.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30">
+                  <tr key={t.id} onClick={() => setEditing(t)}
+                    className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30 cursor-pointer">
                     <td className="py-3 px-4">
                       <div className="font-bold">{t.business_name}</div>
                       <div className="text-[11px] text-slate-400">{t.contact_person}</div>
@@ -190,7 +192,7 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
                         <span className="text-slate-400">Not linked</span>
                       )}
                     </td>
-                    <td className="py-3 px-4 text-right">
+                    <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="flex justify-end gap-1.5">
                         <button onClick={() => setEditing(t)} type="button"
                           className="p-1.5 rounded-lg border text-slate-600 hover:bg-slate-100">
@@ -256,6 +258,10 @@ function TenantForm({
     status: initial?.status ?? 'Active',
     user_id: initial?.user_id ?? '',
   });
+  const [createPortal, setCreatePortal] = useState(false);
+  const [portalPassword, setPortalPassword] = useState('');
+  const [portalBusy, setPortalBusy] = useState(false);
+  const [portalError, setPortalError] = useState<string | null>(null);
 
   const availableShops = shops.filter((s) => s.shopping_center_id === form.shopping_center_id);
   const effectiveShopId = form.shop_id || availableShops[0]?.id || '';
@@ -268,13 +274,37 @@ function TenantForm({
           <h3 className="font-bold text-base">{initial ? 'Edit tenant' : 'Register tenant'}</h3>
           <button type="button" onClick={onCancel}><X className="w-5 h-5 text-slate-400" /></button>
         </div>
-        <form onSubmit={(e) => {
+        <form onSubmit={async (e) => {
           e.preventDefault();
+          setPortalError(null);
+          let linkedUserId = form.user_id || undefined;
+          if (createPortal && !linkedUserId) {
+            if (!form.email) {
+              setPortalError('Email is required to create a portal login.');
+              return;
+            }
+            setPortalBusy(true);
+            try {
+              const result = await profilesApi.addStaff({
+                email: form.email,
+                name: form.contact_person || form.business_name,
+                role: 'tenant',
+                phone: form.phone || undefined,
+                password: portalPassword || undefined,
+              });
+              linkedUserId = result.userId;
+            } catch (err) {
+              setPortalError(err instanceof Error ? err.message : 'Failed to create portal login.');
+              setPortalBusy(false);
+              return;
+            }
+            setPortalBusy(false);
+          }
           onSubmit({
             ...form,
             shop_id: effectiveShopId,
             property_id: shop?.property_id ?? '',
-            user_id: form.user_id || undefined,
+            user_id: linkedUserId,
           });
         }} className="space-y-3 text-xs">
           <div className="grid grid-cols-2 gap-3">
@@ -344,14 +374,10 @@ function TenantForm({
             </div>
           </div>
           <div>
-            <label className="block font-semibold mb-1">
-              Linked portal login (role = tenant)
-            </label>
-            <select
-              value={form.user_id}
+            <label className="block font-semibold mb-1">Linked portal login (role = tenant)</label>
+            <select value={form.user_id}
               onChange={(e) => setForm({ ...form, user_id: e.target.value })}
-              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
-            >
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border">
               <option value="">— not linked —</option>
               {portalUsers.map((u) => (
                 <option key={u.id} value={u.id}>
@@ -360,15 +386,36 @@ function TenantForm({
               ))}
             </select>
             <p className="text-[10px] text-slate-400 mt-1">
-              Link a Staff & Roles user (tenant role) so they can log tickets,
-              see their lease and documents. Create the user first under Staff &
-              Roles if needed.
+              Link an existing portal user, or create one below in the same step.
             </p>
+            {!initial && (
+              <div className="mt-3 p-3 rounded-xl border border-blue-100 dark:border-blue-900/40 bg-blue-50/50 dark:bg-blue-950/20 space-y-2">
+                <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
+                  <input type="checkbox" checked={createPortal}
+                    onChange={(e) => setCreatePortal(e.target.checked)} className="rounded" />
+                  Create portal login now (role = tenant)
+                </label>
+                {createPortal && (
+                  <div>
+                    <label className="block text-[10px] font-semibold mb-1">Temporary password (optional)</label>
+                    <input type="password" value={portalPassword}
+                      onChange={(e) => setPortalPassword(e.target.value)}
+                      placeholder="Leave blank to auto-generate"
+                      className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border text-xs" />
+                    <p className="text-[10px] text-slate-400 mt-1">Uses the email and contact name above.</p>
+                  </div>
+                )}
+                {portalError && (
+                  <div className="text-[11px] text-red-600 font-semibold">{portalError}</div>
+                )}
+              </div>
+            )}
           </div>
           <div className="pt-3 flex justify-end gap-2 border-t">
             <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border">Cancel</button>
-            <button type="submit" className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold">
-              {initial ? 'Save' : 'Create tenant'}
+            <button type="submit" disabled={portalBusy}
+              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold">
+              {portalBusy ? 'Creating…' : initial ? 'Save' : 'Create tenant'}
             </button>
           </div>
         </form>
