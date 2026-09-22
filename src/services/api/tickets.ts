@@ -97,7 +97,7 @@ export const tickets = {
   async assign(ticketId: string, technicianId: string, technicianName: string) {
     const user = requireUser();
     const status = await loadTicketStatus(ticketId);
-    assertStatus(status, ['Open', 'In Progress'], 'assign');
+    assertStatus(status, ['Open', 'In Progress', 'Reopened'], 'assign');
     const { error } = await sb().rpc('assign_ticket', {
       p_ticket_id: ticketId,
       p_technician_id: technicianId,
@@ -110,7 +110,7 @@ export const tickets = {
   async accept(ticketId: string) {
     const user = requireUser();
     const status = await loadTicketStatus(ticketId);
-    assertStatus(status, ['Open'], 'accept');
+    assertStatus(status, ['Open', 'Reopened'], 'accept');
     const { error } = await sb().rpc('accept_ticket', {
       p_ticket_id: ticketId,
       p_actor_name: user.name,
@@ -130,7 +130,7 @@ export const tickets = {
   ) {
     const user = requireUser();
     const status = await loadTicketStatus(ticketId);
-    assertStatus(status, ['In Progress', 'Open'], 'mark as completed');
+    assertStatus(status, ['In Progress', 'Open', 'Reopened'], 'mark as completed');
     const { error } = await sb().rpc('resolve_ticket', {
       p_ticket_id: ticketId,
       p_actor_name: user.name,

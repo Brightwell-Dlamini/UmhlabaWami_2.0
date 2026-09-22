@@ -213,10 +213,8 @@ export const TicketDetailModal: React.FC<Props> = ({
     });
   };
 
-  // Render nothing if no id.
   if (!ticketId) return null;
 
-  // Loading state — still wrapped in <Modal> so chrome is consistent.
   if (loading && !ticket) {
     return (
       <Modal open onClose={onClose} size="lg" bareBody>
@@ -236,6 +234,15 @@ export const TicketDetailModal: React.FC<Props> = ({
     diffMs < 0 &&
     ticket.status !== 'Resolved' &&
     ticket.status !== 'Closed';
+
+  const canAssign =
+    ticket.status === 'Open' ||
+    ticket.status === 'In Progress' ||
+    ticket.status === 'Reopened';
+  const canMaintenanceAct =
+    ticket.status === 'Open' ||
+    ticket.status === 'In Progress' ||
+    ticket.status === 'Reopened';
 
   return (
     <Modal
@@ -326,247 +333,258 @@ export const TicketDetailModal: React.FC<Props> = ({
           </div>
         )}
 
-        {ticket.status === 'Resolved' &&
-          currentUser?.role === 'tenant' && (
-            <div className="p-5 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/40 border-2 border-blue-400 space-y-4">
-              <div className="flex items-center gap-2 text-blue-900 dark:text-blue-200 font-bold text-sm">
-                <ShieldCheck className="w-5 h-5 text-blue-600" />
-                <span>Has the issue been fixed?</span>
-              </div>
+        {ticket.status === 'Resolved' && currentUser?.role === 'tenant' && (
+          <div className="p-5 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/40 border-2 border-blue-400 space-y-4">
+            <div className="flex items-center gap-2 text-blue-900 dark:text-blue-200 font-bold text-sm">
+              <ShieldCheck className="w-5 h-5 text-blue-600" />
+              <span>Has the issue been fixed?</span>
+            </div>
 
-              {!showReopenInput ? (
-                <>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-semibold">Rate:</span>
-                    <div className="flex gap-1">
-                      {[1, 2, 3, 4, 5].map((s) => (
-                        <button
-                          key={s}
-                          onClick={() => setRating(s)}
-                          className="p-1"
-                          type="button"
-                        >
-                          <Star
-                            className={`w-5 h-5 ${
-                              s <= rating
-                                ? 'fill-amber-400 text-amber-400'
-                                : 'text-slate-300'
-                            }`}
-                          />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <input
-                    value={feedback}
-                    onChange={(e) => setFeedback(e.target.value)}
-                    placeholder="Optional feedback"
-                    className="w-full px-3 py-2 bg-white dark:bg-slate-900 rounded-xl border text-xs"
-                  />
-                  <div className="flex gap-3">
-                    <button
-                      onClick={handleConfirm}
-                      disabled={actionBusy || confirm.loading}
-                      className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2"
-                      type="button"
-                    >
-                      <CheckCircle2 className="w-4 h-4" /> Yes, fixed
-                    </button>
-                    <button
-                      onClick={() => setShowReopenInput(true)}
-                      className="py-2.5 px-4 bg-red-100 hover:bg-red-200 text-red-700 font-bold text-xs rounded-xl flex items-center gap-1.5"
-                      type="button"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" /> Reopen
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="p-4 bg-red-50 dark:bg-red-950/40 rounded-xl border border-red-200 space-y-3">
-                  <textarea
-                    rows={2}
-                    value={reopenReason}
-                    onChange={(e) => setReopenReason(e.target.value)}
-                    placeholder="Why is it not fixed?"
-                    className="w-full px-3 py-2 rounded-xl border text-xs"
-                  />
-                  <div className="flex justify-end gap-2">
-                    <button
-                      onClick={() => setShowReopenInput(false)}
-                      className="px-3 py-1.5 text-xs text-slate-600"
-                      type="button"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleReopen}
-                      disabled={
-                        !reopenReason || actionBusy || reopen.loading
-                      }
-                      className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-xs rounded-xl font-semibold"
-                      type="button"
-                    >
-                      Reopen ticket
-                    </button>
+            {!showReopenInput ? (
+              <>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-semibold">Rate:</span>
+                  <div className="flex gap-1">
+                    {[1, 2, 3, 4, 5].map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setRating(s)}
+                        className="p-1"
+                        type="button"
+                      >
+                        <Star
+                          className={`w-5 h-5 ${
+                            s <= rating
+                              ? 'fill-amber-400 text-amber-400'
+                              : 'text-slate-300'
+                          }`}
+                        />
+                      </button>
+                    ))}
                   </div>
                 </div>
-              )}
-            </div>
-          )}
-
-        {currentUser?.role === 'maintenance' &&
-          ticket.status !== 'Closed' &&
-          ticket.status !== 'Resolved' && (
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border space-y-3">
-              <div className="font-bold text-xs flex items-center gap-1.5">
-                <Wrench className="w-4 h-4 text-blue-600" /> Technician
-                actions
-              </div>
-              {ticket.status === 'Open' ? (
-                <button
-                  onClick={handleAccept}
-                  disabled={actionBusy || accept.loading}
-                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold text-xs rounded-xl"
-                  type="button"
-                >
-                  Accept job &amp; mark In Progress
-                </button>
-              ) : (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <input
-                      value={repairNotes}
-                      onChange={(e) => setRepairNotes(e.target.value)}
-                      placeholder="Repair notes"
-                      className="px-3 py-2 rounded-xl border text-xs"
-                    />
-                    <input
-                      value={materialsUsed}
-                      onChange={(e) => setMaterialsUsed(e.target.value)}
-                      placeholder="Materials used"
-                      className="px-3 py-2 rounded-xl border text-xs"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="number"
-                      step="0.5"
-                      value={hoursSpent}
-                      onChange={(e) => setHoursSpent(e.target.value)}
-                      placeholder="Hours"
-                      className="px-3 py-2 rounded-xl border text-xs"
-                    />
-                    <input
-                      type="number"
-                      value={cost}
-                      onChange={(e) => setCost(e.target.value)}
-                      placeholder="Cost (E)"
-                      className="px-3 py-2 rounded-xl border text-xs"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                        After photos
-                      </span>
-                      <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-[11px] font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-600">
-                        <Upload className="w-3 h-3" />
-                        {uploadingAfter ? 'Uploading…' : 'Add photo'}
-                        <input
-                          ref={afterInputRef}
-                          type="file"
-                          accept="image/*"
-                          multiple
-                          disabled={uploadingAfter}
-                          onChange={handleAfterPhotoSelected}
-                          className="hidden"
-                        />
-                      </label>
-                    </div>
-                    {afterPhotoUrls.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {afterPhotoUrls.map((url) => (
-                          <div
-                            key={url}
-                            className="relative w-16 h-16 rounded-lg overflow-hidden border"
-                          >
-                            <img
-                              src={url}
-                              alt="After repair"
-                              className="w-full h-full object-cover"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => removeAfterPhoto(url)}
-                              className="absolute top-0.5 right-0.5 px-1 py-0.5 rounded bg-black/60 text-white text-[10px]"
-                              aria-label="Remove photo"
-                            >
-                              ×
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
+                <input
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                  placeholder="Optional feedback"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 rounded-xl border text-xs"
+                />
+                <div className="flex gap-3">
                   <button
-                    onClick={handleResolve}
-                    disabled={actionBusy || resolve.loading || uploadingAfter}
-                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2"
+                    onClick={handleConfirm}
+                    disabled={actionBusy || confirm.loading}
+                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2"
                     type="button"
                   >
-                    <CheckCircle2 className="w-4 h-4" /> Complete job &amp;
-                    send to tenant
+                    <CheckCircle2 className="w-4 h-4" /> Yes, fixed
+                  </button>
+                  <button
+                    onClick={() => setShowReopenInput(true)}
+                    className="py-2.5 px-4 bg-red-100 hover:bg-red-200 text-red-700 font-bold text-xs rounded-xl flex items-center gap-1.5"
+                    type="button"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Reopen
                   </button>
                 </div>
-              )}
+              </>
+            ) : (
+              <div className="p-4 bg-red-50 dark:bg-red-950/40 rounded-xl border border-red-200 space-y-3">
+                <textarea
+                  rows={2}
+                  value={reopenReason}
+                  onChange={(e) => setReopenReason(e.target.value)}
+                  placeholder="Why is it not fixed?"
+                  className="w-full px-3 py-2 rounded-xl border text-xs"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => setShowReopenInput(false)}
+                    className="px-3 py-1.5 text-xs text-slate-600"
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleReopen}
+                    disabled={!reopenReason || actionBusy || reopen.loading}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-xs rounded-xl font-semibold"
+                    type="button"
+                  >
+                    Reopen ticket
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {currentUser?.role === 'maintenance' && canMaintenanceAct && (
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border space-y-3">
+            <div className="font-bold text-xs flex items-center gap-1.5">
+              <Wrench className="w-4 h-4 text-blue-600" /> Technician actions
+            </div>
+            {ticket.status === 'Open' || ticket.status === 'Reopened' ? (
+              <button
+                onClick={handleAccept}
+                disabled={actionBusy || accept.loading}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold text-xs rounded-xl"
+                type="button"
+              >
+                Accept job & mark In Progress
+              </button>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    value={repairNotes}
+                    onChange={(e) => setRepairNotes(e.target.value)}
+                    placeholder="Repair notes"
+                    className="px-3 py-2 rounded-xl border text-xs"
+                  />
+                  <input
+                    value={materialsUsed}
+                    onChange={(e) => setMaterialsUsed(e.target.value)}
+                    placeholder="Materials used"
+                    className="px-3 py-2 rounded-xl border text-xs"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={hoursSpent}
+                    onChange={(e) => setHoursSpent(e.target.value)}
+                    placeholder="Hours"
+                    className="px-3 py-2 rounded-xl border text-xs"
+                  />
+                  <input
+                    type="number"
+                    value={cost}
+                    onChange={(e) => setCost(e.target.value)}
+                    placeholder="Cost (E)"
+                    className="px-3 py-2 rounded-xl border text-xs"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      After photos
+                    </span>
+                    <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-[11px] font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-600">
+                      <Upload className="w-3 h-3" />
+                      {uploadingAfter ? 'Uploading…' : 'Add photo'}
+                      <input
+                        ref={afterInputRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        disabled={uploadingAfter}
+                        onChange={handleAfterPhotoSelected}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                  {afterPhotoUrls.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {afterPhotoUrls.map((url) => (
+                        <div
+                          key={url}
+                          className="relative w-16 h-16 rounded-lg overflow-hidden border"
+                        >
+                          <img
+                            src={url}
+                            alt="After repair"
+                            className="w-full h-full object-cover"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeAfterPhoto(url)}
+                            className="absolute top-0.5 right-0.5 px-1 py-0.5 rounded bg-black/60 text-white text-[10px]"
+                            aria-label="Remove photo"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={handleResolve}
+                  disabled={actionBusy || resolve.loading || uploadingAfter}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2"
+                  type="button"
+                >
+                  <CheckCircle2 className="w-4 h-4" /> Complete job & send to
+                  tenant
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {(currentUser?.role === 'property_manager' ||
+          currentUser?.role === 'admin') &&
+          canAssign && (
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="text-xs flex items-center gap-2">
+                <User className="w-4 h-4 text-slate-500" />
+                <span>
+                  <strong>Assign technician:</strong>{' '}
+                  <span className="text-slate-500">
+                    allocate to center maintenance team
+                  </span>
+                </span>
+              </div>
+              <div className="flex gap-2 w-full sm:w-auto">
+                <select
+                  value={selectedTechId}
+                  onChange={(e) => setSelectedTechId(e.target.value)}
+                  className="px-3 py-1.5 rounded-xl border text-xs"
+                >
+                  <option value="">-- Choose --</option>
+                  {technicians.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={handleAssign}
+                  disabled={!selectedTechId || actionBusy || assign.loading}
+                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-semibold rounded-xl"
+                  type="button"
+                >
+                  Assign
+                </button>
+              </div>
             </div>
           )}
 
         {(currentUser?.role === 'property_manager' ||
-          currentUser?.role === 'admin') && (
-          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="text-xs flex items-center gap-2">
-              <User className="w-4 h-4 text-slate-500" />
-              <span>
-                <strong>Assign technician:</strong>{' '}
-                <span className="text-slate-500">
-                  allocate to center maintenance team
-                </span>
-              </span>
+          currentUser?.role === 'admin') &&
+          (ticket.status === 'Resolved' || ticket.status === 'Closed') && (
+            <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800/60 border text-xs text-slate-600 dark:text-slate-400">
+              This ticket is <strong>{ticket.status}</strong>. Assignment is
+              locked. Reopen the ticket if further work is required.
             </div>
-            <div className="flex gap-2 w-full sm:w-auto">
-              <select
-                value={selectedTechId}
-                onChange={(e) => setSelectedTechId(e.target.value)}
-                className="px-3 py-1.5 rounded-xl border text-xs"
-              >
-                <option value="">-- Choose --</option>
-                {technicians.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={handleAssign}
-                disabled={!selectedTechId || actionBusy || assign.loading}
-                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-semibold rounded-xl"
-                type="button"
-              >
-                Assign
-              </button>
-            </div>
-          </div>
-        )}
+          )}
 
         <div>
           <h4 className="text-xs font-bold uppercase tracking-wider mb-3">
             Audit trail
           </h4>
           <div className="relative pl-6 space-y-4 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200 dark:before:bg-slate-700">
-            {ticket.timeline.map((item) => (
+            {(ticket.timeline || []).map((item: {
+              id: string;
+              title: string;
+              description?: string;
+              actor_name: string;
+              actor_role: string;
+              timestamp: string;
+            }) => (
               <div key={item.id} className="relative">
                 <div className="absolute -left-6 top-1 w-2.5 h-2.5 rounded-full bg-blue-600 ring-4 ring-white dark:ring-slate-900" />
                 <div className="text-xs font-semibold">{item.title}</div>
@@ -586,16 +604,18 @@ export const TicketDetailModal: React.FC<Props> = ({
 
         <div className="border-t pt-4">
           <h4 className="text-xs font-bold uppercase tracking-wider mb-3 flex items-center gap-1.5">
-            <MessageSquare className="w-3.5 h-3.5 text-blue-600" />{' '}
-            Discussion
+            <MessageSquare className="w-3.5 h-3.5 text-blue-600" /> Discussion
           </h4>
           <div className="space-y-2.5 mb-3 max-h-48 overflow-y-auto">
             {comments.length === 0 ? (
-              <div className="text-xs text-slate-400 py-2">
-                No comments yet.
-              </div>
+              <div className="text-xs text-slate-400 py-2">No comments yet.</div>
             ) : (
-              comments.map((c) => (
+              comments.map((c: {
+                id: string;
+                user_name: string;
+                created_at: string;
+                comment: string;
+              }) => (
                 <div
                   key={c.id}
                   className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 text-xs"
