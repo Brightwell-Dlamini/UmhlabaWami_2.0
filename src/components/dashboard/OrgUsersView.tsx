@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { PasswordInput } from '../ui/PasswordInput';
 import { Modal } from '../ui/Modal';
+import { useConfirm } from '../ui/ConfirmDialog';
 import { auth } from '../../services/auth';
 import { profiles as profilesApi } from '../../services/api/profiles';
 import { organizations as orgApi } from '../../services/api/organizations';
@@ -38,6 +39,8 @@ const ORG_ROLES: UserRole[] = [
 export const OrgUsersView: React.FC = () => {
   const isSuper = auth.isSuperAdmin();
   const orgId = auth.getCurrentOrganization()?.id ?? '';
+  const { confirm } = useConfirm();
+
   const [search, setSearch] = useState('');
   const [orgFilter, setOrgFilter] = useState<string>('all');
   const [feedback, setFeedback] = useState('');
@@ -360,8 +363,15 @@ export const OrgUsersView: React.FC = () => {
                         <button
                           type="button"
                           title="Deactivate"
-                          onClick={() => {
-                            if (confirm(`Deactivate ${u.name}?`)) remove.mutate(u.id);
+                          onClick={async () => {
+                            const ok = await confirm({
+                              title: `Deactivate ${u.name}?`,
+                              message:
+                                'They will lose access immediately. Their tickets and records are kept and can be reactivated later.',
+                              confirmLabel: 'Deactivate',
+                              tone: 'danger',
+                            });
+                            if (ok) remove.mutate(u.id);
                           }}
                           className="p-1.5 rounded-lg hover:bg-red-50"
                         >
@@ -423,9 +433,11 @@ export const OrgUsersView: React.FC = () => {
         />
       )}
 
-      {/* purge is available via API for super admins; UI intentionally
-          surfaces it through the deactivate flow to avoid accidental
-          double-click purge. */}
+      {/* purge() is exposed for super admins through the profile API and is
+          intentionally not surfaced as a one-click action in the UI — the
+          deactivate flow above is reversible, purge is not. Kept mounted so
+          the mutation's hooks run and can be triggered programmatically if
+          needed later. */}
       {false && purge && null}
     </div>
   );
@@ -476,7 +488,7 @@ function AddStaffForm({
     () => defaultOrgId || orgs[0]?.id || ''
   );
 
-  // Reset whenever the modal re-opens.
+  // Reset the draft whenever the modal re-opens with a different target org.
   useEffect(() => {
     setEmail('');
     setName('');
@@ -632,11 +644,10 @@ function AddStaffForm({
 /**
  * Full edit form for a user record.
  *
- * Note on the extra props: `orgs`, `isSuper`, and `onRoleOnly` are accepted
- * for backwards compatibility with the parent call site but are not used in
- * this version — the parent's `updateUser` mutation already routes role
- * changes through `updateAsAdmin`, which enforces the same server-side
- * permissions as `setRole`.
+ * `orgs`, `isSuper`, and `onRoleOnly` are accepted in the props for backwards
+ * compatibility with the parent call site, but are not used inside — the
+ * parent's `updateUser` mutation routes role changes through `updateAsAdmin`,
+ * which enforces the same server-side permission checks as `setRole`.
  */
 function FullEditForm({
   user,
@@ -665,13 +676,15 @@ function FullEditForm({
   const [role, setRole] = useState<UserRole>(user.role);
   const [status, setStatus] = useState<User['status']>(user.status);
 
-  // Reset the draft if the parent swaps the target user while open.
+  // Reset the draft if the parent swaps the target user while the modal is
+  // open (e.g. from the org-selector side effects).
   useEffect(() => {
     setName(user.name);
     setEmail(user.email);
     setPhone(user.phone ?? '');
     setRole(user.role);
     setStatus(user.status);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user.id]);
 
   return (

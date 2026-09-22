@@ -8,7 +8,6 @@ import {
   Layers,
   Sliders,
   AlertTriangle,
-  X,
   Pencil,
   Ban,
   Play,
@@ -24,6 +23,7 @@ import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 import { useRealtime } from '../../hooks/useRealtime';
 import { downloadCsv } from '../../services/api/_export';
 import type { Organization, SubscriptionTier } from '../../types';
+import { Modal } from '../ui/Modal';
 
 interface Props {
   initialTab?: string;
@@ -414,10 +414,19 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
       )}
 
       {editingPlan && (
-        <PlanEditModal plan={editingPlan} onCancel={() => setEditingPlan(null)} onSave={savePlan} />
+        <PlanEditModal
+          plan={editingPlan}
+          onCancel={() => setEditingPlan(null)}
+          onSave={savePlan}
+        />
       )}
       {editingOrg && (
-        <OrgEditModal org={editingOrg} onCancel={() => setEditingOrg(null)} onSave={(patch) => updateOrg.mutate({ id: editingOrg.id, patch })} loading={updateOrg.loading} />
+        <OrgEditModal
+          org={editingOrg}
+          onCancel={() => setEditingOrg(null)}
+          onSave={(patch) => updateOrg.mutate({ id: editingOrg.id, patch })}
+          loading={updateOrg.loading}
+        />
       )}
     </div>
   );
@@ -427,11 +436,6 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-/**
- * Per-card state — the code draft belongs to the card, not the page.
- * Fixes the bug where typing into one pending card's input leaked into
- * another when the shared page state was used.
- */
 function PendingOrgCard({
   org,
   approving,
@@ -578,39 +582,126 @@ function StatusPill({ status }: { status: string }) {
   return <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}`}>{status}</span>;
 }
 
-function PlanEditModal({ plan, onCancel, onSave }: { plan: TierPlan; onCancel: () => void; onSave: (p: TierPlan) => void }) {
+// ---------------------------------------------------------------------------
+// Modals — both use the shared <Modal> primitive
+// ---------------------------------------------------------------------------
+
+function PlanEditModal({
+  plan,
+  onCancel,
+  onSave,
+}: {
+  plan: TierPlan;
+  onCancel: () => void;
+  onSave: (p: TierPlan) => void;
+}) {
   const [form, setForm] = useState({ ...plan });
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border p-6 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-base flex items-center gap-2"><Sliders className="w-4 h-4 text-violet-600" /> Edit {plan.tier}</h3>
-          <button type="button" onClick={onCancel}><X className="w-5 h-5 text-slate-400" /></button>
+    <Modal
+      open
+      onClose={onCancel}
+      size="sm"
+      title={`Edit ${plan.tier}`}
+      icon={<Sliders className="w-5 h-5 text-violet-600" />}
+    >
+      <div className="space-y-3 text-xs">
+        <Field label="Display name">
+          <input
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+          />
+        </Field>
+        <Field label="Monthly fee (E)">
+          <input
+            type="number"
+            value={form.monthlyFeeE}
+            onChange={(e) =>
+              setForm({ ...form, monthlyFeeE: Number(e.target.value) || 0 })
+            }
+            className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Property limit">
+            <input
+              type="number"
+              value={form.propertyLimit}
+              onChange={(e) =>
+                setForm({ ...form, propertyLimit: Number(e.target.value) || 0 })
+              }
+              className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+            />
+          </Field>
+          <Field label="Tenant limit">
+            <input
+              type="number"
+              value={form.tenantLimit}
+              onChange={(e) =>
+                setForm({ ...form, tenantLimit: Number(e.target.value) || 0 })
+              }
+              className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+            />
+          </Field>
+          <Field label="Staff logins">
+            <input
+              type="number"
+              value={form.userLimit}
+              onChange={(e) =>
+                setForm({ ...form, userLimit: Number(e.target.value) || 0 })
+              }
+              className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+            />
+          </Field>
+          <Field label="Storage (GB)">
+            <input
+              type="number"
+              value={form.storageLimitGb}
+              onChange={(e) =>
+                setForm({ ...form, storageLimitGb: Number(e.target.value) || 0 })
+              }
+              className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+            />
+          </Field>
         </div>
-        <div className="space-y-3 text-xs">
-          <Field label="Display name"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" /></Field>
-          <Field label="Monthly fee (E)"><input type="number" value={form.monthlyFeeE} onChange={(e) => setForm({ ...form, monthlyFeeE: Number(e.target.value) || 0 })} className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" /></Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Property limit"><input type="number" value={form.propertyLimit} onChange={(e) => setForm({ ...form, propertyLimit: Number(e.target.value) || 0 })} className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" /></Field>
-            <Field label="Tenant limit"><input type="number" value={form.tenantLimit} onChange={(e) => setForm({ ...form, tenantLimit: Number(e.target.value) || 0 })} className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" /></Field>
-            <Field label="Staff logins"><input type="number" value={form.userLimit} onChange={(e) => setForm({ ...form, userLimit: Number(e.target.value) || 0 })} className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" /></Field>
-            <Field label="Storage (GB)"><input type="number" value={form.storageLimitGb} onChange={(e) => setForm({ ...form, storageLimitGb: Number(e.target.value) || 0 })} className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" /></Field>
-          </div>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
-            <span className="font-semibold">Active (shown at registration)</span>
-          </label>
-        </div>
-        <div className="flex justify-end gap-2 pt-2 border-t">
-          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border text-xs">Cancel</button>
-          <button type="button" onClick={() => onSave(form)} className="px-5 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold">Save tier</button>
-        </div>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.active}
+            onChange={(e) => setForm({ ...form, active: e.target.checked })}
+          />
+          <span className="font-semibold">Active (shown at registration)</span>
+        </label>
       </div>
-    </div>
+
+      <div className="flex justify-end gap-2 pt-3 mt-3 border-t">
+        <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border text-xs">
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => onSave(form)}
+          className="px-5 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold"
+        >
+          Save tier
+        </button>
+      </div>
+    </Modal>
   );
 }
 
-function OrgEditModal({ org, onCancel, onSave, loading }: { org: Organization; onCancel: () => void; onSave: (patch: Parameters<typeof orgApi.update>[1]) => void; loading?: boolean }) {
+function OrgEditModal({
+  org,
+  onCancel,
+  onSave,
+  loading,
+}: {
+  org: Organization;
+  onCancel: () => void;
+  onSave: (patch: Parameters<typeof orgApi.update>[1]) => void;
+  loading?: boolean;
+}) {
   const [form, setForm] = useState({
     company_name: org.company_name,
     owner_name: org.owner_name,
@@ -624,57 +715,148 @@ function OrgEditModal({ org, onCancel, onSave, loading }: { org: Organization; o
     storage_limit: org.storage_limit,
     monthly_fee_estimate: org.monthly_fee_estimate ?? 0,
   });
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-lg w-full border p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-base">Edit organisation</h3>
-          <button type="button" onClick={onCancel}><X className="w-5 h-5 text-slate-400" /></button>
+    <Modal
+      open
+      onClose={onCancel}
+      size="md"
+      title="Edit organisation"
+      icon={<Building2 className="w-5 h-5 text-violet-600" />}
+    >
+      <div className="space-y-3 text-xs">
+        <Field label="Company name">
+          <input
+            value={form.company_name}
+            onChange={(e) => setForm({ ...form, company_name: e.target.value })}
+            className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Owner">
+            <input
+              value={form.owner_name}
+              onChange={(e) => setForm({ ...form, owner_name: e.target.value })}
+              className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+            />
+          </Field>
+          <Field label="Phone">
+            <input
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+            />
+          </Field>
         </div>
-        <div className="space-y-3 text-xs">
-          <Field label="Company name"><input value={form.company_name} onChange={(e) => setForm({ ...form, company_name: e.target.value })} className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" /></Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Owner"><input value={form.owner_name} onChange={(e) => setForm({ ...form, owner_name: e.target.value })} className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" /></Field>
-            <Field label="Phone"><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" /></Field>
-          </div>
-          <Field label="Email"><input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" /></Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Tier">
-              <select value={form.subscription_tier} onChange={(e) => setForm({ ...form, subscription_tier: e.target.value as SubscriptionTier })} className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900">
-                <option value="Starter">Starter</option>
-                <option value="Professional">Professional</option>
-                <option value="Enterprise">Enterprise</option>
-              </select>
-            </Field>
-            <Field label="Status">
-              <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as Organization['status'] })} className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900">
-                <option value="Active">Active</option>
-                <option value="Pending Approval">Pending Approval</option>
-                <option value="Suspended">Suspended</option>
-                <option value="Rejected">Rejected</option>
-              </select>
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Property limit"><input type="number" value={form.property_limit} onChange={(e) => setForm({ ...form, property_limit: Number(e.target.value) || 0 })} className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" /></Field>
-            <Field label="Tenant limit"><input type="number" value={form.tenant_limit} onChange={(e) => setForm({ ...form, tenant_limit: Number(e.target.value) || 0 })} className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" /></Field>
-            <Field label="User limit"><input type="number" value={form.user_limit} onChange={(e) => setForm({ ...form, user_limit: Number(e.target.value) || 0 })} className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" /></Field>
-            <Field label="Storage (GB)"><input type="number" value={form.storage_limit} onChange={(e) => setForm({ ...form, storage_limit: Number(e.target.value) || 0 })} className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" /></Field>
-          </div>
+        <Field label="Email">
+          <input
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Tier">
+            <select
+              value={form.subscription_tier}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  subscription_tier: e.target.value as SubscriptionTier,
+                })
+              }
+              className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+            >
+              <option value="Starter">Starter</option>
+              <option value="Professional">Professional</option>
+              <option value="Enterprise">Enterprise</option>
+            </select>
+          </Field>
+          <Field label="Status">
+            <select
+              value={form.status}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  status: e.target.value as Organization['status'],
+                })
+              }
+              className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+            >
+              <option value="Active">Active</option>
+              <option value="Pending Approval">Pending Approval</option>
+              <option value="Suspended">Suspended</option>
+              <option value="Rejected">Rejected</option>
+            </select>
+          </Field>
         </div>
-        <div className="flex justify-end gap-2 pt-2 border-t">
-          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border text-xs">Cancel</button>
-          <button type="button" disabled={loading} onClick={() => onSave(form)} className="px-5 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold disabled:opacity-60">{loading ? 'Saving…' : 'Save changes'}</button>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Property limit">
+            <input
+              type="number"
+              value={form.property_limit}
+              onChange={(e) =>
+                setForm({ ...form, property_limit: Number(e.target.value) || 0 })
+              }
+              className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+            />
+          </Field>
+          <Field label="Tenant limit">
+            <input
+              type="number"
+              value={form.tenant_limit}
+              onChange={(e) =>
+                setForm({ ...form, tenant_limit: Number(e.target.value) || 0 })
+              }
+              className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+            />
+          </Field>
+          <Field label="User limit">
+            <input
+              type="number"
+              value={form.user_limit}
+              onChange={(e) =>
+                setForm({ ...form, user_limit: Number(e.target.value) || 0 })
+              }
+              className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+            />
+          </Field>
+          <Field label="Storage (GB)">
+            <input
+              type="number"
+              value={form.storage_limit}
+              onChange={(e) =>
+                setForm({ ...form, storage_limit: Number(e.target.value) || 0 })
+              }
+              className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+            />
+          </Field>
         </div>
       </div>
-    </div>
+
+      <div className="flex justify-end gap-2 pt-3 mt-3 border-t">
+        <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border text-xs">
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => onSave(form)}
+          className="px-5 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold disabled:opacity-60"
+        >
+          {loading ? 'Saving…' : 'Save changes'}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block font-semibold mb-1 text-slate-600 dark:text-slate-300">{label}</label>
+      <label className="block font-semibold mb-1 text-slate-600 dark:text-slate-300">
+        {label}
+      </label>
       {children}
     </div>
   );
