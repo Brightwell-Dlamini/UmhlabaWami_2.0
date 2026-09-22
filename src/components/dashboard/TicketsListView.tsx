@@ -18,13 +18,14 @@ import { profiles as profilesApi } from '../../services/api/profiles';
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 import { useRealtime } from '../../hooks/useRealtime';
+import { useVirtualList } from '../../hooks/useVirtualList';
 import { useConfirm } from '../ui/ConfirmDialog';
 import { useToast } from '../ui/ToastProvider';
 import { Modal } from '../ui/Modal';
 
 interface Props {
   onViewTicket: (id: string) => void;
-  onOpenCreateTicket: () => void;
+  onOpenCreateTicket?: () => void;
 }
 
 type StatusChip = {
@@ -50,6 +51,9 @@ const CHIP_TONES: Record<StatusChip['tone'], { text: string; bg: string }> = {
   emerald: { text: 'text-emerald-600 dark:text-emerald-400', bg: 'hover:border-emerald-400' },
 };
 
+const VIRTUAL_THRESHOLD = 200;
+const VIRTUAL_ROW_HEIGHT = 96;
+
 export const TicketsListView: React.FC<Props> = ({
   onViewTicket,
   onOpenCreateTicket,
@@ -66,7 +70,10 @@ export const TicketsListView: React.FC<Props> = ({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showBulkAssign, setShowBulkAssign] = useState(false);
 
-  const canBulk = currentUser?.role === 'admin' || currentUser?.role === 'property_manager' || currentUser?.role === 'super_admin';
+  const canBulk =
+    currentUser?.role === 'admin' ||
+    currentUser?.role === 'property_manager' ||
+    currentUser?.role === 'super_admin';
 
   const { data: allTickets = [], loading, error } = useSupabaseQuery(
     ['tickets', 'lite', orgId],
@@ -112,6 +119,13 @@ export const TicketsListView: React.FC<Props> = ({
     });
   }, [allTickets, currentUser, statusFilter, priorityFilter, categoryFilter, searchQuery]);
 
+  const useVirtual = displayedTickets.length > VIRTUAL_THRESHOLD;
+
+  const virtual = useVirtualList(displayedTickets, {
+    itemHeight: VIRTUAL_ROW_HEIGHT,
+    overscan: 8,
+  });
+
   const counts = useMemo(
     () => ({
       open: allTickets.filter((t) => t.status === 'Open').length,
@@ -128,7 +142,15 @@ export const TicketsListView: React.FC<Props> = ({
 
   // ----- Bulk mutations -----
   const bulkAssign = useSupabaseMutation({
-    mutationFn: async ({ ids, techId, techName }: { ids: string[]; techId: string; techName: string }) => {
+    mutationFn: async ({
+      ids,
+      techId,
+      techName,
+    }: {
+      ids: string[];
+      techId: string;
+      techName: string;
+    }) => {
       const results = await Promise.allSettled(
         ids.map((id) => ticketsApi.assign(id, techId, techName))
       );
@@ -197,14 +219,23 @@ export const TicketsListView: React.FC<Props> = ({
     try {
       const res = await bulkAssign.mutate({ ids, techId, techName });
       if (res.failed === 0) {
-        toast.success(`Assigned ${res.total} ticket${res.total === 1 ? '' : 's'}`, `to ${techName}.`);
+        toast.success(
+          `Assigned ${res.total} ticket${res.total === 1 ? '' : 's'}`,
+          `to ${techName}.`
+        );
       } else {
-        toast.info('Partial success', `${res.total - res.failed} of ${res.total} assigned to ${techName}.`);
+        toast.info(
+          'Partial success',
+          `${res.total - res.failed} of ${res.total} assigned to ${techName}.`
+        );
       }
       clearSelection();
       setShowBulkAssign(false);
     } catch (e) {
-      toast.error('Bulk assign failed', e instanceof Error ? e.message : 'Try again.');
+      toast.error(
+        'Bulk assign failed',
+        e instanceof Error ? e.message : 'Try again.'
+      );
     }
   };
 
@@ -222,13 +253,21 @@ export const TicketsListView: React.FC<Props> = ({
     try {
       const res = await bulkResolve.mutate(ids);
       if (res.failed === 0) {
-        toast.success(`Resolved ${res.total} ticket${res.total === 1 ? '' : 's'}`);
+        toast.success(
+          `Resolved ${res.total} ticket${res.total === 1 ? '' : 's'}`
+        );
       } else {
-        toast.info('Partial success', `${res.total - res.failed} of ${res.total} resolved.`);
+        toast.info(
+          'Partial success',
+          `${res.total - res.failed} of ${res.total} resolved.`
+        );
       }
       clearSelection();
     } catch (e) {
-      toast.error('Bulk resolve failed', e instanceof Error ? e.message : 'Try again.');
+      toast.error(
+        'Bulk resolve failed',
+        e instanceof Error ? e.message : 'Try again.'
+      );
     }
   };
 
@@ -241,6 +280,96 @@ export const TicketsListView: React.FC<Props> = ({
   const allVisibleSelected =
     displayedTickets.length > 0 && selected.size === displayedTickets.length;
 
+  const renderRow = (t: (typeof displayedTickets)[number]) => (
+    <div
+      key={t.id}
+      className={`flex items-stretch border-b border-slate-100 dark:border-slate-700/60 ${
+        selected.has(t.id) ? 'bg-blue-50/60 dark:bg-blue-950/20' : ''
+      }`}
+    >
+      {canBulk && (
+        <div className="pl-4 flex items-center">
+          <input
+            type="checkbox"
+            checked={selected.has(t.id)}
+            onChange={(e) => {
+              e.stopPropagation();
+              toggleSelected(t.id);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-3.5 h-3.5 rounded"
+            aria-label={`Select ${t.ticket_number}`}
+          />
+        </div>
+      )}
+      <button
+        onClick={() => onViewTicket(t.id)}
+        className="flex-1 text-left p-4 hover:bg-slate-50/80 dark:hover:bg-slate-700/40 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+        type="button"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <span className="font-mono text-[10px] font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">
+              {t.ticket_number}
+            </span>
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                t.priority === 'Emergency'
+                  ? 'bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300'
+                  : t.priority === 'High'
+                    ? 'bg-orange-100 text-orange-800'
+                    : t.priority === 'Medium'
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              {t.priority}
+            </span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+              {t.status}
+            </span>
+          </div>
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
+            {t.title}
+          </h3>
+          <p className="text-xs text-slate-500 truncate mt-0.5">
+            {t.description}
+          </p>
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="text-right">
+            <div className="text-[10px] text-slate-500">SLA</div>
+            <div
+              className={`text-[11px] font-bold ${
+                t.sla_status === 'Compliant'
+                  ? 'text-emerald-600'
+                  : t.sla_status === 'Warning'
+                    ? 'text-amber-600'
+                    : 'text-red-600'
+              }`}
+            >
+              {t.sla_status}
+            </div>
+            {t.resolution_deadline &&
+              t.status !== 'Resolved' &&
+              t.status !== 'Closed' && (
+                <div className="text-[10px] text-slate-400 mt-0.5">
+                  {(() => {
+                    const hrs = Math.round(
+                      (new Date(t.resolution_deadline).getTime() - Date.now()) /
+                        3600000
+                    );
+                    return hrs >= 0 ? `${hrs}h left` : `${Math.abs(hrs)}h overdue`;
+                  })()}
+                </div>
+              )}
+          </div>
+          <ChevronRight className="w-4 h-4 text-slate-400" />
+        </div>
+      </button>
+    </div>
+  );
+
   return (
     <div className="space-y-6 pb-12">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -252,17 +381,20 @@ export const TicketsListView: React.FC<Props> = ({
             </h1>
           </div>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Track, assign, and resolve commercial maintenance requests with live SLA monitoring
+            Track, assign, and resolve commercial maintenance requests with live
+            SLA monitoring
           </p>
         </div>
-        <button
-          onClick={onOpenCreateTicket}
-          className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs sm:text-sm font-semibold shadow-md shadow-blue-500/20 transition flex items-center justify-center gap-2"
-          type="button"
-        >
-          <PlusCircle className="w-4 h-4" />
-          <span>Log New Ticket</span>
-        </button>
+        {onOpenCreateTicket && (
+          <button
+            onClick={onOpenCreateTicket}
+            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs sm:text-sm font-semibold shadow-md shadow-blue-500/20 transition flex items-center justify-center gap-2"
+            type="button"
+          >
+            <PlusCircle className="w-4 h-4" />
+            <span>Log New Ticket</span>
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -285,7 +417,9 @@ export const TicketsListView: React.FC<Props> = ({
               type="button"
             >
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-slate-500 font-medium">{chip.label}</span>
+                <span className="text-xs text-slate-500 font-medium">
+                  {chip.label}
+                </span>
                 <Icon className={`w-4 h-4 ${tone.text}`} />
               </div>
               <div className={`text-2xl font-bold ${tone.text}`}>{value}</div>
@@ -354,7 +488,6 @@ export const TicketsListView: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Bulk action bar */}
       {canBulk && selected.size > 0 && (
         <div className="p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/50 flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
@@ -397,7 +530,9 @@ export const TicketsListView: React.FC<Props> = ({
             <Loader2 className="w-4 h-4 animate-spin" /> Loading tickets…
           </div>
         ) : error ? (
-          <div className="p-12 text-center text-red-500 text-xs">{error.message}</div>
+          <div className="p-12 text-center text-red-500 text-xs">
+            {error.message}
+          </div>
         ) : displayedTickets.length === 0 ? (
           <div className="p-12 text-center text-slate-400 text-xs">
             No tickets match your filter criteria.
@@ -420,101 +555,28 @@ export const TicketsListView: React.FC<Props> = ({
                 </span>
               </div>
             )}
-            <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
-              {displayedTickets.map((t) => (
-                <div
-                  key={t.id}
-                  className={`flex items-stretch ${
-                    selected.has(t.id) ? 'bg-blue-50/60 dark:bg-blue-950/20' : ''
-                  }`}
-                >
-                  {canBulk && (
-                    <div className="pl-4 flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={selected.has(t.id)}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          toggleSelected(t.id);
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-3.5 h-3.5 rounded"
-                        aria-label={`Select ${t.ticket_number}`}
-                      />
-                    </div>
-                  )}
-                  <button
-                    onClick={() => onViewTicket(t.id)}
-                    className="flex-1 text-left p-4 hover:bg-slate-50/80 dark:hover:bg-slate-700/40 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                    type="button"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2 mb-1">
-                        <span className="font-mono text-[10px] font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">
-                          {t.ticket_number}
-                        </span>
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            t.priority === 'Emergency'
-                              ? 'bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300'
-                              : t.priority === 'High'
-                                ? 'bg-orange-100 text-orange-800'
-                                : t.priority === 'Medium'
-                                  ? 'bg-amber-100 text-amber-800'
-                                  : 'bg-slate-100 text-slate-600'
-                          }`}
-                        >
-                          {t.priority}
-                        </span>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
-                          {t.status}
-                        </span>
-                      </div>
-                      <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                        {t.title}
-                      </h3>
-                      <p className="text-xs text-slate-500 truncate mt-0.5">
-                        {t.description}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <div className="text-right">
-                        <div className="text-[10px] text-slate-500">SLA</div>
-                        <div
-                          className={`text-[11px] font-bold ${
-                            t.sla_status === 'Compliant'
-                              ? 'text-emerald-600'
-                              : t.sla_status === 'Warning'
-                                ? 'text-amber-600'
-                                : 'text-red-600'
-                          }`}
-                        >
-                          {t.sla_status}
-                        </div>
-                        {t.resolution_deadline &&
-                          t.status !== 'Resolved' &&
-                          t.status !== 'Closed' && (
-                            <div className="text-[10px] text-slate-400 mt-0.5">
-                              {(() => {
-                                const hrs = Math.round(
-                                  (new Date(t.resolution_deadline).getTime() - Date.now()) / 3600000
-                                );
-                                return hrs >= 0 ? `${hrs}h left` : `${Math.abs(hrs)}h overdue`;
-                              })()}
-                            </div>
-                          )}
-                      </div>
-                      <ChevronRight className="w-4 h-4 text-slate-400" />
-                    </div>
-                  </button>
+
+            {useVirtual ? (
+              <div
+                ref={virtual.containerRef}
+                className="virtual-list-viewport overflow-y-auto"
+                style={{ maxHeight: '70vh' }}
+              >
+                <div style={{ height: virtual.totalHeight, position: 'relative' }}>
+                  <div style={{ transform: `translateY(${virtual.offsetY}px)` }}>
+                    {virtual.virtualItems.map(renderRow)}
+                  </div>
                 </div>
-              ))}
-            </div>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                {displayedTickets.map(renderRow)}
+              </div>
+            )}
           </>
         )}
       </div>
 
-      {/* Bulk-assign modal */}
       <BulkAssignModal
         open={showBulkAssign}
         technicians={technicians}
@@ -563,7 +625,8 @@ function BulkAssignModal({
     >
       <div className="space-y-3 text-xs">
         <p className="text-slate-500">
-          Pick a technician. Tickets already closed or resolved will be skipped automatically.
+          Pick a technician. Tickets already closed or resolved will be skipped
+          automatically.
         </p>
         <select
           value={techId}
@@ -578,7 +641,11 @@ function BulkAssignModal({
           ))}
         </select>
         <div className="pt-3 border-t flex justify-end gap-2">
-          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 rounded-xl border"
+          >
             Cancel
           </button>
           <button

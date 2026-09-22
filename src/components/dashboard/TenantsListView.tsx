@@ -1,7 +1,6 @@
+// src/components/dashboard/TenantsListView.tsx
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Search, PlusCircle, Edit3, Trash2,
-} from 'lucide-react';
+import { Search, PlusCircle, Edit3, Trash2 } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { tenants as tenantsApi } from '../../services/api/tenants';
 import { shops as shopsApi } from '../../services/api/shops';
@@ -11,6 +10,7 @@ import { profiles as profilesApi } from '../../services/api/profiles';
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 import { useRealtime } from '../../hooks/useRealtime';
+import { useVirtualList } from '../../hooks/useVirtualList';
 import type { Tenant } from '../../types';
 import { Modal } from '../ui/Modal';
 import { useConfirm } from '../ui/ConfirmDialog';
@@ -21,6 +21,9 @@ interface Props {
   onOpenCreateTicketForShop?: (shopId: string) => void;
   onViewLeases?: () => void;
 }
+
+const VIRTUAL_THRESHOLD = 200;
+const VIRTUAL_ROW_HEIGHT = 68;
 
 export const TenantsListView: React.FC<Props> = ({
   onOpenCreateTicketForShop,
@@ -116,6 +119,13 @@ export const TenantsListView: React.FC<Props> = ({
     [tenants, statusFilter, selectedCenter, search]
   );
 
+  const useVirtual = filtered.length > VIRTUAL_THRESHOLD;
+
+  const virtual = useVirtualList(filtered, {
+    itemHeight: VIRTUAL_ROW_HEIGHT,
+    overscan: 10,
+  });
+
   const handleRemove = async (t: Tenant) => {
     const ok = await confirm({
       title: `Remove ${t.business_name}?`,
@@ -134,6 +144,96 @@ export const TenantsListView: React.FC<Props> = ({
         e instanceof Error ? e.message : 'Could not remove tenant.'
       );
     }
+  };
+
+  const renderRow = (t: Tenant) => {
+    const shop = shops.find((s) => s.id === t.shop_id);
+    const center = centers.find((c) => c.id === t.shopping_center_id);
+    const linked = t.user_id
+      ? portalUsers.find((u) => u.id === t.user_id)
+      : undefined;
+
+    return (
+      <div
+        key={t.id}
+        onClick={() => setEditing(t)}
+        className="grid grid-cols-12 gap-2 px-4 py-3 items-center hover:bg-slate-50/60 dark:hover:bg-slate-700/30 cursor-pointer border-b border-slate-100 dark:border-slate-700/60"
+        style={useVirtual ? { height: VIRTUAL_ROW_HEIGHT } : undefined}
+      >
+        <div className="col-span-3 min-w-0">
+          <div className="font-bold text-xs truncate">{t.business_name}</div>
+          <div className="text-[11px] text-slate-400 truncate">
+            {t.contact_person}
+          </div>
+        </div>
+        <div className="col-span-2 min-w-0">
+          <div className="font-mono text-[11px] truncate">
+            {shop?.shop_number ?? '—'}
+          </div>
+          <div className="text-[10px] text-slate-400 truncate">
+            {center?.name}
+          </div>
+        </div>
+        <div className="col-span-1 text-xs truncate">{t.trade_type}</div>
+        <div className="col-span-2 min-w-0">
+          <div className="text-[11px] truncate">{t.phone}</div>
+          <div className="text-[10px] text-slate-400 truncate">{t.email}</div>
+        </div>
+        <div className="col-span-1 font-bold text-xs tabular-nums truncate">
+          E {(shop?.rental_amount ?? 0).toLocaleString()}
+        </div>
+        <div className="col-span-1">
+          <span
+            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+              t.status === 'Active'
+                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                : 'bg-amber-100 text-amber-800'
+            }`}
+          >
+            {t.status}
+          </span>
+        </div>
+        <div className="col-span-1 text-[11px] truncate">
+          {linked ? (
+            <span className="text-emerald-600 font-semibold truncate">
+              {linked.name}
+            </span>
+          ) : (
+            <span className="text-slate-400">Not linked</span>
+          )}
+        </div>
+        <div
+          className="col-span-1 text-right"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex justify-end gap-1.5">
+            <button
+              onClick={() => setEditing(t)}
+              type="button"
+              className="p-1.5 rounded-lg border text-slate-600 hover:bg-slate-100"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+            </button>
+            {onOpenCreateTicketForShop && shop && (
+              <button
+                onClick={() => onOpenCreateTicketForShop(shop.id)}
+                type="button"
+                className="px-2 py-1 text-[10px] font-bold bg-blue-50 text-blue-600 rounded-lg"
+              >
+                Log issue
+              </button>
+            )}
+            <button
+              onClick={() => handleRemove(t)}
+              type="button"
+              className="p-1.5 rounded-lg border text-red-500 hover:bg-red-50"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   if (!orgId) {
@@ -238,129 +338,42 @@ export const TenantsListView: React.FC<Props> = ({
       </div>
 
       <div className="bg-white dark:bg-slate-800 rounded-2xl border overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 dark:bg-slate-900/60 text-slate-500 text-[10px] uppercase">
-              <tr>
-                <th className="py-3 px-4">Business</th>
-                <th className="py-3 px-4">Unit</th>
-                <th className="py-3 px-4">Category</th>
-                <th className="py-3 px-4">Contact</th>
-                <th className="py-3 px-4">Rent</th>
-                <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4">Portal</th>
-                <th className="py-3 px-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={8}>
-                    <EmptyState
-                      icon={<Search className="w-5 h-5" />}
-                      title="No tenants match your filters"
-                      message="Try clearing the search or status filter."
-                    />
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((t) => {
-                  const shop = shops.find((s) => s.id === t.shop_id);
-                  const center = centers.find(
-                    (c) => c.id === t.shopping_center_id
-                  );
-                  const linked = t.user_id
-                    ? portalUsers.find((u) => u.id === t.user_id)
-                    : undefined;
-                  return (
-                    <tr
-                      key={t.id}
-                      onClick={() => setEditing(t)}
-                      className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30 cursor-pointer"
-                    >
-                      <td className="py-3 px-4">
-                        <div className="font-bold">{t.business_name}</div>
-                        <div className="text-[11px] text-slate-400">
-                          {t.contact_person}
-                        </div>
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="font-mono text-[11px]">
-                          {shop?.shop_number ?? '—'}
-                        </div>
-                        <div className="text-[10px] text-slate-400">
-                          {center?.name}
-                        </div>
-                      </td>
-                      <td className="py-3 px-4">{t.trade_type}</td>
-                      <td className="py-3 px-4">
-                        <div className="text-[11px]">{t.phone}</div>
-                        <div className="text-[10px] text-slate-400 truncate max-w-[160px]">
-                          {t.email}
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 font-bold">
-                        E {(shop?.rental_amount ?? 0).toLocaleString()}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            t.status === 'Active'
-                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
-                              : 'bg-amber-100 text-amber-800'
-                          }`}
-                        >
-                          {t.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-[11px]">
-                        {linked ? (
-                          <span className="text-emerald-600 font-semibold">
-                            {linked.name}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">Not linked</span>
-                        )}
-                      </td>
-                      <td
-                        className="py-3 px-4 text-right"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <div className="flex justify-end gap-1.5">
-                          <button
-                            onClick={() => setEditing(t)}
-                            type="button"
-                            className="p-1.5 rounded-lg border text-slate-600 hover:bg-slate-100"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          {onOpenCreateTicketForShop && shop && (
-                            <button
-                              onClick={() =>
-                                onOpenCreateTicketForShop(shop.id)
-                              }
-                              type="button"
-                              className="px-2 py-1 text-[10px] font-bold bg-blue-50 text-blue-600 rounded-lg"
-                            >
-                              Log issue
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleRemove(t)}
-                            type="button"
-                            className="p-1.5 rounded-lg border text-red-500 hover:bg-red-50"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+        {filtered.length === 0 ? (
+          <EmptyState
+            icon={<Search className="w-5 h-5" />}
+            title="No tenants match your filters"
+            message="Try clearing the search or status filter."
+          />
+        ) : (
+          <>
+            <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-slate-50 dark:bg-slate-900/60 text-[10px] uppercase text-slate-500 border-b border-slate-100 dark:border-slate-700/60">
+              <div className="col-span-3">Business</div>
+              <div className="col-span-2">Unit</div>
+              <div className="col-span-1">Category</div>
+              <div className="col-span-2">Contact</div>
+              <div className="col-span-1">Rent</div>
+              <div className="col-span-1">Status</div>
+              <div className="col-span-1">Portal</div>
+              <div className="col-span-1 text-right">Actions</div>
+            </div>
+
+            {useVirtual ? (
+              <div
+                ref={virtual.containerRef}
+                className="virtual-list-viewport overflow-y-auto"
+                style={{ maxHeight: '70vh' }}
+              >
+                <div style={{ height: virtual.totalHeight, position: 'relative' }}>
+                  <div style={{ transform: `translateY(${virtual.offsetY}px)` }}>
+                    {virtual.virtualItems.map(renderRow)}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div>{filtered.map(renderRow)}</div>
+            )}
+          </>
+        )}
       </div>
 
       <TenantForm
@@ -384,7 +397,7 @@ export const TenantsListView: React.FC<Props> = ({
 };
 
 // ---------------------------------------------------------------------------
-// TenantForm — now uses the shared <Modal>
+// TenantForm — unchanged from prior version
 // ---------------------------------------------------------------------------
 
 function TenantForm({
@@ -418,8 +431,7 @@ function TenantForm({
     phone: initial?.phone ?? '+268 ',
     email: initial?.email ?? '',
     trade_type: initial?.trade_type ?? 'Retail',
-    shopping_center_id:
-      initial?.shopping_center_id ?? centers[0]?.id ?? '',
+    shopping_center_id: initial?.shopping_center_id ?? centers[0]?.id ?? '',
     shop_id: initial?.shop_id ?? '',
     status: initial?.status ?? 'Active',
     user_id: initial?.user_id ?? '',
@@ -429,7 +441,6 @@ function TenantForm({
   const [portalBusy, setPortalBusy] = useState(false);
   const [portalError, setPortalError] = useState<string | null>(null);
 
-  // Reset draft whenever the modal re-opens or the target changes.
   useEffect(() => {
     if (!open) return;
     setForm({
@@ -438,8 +449,7 @@ function TenantForm({
       phone: initial?.phone ?? '+268 ',
       email: initial?.email ?? '',
       trade_type: initial?.trade_type ?? 'Retail',
-      shopping_center_id:
-        initial?.shopping_center_id ?? centers[0]?.id ?? '',
+      shopping_center_id: initial?.shopping_center_id ?? centers[0]?.id ?? '',
       shop_id: initial?.shop_id ?? '',
       status: initial?.status ?? 'Active',
       user_id: initial?.user_id ?? '',
@@ -505,9 +515,7 @@ function TenantForm({
       >
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block font-semibold mb-1">
-              Business name *
-            </label>
+            <label className="block font-semibold mb-1">Business name *</label>
             <input
               required
               value={form.business_name}
@@ -518,9 +526,7 @@ function TenantForm({
             />
           </div>
           <div>
-            <label className="block font-semibold mb-1">
-              Contact person *
-            </label>
+            <label className="block font-semibold mb-1">Contact person *</label>
             <input
               required
               value={form.contact_person}
@@ -555,9 +561,7 @@ function TenantForm({
             <label className="block font-semibold mb-1">Trade type</label>
             <input
               value={form.trade_type}
-              onChange={(e) =>
-                setForm({ ...form, trade_type: e.target.value })
-              }
+              onChange={(e) => setForm({ ...form, trade_type: e.target.value })}
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
             />
           </div>
@@ -633,8 +637,7 @@ function TenantForm({
             ))}
           </select>
           <p className="text-[10px] text-slate-400 mt-1">
-            Link an existing portal user, or create one below in the same
-            step.
+            Link an existing portal user, or create one below in the same step.
           </p>
           {!initial && (
             <div className="mt-3 p-3 rounded-xl border border-blue-100 dark:border-blue-900/40 bg-blue-50/50 dark:bg-blue-950/20 space-y-2">
