@@ -47,25 +47,40 @@ export const LeaseManagementView: React.FC = () => {
     return leases.filter((l) => l.tenant_id === myTenant.id);
   }, [leases, isTenant, myTenant]);
 
+  const flash = (msg: string, ms = 4000) => {
+    setFeedback(msg);
+    setTimeout(() => setFeedback(''), ms);
+  };
+
   const create = useSupabaseMutation({
     mutationFn: (input: Parameters<typeof leasesApi.create>[0]) => leasesApi.create(input),
     invalidateKeys: ['leases'],
-    onSuccess: () => { setFeedback('Lease created.'); setTimeout(() => setFeedback(''), 3000); setShowDraft(false); },
+    onSuccess: () => {
+      flash('Lease created successfully.');
+      setShowDraft(false);
+    },
+    onError: (e) => flash(`Create failed: ${e.message}`, 8000),
   });
   const update = useSupabaseMutation({
     mutationFn: ({ id, patch }: { id: string; patch: Partial<Lease> }) => leasesApi.update(id, patch),
     invalidateKeys: ['leases'],
-    onSuccess: () => { setFeedback('Lease updated.'); setTimeout(() => setFeedback(''), 3000); setEditing(null); },
+    onSuccess: () => {
+      flash('Lease updated successfully.');
+      setEditing(null);
+    },
+    onError: (e) => flash(`Save failed: ${e.message}`, 8000),
   });
   const remove = useSupabaseMutation({
     mutationFn: (id: string) => leasesApi.remove(id),
     invalidateKeys: ['leases'],
-    onSuccess: () => { setFeedback('Lease removed.'); setTimeout(() => setFeedback(''), 3000); },
+    onSuccess: () => flash('Lease removed.'),
+    onError: (e) => flash(`Delete failed: ${e.message}`, 8000),
   });
   const sign = useSupabaseMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) => leasesApi.sign(id, name),
     invalidateKeys: ['leases'],
-    onSuccess: () => { setFeedback('Lease signed.'); setTimeout(() => setFeedback(''), 3000); },
+    onSuccess: () => flash('Lease signed.'),
+    onError: (e) => flash(`Sign failed: ${e.message}`, 8000),
   });
 
   if (!orgId) return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
@@ -95,7 +110,13 @@ export const LeaseManagementView: React.FC = () => {
       </div>
 
       {feedback && (
-        <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-xl text-xs flex items-center gap-2">
+        <div
+          className={`p-3 rounded-xl text-xs flex items-center gap-2 border ${
+            /fail|error/i.test(feedback)
+              ? 'bg-red-50 border-red-300 text-red-800'
+              : 'bg-emerald-50 border-emerald-300 text-emerald-800'
+          }`}
+        >
           <CheckCircle2 className="w-4 h-4" /> {feedback}
         </div>
       )}
@@ -103,8 +124,8 @@ export const LeaseManagementView: React.FC = () => {
       {isTenant && !myTenant && (
         <div className="p-4 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 text-xs">
           Your account is not linked to a tenant record yet. Documents and leases
-          will appear once your organisation admin links your user under
-          <strong> Tenants Directory</strong>.
+          will appear once your organisation admin links your user under{' '}
+          <strong>Tenants Directory</strong>.
         </div>
       )}
 
@@ -253,7 +274,11 @@ function LeaseTermsModal({
   shop?: { shop_number: string };
   onClose: () => void;
 }) {
-  const terms = lease.terms_body || lease.document_url || '';
+  const raw =
+    (lease as Lease & { terms_body?: string }).terms_body ||
+    lease.document_url ||
+    '';
+  const terms = raw.startsWith('terms:\n') ? raw.slice(7) : raw;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
