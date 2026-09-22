@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Sidebar } from './layout/Sidebar';
+import { Sidebar, getNavItemsForRole } from './layout/Sidebar';
 import { TenantDashboard } from './dashboard/TenantDashboard';
 import { ManagerDashboard } from './dashboard/ManagerDashboard';
 import { MaintenancePortal } from './dashboard/MaintenancePortal';
@@ -37,7 +37,7 @@ import {
   useTabGuard,
 } from '../hooks/useTabGuard';
 import type { User } from '../types';
-import { Radio } from 'lucide-react';
+import { Menu, Radio, X } from 'lucide-react';
 import { Z } from '../constants/zIndex';
 
 interface Props {
@@ -109,15 +109,12 @@ export function OperationsApp({ currentUser, showToast }: Props) {
   const [isCreateTicketOpen, setIsCreateTicketOpen] = useState(false);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [isBroadcastOpen, setIsBroadcastOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-  // Persist whenever the tab changes.
   useEffect(() => {
     persistTab(sidebarActiveTab);
   }, [sidebarActiveTab]);
 
-  // Guard: any tab that isn't permitted for this role snaps back to the
-  // role's default. Fires for URL hash, sessionStorage restore, and
-  // programmatic setSidebarActiveTab calls that bypass the nav.
   useTabGuard(sidebarActiveTab, currentUser.role, (safe) => {
     setSidebarActiveTab(safe);
   });
@@ -153,6 +150,15 @@ export function OperationsApp({ currentUser, showToast }: Props) {
     };
   }, [currentUser.organization_id]);
 
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mobileNavOpen]);
+
   const { data: activeEmergencies = [] } = useSupabaseQuery(
     ['emergency_broadcasts', 'active', currentUser.organization_id ?? ''],
     () => emergApi.listActive(),
@@ -173,6 +179,20 @@ export function OperationsApp({ currentUser, showToast }: Props) {
   });
 
   const firstEmergency = activeEmergencies[0];
+  const role = currentUser.role || 'tenant';
+  const org = auth.getCurrentOrganization();
+  const currentNavLabel =
+    getNavItemsForRole(role).find((i) => i.id === sidebarActiveTab)?.label ??
+    'Menu';
+
+  const handleTabChange = (tab: string) => {
+    if (tab === 'report_issue') {
+      setIsCreateTicketOpen(true);
+    } else {
+      setSidebarActiveTab(tab);
+    }
+    setMobileNavOpen(false);
+  };
 
   return (
     <>
@@ -191,23 +211,84 @@ export function OperationsApp({ currentUser, showToast }: Props) {
         </div>
       )}
 
-      <div className="flex-1 flex max-w-7xl w-full mx-auto px-3 sm:px-6 py-6 gap-6">
+      <div className="lg:hidden sticky top-16 z-40 border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 h-12 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(true)}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm min-h-[40px]"
+            aria-label="Open menu"
+          >
+            <Menu className="w-4 h-4" />
+            Menu
+          </button>
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+              {String(role).replace(/_/g, ' ')}
+            </p>
+            <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+              {currentNavLabel}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {mobileNavOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-[60]"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Navigation menu"
+        >
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            aria-label="Close menu"
+            onClick={() => setMobileNavOpen(false)}
+          />
+          <div className="absolute inset-y-0 left-0 w-[min(100vw-3rem,20rem)] max-w-full shadow-2xl flex flex-col bg-white dark:bg-slate-900 animate-in">
+            <div className="flex items-center justify-between px-3 py-3 border-b border-slate-200 dark:border-slate-800 shrink-0">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                Navigation
+              </span>
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(false)}
+                className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                aria-label="Close menu"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <Sidebar
+                mobile
+                role={role}
+                activeTab={sidebarActiveTab}
+                onTabChange={handleTabChange}
+                organizationName={org?.company_name}
+                orgCode={org?.organization_code}
+                organizationLogo={org?.logo_url}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 flex max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 gap-6">
         <div className="hidden lg:block w-64 shrink-0">
           <Sidebar
-            role={currentUser.role || 'tenant'}
+            role={role}
             activeTab={sidebarActiveTab}
-            onTabChange={(tab) => {
-              if (tab === 'report_issue') setIsCreateTicketOpen(true);
-              else setSidebarActiveTab(tab);
-            }}
+            onTabChange={handleTabChange}
             onOpenCreateTicket={() => setIsCreateTicketOpen(true)}
-            organizationName={auth.getCurrentOrganization()?.company_name}
-            orgCode={auth.getCurrentOrganization()?.organization_code}
-            organizationLogo={auth.getCurrentOrganization()?.logo_url}
+            organizationName={org?.company_name}
+            orgCode={org?.organization_code}
+            organizationLogo={org?.logo_url}
           />
         </div>
 
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 overflow-x-hidden">
           {sidebarActiveTab === 'centres' && <CentresView />}
           {(sidebarActiveTab === 'units' ||
             sidebarActiveTab === 'properties') && (
