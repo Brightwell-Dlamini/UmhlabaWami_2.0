@@ -1,12 +1,16 @@
 import type { Invoice, FinanceTransaction } from '../../types';
+import { localDaysBetween, todayIsoLocal } from '../../lib/dates';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const MS_PER_DAY = 86_400_000;
-
-/** Invoice statuses that should be excluded from outstanding calculations. */
+/**
+ * Statuses excluded from BOTH sides of the receivables equation.
+ * Cancelled invoices never happened; Paid invoices are fully collected.
+ * We still want the Paid row to contribute to `totalCollected` — see below.
+ */
+const VOID_STATUSES = new Set(['Cancelled']);
 const SETTLED_STATUSES = new Set(['Paid', 'Cancelled']);
 
 // ---------------------------------------------------------------------------
@@ -47,18 +51,18 @@ export interface TransactionTotals {
 
 /**
  * Whole days between two dates, floor-based, immune to time-of-day.
- * Uses calendar dates only (ignores hours/minutes/seconds).
+ * Delegates to the local-time implementation in lib/dates.
+ *
+ * Kept exported under the original name so existing call sites and tests
+ * continue to work without modification.
  */
 export function daysBetween(fromIso: string, toIso: string): number {
-  const from = toUtcMidnight(fromIso);
-  const to = toUtcMidnight(toIso);
-  return Math.floor((to - from) / MS_PER_DAY);
+  return localDaysBetween(fromIso, toIso);
 }
 
-function toUtcMidnight(iso: string): number {
-  // Handles 'YYYY-MM-DD' and full ISO timestamps. We discard time-of-day.
-  const d = new Date(iso);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+/** Days an invoice is past due as of `now` (local). Negative = not yet due. */
+export function daysOverdue(invoice: Invoice, now: Date = new Date()): number {
+  return localDaysBetween(invoice.due_date, now);
 }
 
 function round2(n: number): number {
@@ -69,12 +73,23 @@ function round2(n: number): number {
 // Invoice calculations
 // ---------------------------------------------------------------------------
 
+/**
+ * Aggregates invoice totals.
+ *
+ * Cancelled invoices are excluded from every figure — they never happened.
+ * Paid invoices contribute to `totalCollected` but not to `totalOutstanding`.
+ *
+ * `collectionRate` = collected / invoiced (invoiced excludes Cancelled).
+ */
 export function calculateInvoiceTotals(invoices: Invoice[]): InvoiceTotals {
   let totalInvoiced = 0;
   let totalCollected = 0;
   let unpaidCount = 0;
+  let countableCount = 0;
 
   for (const inv of invoices) {
+    if (VOID_STATUSES.has(inv.status)) continue;
+    countableCount++;
     totalInvoiced += inv.total;
     totalCollected += inv.amount_paid;
     if (!SETTLED_STATUSES.has(inv.status)) unpaidCount++;
@@ -88,7 +103,7 @@ export function calculateInvoiceTotals(invoices: Invoice[]): InvoiceTotals {
     totalInvoiced: round2(totalInvoiced),
     totalCollected: round2(totalCollected),
     totalOutstanding: round2(totalOutstanding),
-    invoiceCount: invoices.length,
+    invoiceCount: countableCount,
     unpaidCount,
     collectionRate,
   };
@@ -102,6 +117,8 @@ export function calculateInvoiceTotals(invoices: Invoice[]): InvoiceTotals {
  *   d60      : 31..=60
  *   d90      : 61..=90
  *   older    : >= 91
+ *
+ * Cancelled invoices never enter any bucket.
  */
 export function calculateAgingBuckets(
   invoices: Invoice[],
@@ -115,14 +132,12 @@ export function calculateAgingBuckets(
     older: 0,
   };
 
-  const todayIso = now.toISOString().slice(0, 10);
-
   for (const inv of invoices) {
     if (SETTLED_STATUSES.has(inv.status)) continue;
     const outstanding = inv.total - inv.amount_paid;
     if (outstanding <= 0) continue;
 
-    const overdueDays = daysBetween(inv.due_date, todayIso);
+    const overdueDays = localDaysBetween(inv.due_date, now);
 
     if (overdueDays <= 0) buckets.current += outstanding;
     else if (overdueDays <= 30) buckets.d30 += outstanding;
@@ -142,18 +157,21 @@ export function calculateAgingBuckets(
 
 /**
  * Return unpaid invoices sorted by how overdue they are, oldest due first.
- * Only includes invoices that are actually past due.
+ * Only includes invoices that are strictly past due (same-day is not overdue).
  */
 export function selectOverdueInvoices(
   invoices: Invoice[],
   now: Date = new Date()
 ): Invoice[] {
-  const todayIso = now.toISOString().slice(0, 10);
   return invoices
     .filter((inv) => !SETTLED_STATUSES.has(inv.status))
     .filter((inv) => inv.total - inv.amount_paid > 0)
-    .filter((inv) => daysBetween(inv.due_date, todayIso) > 0)
-    .sort((a, b) => daysBetween(b.due_date, todayIso) - daysBetween(a.due_date, todayIso));
+    .filter((inv) => localDaysBetween(inv.due_date, now) > 0)
+    .sort(
+      (a, b) =>
+        localDaysBetween(b.due_date, now) -
+        localDaysBetween(a.due_date, now)
+    );
 }
 
 /**
@@ -199,3 +217,10 @@ export function selectRecentTransactions(
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, limit);
 }
+
+// ---------------------------------------------------------------------------
+// Utilities exposed for views that need a local "today" without importing
+// lib/dates directly.
+// ---------------------------------------------------------------------------
+
+export { todayIsoLocal };

@@ -63,7 +63,6 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
   }, [initialTab]);
 
   const [actionNotice, setActionNotice] = useState('');
-  const [customCode, setCustomCode] = useState('');
   const [plans, setPlans] = useState<TierPlan[]>(() => subscriptionPlans.list());
   const [editingPlan, setEditingPlan] = useState<TierPlan | null>(null);
   const [editingOrg, setEditingOrg] = useState<Organization | null>(null);
@@ -85,27 +84,26 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
   };
 
   const approve = useSupabaseMutation({
-    mutationFn: ({ orgId }: { orgId: string }) =>
+    mutationFn: (args: { orgId: string; customCode?: string }) =>
       orgApi.approve({
-        organizationId: orgId,
+        organizationId: args.orgId,
         approverName: auth.getCurrentUser()?.name ?? 'Super Admin',
-        customCode: customCode.trim() || undefined,
+        customCode: args.customCode?.trim() || undefined,
       }),
     invalidateKeys: ['super_orgs', 'super_audit'],
     onSuccess: (res) => {
       flash(`Approved — code ${res.organizationCode}.`);
-      setCustomCode('');
       refetchLogs();
     },
     onError: (e) => flash(`Approval failed: ${e.message}`, 6000),
   });
 
   const reject = useSupabaseMutation({
-    mutationFn: ({ orgId }: { orgId: string }) =>
+    mutationFn: (args: { orgId: string; reason: string }) =>
       orgApi.reject({
-        organizationId: orgId,
+        organizationId: args.orgId,
         approverName: auth.getCurrentUser()?.name ?? 'Super Admin',
-        reason: 'Application not approved.',
+        reason: args.reason || 'Application not approved.',
       }),
     invalidateKeys: ['super_orgs', 'super_audit'],
     onSuccess: () => {
@@ -131,8 +129,14 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
     onError: (e) => flash(`Update failed: ${e.message}`, 6000),
   });
 
-  const pending = useMemo(() => orgs.filter((o) => o.status === 'Pending Approval'), [orgs]);
-  const activeOrgs = useMemo(() => orgs.filter((o) => o.status === 'Active'), [orgs]);
+  const pending = useMemo(
+    () => orgs.filter((o) => o.status === 'Pending Approval'),
+    [orgs]
+  );
+  const activeOrgs = useMemo(
+    () => orgs.filter((o) => o.status === 'Active'),
+    [orgs]
+  );
 
   const exportBackup = () => {
     downloadCsv(`umhlaba-wami-orgs-${new Date().toISOString().slice(0, 10)}.csv`, [
@@ -257,34 +261,16 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
             <EmptyState icon={<CheckCircle2 className="w-10 h-10 text-emerald-500" />} title="All caught up" body="No applications waiting for approval." />
           ) : (
             pending.map((org) => (
-              <div key={org.id} className="p-6 rounded-2xl bg-white dark:bg-slate-800 border border-amber-200/80 dark:border-amber-800/50 shadow-sm space-y-4">
-                <div className="flex items-start justify-between gap-3 border-b border-slate-100 dark:border-slate-700 pb-3">
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-bold text-base">{org.company_name}</h3>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 uppercase">Pending</span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-0.5">{org.owner_name} · {org.email} · {org.phone}</p>
-                  </div>
-                  <div className="text-right text-xs">
-                    <div className="text-slate-500">Tier</div>
-                    <strong className="text-violet-600 dark:text-violet-400">{org.subscription_tier}</strong>
-                  </div>
-                </div>
-                <div className="p-3.5 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row items-center justify-between gap-3">
-                  <div>
-                    <label className="block text-[10px] text-slate-500 mb-0.5">Custom code (auto if blank)</label>
-                    <input value={customCode} onChange={(e) => setCustomCode(e.target.value.toUpperCase())} placeholder="e.g. GAB-140926-0001" className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-mono text-xs bg-white dark:bg-slate-800" />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => reject.mutate({ orgId: org.id })} disabled={reject.loading} className="px-3.5 py-2 rounded-xl text-xs font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-60">Reject</button>
-                    <button onClick={() => approve.mutate({ orgId: org.id })} disabled={approve.loading} className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 flex items-center gap-1.5 shadow-sm">
-                      <CheckCircle2 className="w-4 h-4" />
-                      {approve.loading ? 'Approving…' : 'Approve & issue code'}
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <PendingOrgCard
+                key={org.id}
+                org={org}
+                approving={approve.loading}
+                rejecting={reject.loading}
+                onApprove={(customCode) =>
+                  approve.mutate({ orgId: org.id, customCode })
+                }
+                onReject={(reason) => reject.mutate({ orgId: org.id, reason })}
+              />
             ))
           )}
         </div>
@@ -436,6 +422,114 @@ export const SuperAdminPortal: React.FC<Props> = ({ initialTab }) => {
     </div>
   );
 };
+
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-card state — the code draft belongs to the card, not the page.
+ * Fixes the bug where typing into one pending card's input leaked into
+ * another when the shared page state was used.
+ */
+function PendingOrgCard({
+  org,
+  approving,
+  rejecting,
+  onApprove,
+  onReject,
+}: {
+  org: Organization;
+  approving: boolean;
+  rejecting: boolean;
+  onApprove: (customCode?: string) => void;
+  onReject: (reason: string) => void;
+}) {
+  const [codeDraft, setCodeDraft] = useState('');
+  const [showReject, setShowReject] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+
+  return (
+    <div className="p-6 rounded-2xl bg-white dark:bg-slate-800 border border-amber-200/80 dark:border-amber-800/50 shadow-sm space-y-4">
+      <div className="flex items-start justify-between gap-3 border-b border-slate-100 dark:border-slate-700 pb-3">
+        <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="font-bold text-base">{org.company_name}</h3>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 uppercase">Pending</span>
+          </div>
+          <p className="text-xs text-slate-500 mt-0.5">{org.owner_name} · {org.email} · {org.phone}</p>
+        </div>
+        <div className="text-right text-xs">
+          <div className="text-slate-500">Tier</div>
+          <strong className="text-violet-600 dark:text-violet-400">{org.subscription_tier}</strong>
+        </div>
+      </div>
+
+      {!showReject ? (
+        <div className="p-3.5 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="w-full sm:w-auto">
+            <label className="block text-[10px] text-slate-500 mb-0.5">Custom code (auto if blank)</label>
+            <input
+              value={codeDraft}
+              onChange={(e) => setCodeDraft(e.target.value.toUpperCase())}
+              placeholder="e.g. GAB-140926-0001"
+              className="w-full sm:w-56 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-mono text-xs bg-white dark:bg-slate-800"
+            />
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowReject(true)}
+              disabled={rejecting || approving}
+              className="px-3.5 py-2 rounded-xl text-xs font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-60"
+            >
+              Reject
+            </button>
+            <button
+              type="button"
+              onClick={() => onApprove(codeDraft || undefined)}
+              disabled={approving || rejecting}
+              className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 flex items-center gap-1.5 shadow-sm"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              {approving ? 'Approving…' : 'Approve & issue code'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="p-3.5 bg-red-50 dark:bg-red-950/30 rounded-xl border border-red-200 dark:border-red-900/50 space-y-3">
+          <label className="block text-[10px] font-bold text-red-800 dark:text-red-300 uppercase tracking-wider">
+            Reason for rejection
+          </label>
+          <textarea
+            rows={2}
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            placeholder="Tell the applicant why this was not approved…"
+            className="w-full px-3 py-2 rounded-lg border border-red-200 dark:border-red-800 text-xs bg-white dark:bg-slate-900"
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => { setShowReject(false); setRejectReason(''); }}
+              className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => onReject(rejectReason.trim() || 'Application not approved.')}
+              disabled={rejecting}
+              className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-60"
+            >
+              {rejecting ? 'Rejecting…' : 'Confirm rejection'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) {
   return (

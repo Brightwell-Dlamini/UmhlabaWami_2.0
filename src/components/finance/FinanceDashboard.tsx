@@ -19,6 +19,7 @@ import {
   daysBetween,
   selectOverdueInvoices,
   selectRecentTransactions,
+  todayIsoLocal,
 } from './calculators';
 
 export function FinanceDashboard() {
@@ -47,7 +48,10 @@ export function FinanceDashboard() {
     [transactions]
   );
 
-  const topOverdue = useMemo(() => selectOverdueInvoices(invoices).slice(0, 5), [invoices]);
+  const topOverdue = useMemo(
+    () => selectOverdueInvoices(invoices).slice(0, 5),
+    [invoices]
+  );
 
   if (!orgId) {
     return (
@@ -56,6 +60,7 @@ export function FinanceDashboard() {
   }
 
   const hasData = stats.invoiceCount > 0 || transactions.length > 0;
+  const today = todayIsoLocal();
 
   return (
     <div className="space-y-6">
@@ -203,7 +208,7 @@ export function FinanceDashboard() {
           ) : (
             <div className="divide-y divide-slate-100 dark:divide-slate-700">
               {topOverdue.map((inv) => {
-                const days = daysBetween(inv.due_date, new Date().toISOString().slice(0, 10));
+                const days = daysBetween(inv.due_date, today);
                 return (
                   <div
                     key={inv.id}

@@ -4,7 +4,6 @@ import {
   DollarSign,
   Search,
   Download,
-  TrendingUp,
   CalendarClock,
   AlertTriangle,
 } from 'lucide-react';
@@ -16,6 +15,7 @@ import { shoppingCenters as centersApi } from '../../services/api/shoppingCenter
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useRealtime } from '../../hooks/useRealtime';
 import { downloadCsv } from '../../services/api/_export';
+import { localDaysBetween } from '../../lib/dates';
 
 interface RentRow {
   tenantId: string;
@@ -37,13 +37,13 @@ interface RentRow {
   psf: number;
 }
 
+type ExpiryFilter = 'all' | 'expired' | '90' | '180' | '365';
+
 export function RentRollView() {
   const orgId = auth.getCurrentOrganization()?.id ?? '';
   const [search, setSearch] = useState('');
   const [centerFilter, setCenterFilter] = useState('all');
-  const [expiryFilter, setExpiryFilter] = useState<'all' | '90' | '180' | '365'>(
-    'all'
-  );
+  const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>('all');
   const [notice, setNotice] = useState('');
 
   const { data: tenants = [] } = useSupabaseQuery(
@@ -81,24 +81,16 @@ export function RentRollView() {
   });
 
   const rows: RentRow[] = useMemo(() => {
-    const today = new Date();
-    const todayMs = today.getTime();
-
     return tenants
       .filter((t) => t.status === 'Active' || t.status === 'Notice Given')
       .map((t) => {
         const shop = shops.find((s) => s.id === t.shop_id);
-        const center = centers.find(
-          (c) => c.id === t.shopping_center_id
-        );
+        const center = centers.find((c) => c.id === t.shopping_center_id);
         const lease = leases.find((l) => l.tenant_id === t.id);
 
         const leaseEnd = lease?.end_date ?? null;
-        const daysToExpiry = leaseEnd
-          ? Math.floor(
-              (new Date(leaseEnd).getTime() - todayMs) / 86_400_000
-            )
-          : null;
+        const daysToExpiry =
+          leaseEnd !== null ? localDaysBetween(leaseEnd) : null;
 
         const monthlyRent = shop?.rental_amount ?? lease?.rental_amount ?? 0;
         const sizeSqm = shop?.size_sqm ?? 0;
@@ -132,7 +124,12 @@ export function RentRollView() {
       if (expiryFilter !== 'all') {
         const days = r.daysToExpiry;
         if (days === null) return false;
-        if (days < 0) return expiryFilter === 'all'; // already expired — include only in 'all'
+
+        // Expired leases are the most urgent — include them in every
+        // forward-looking filter as well as their own chip.
+        if (expiryFilter === 'expired') return days < 0;
+
+        if (days < 0) return true;
         if (days > Number(expiryFilter)) return false;
       }
       if (search) {
@@ -157,8 +154,11 @@ export function RentRollView() {
     const expiringSoon = filtered.filter(
       (r) => r.daysToExpiry !== null && r.daysToExpiry >= 0 && r.daysToExpiry <= 90
     ).length;
+    const expired = filtered.filter(
+      (r) => r.daysToExpiry !== null && r.daysToExpiry < 0
+    ).length;
     const unsigned = filtered.filter((r) => !r.signed).length;
-    return { monthlyTotal, annualised, avgPsf, expiringSoon, unsigned };
+    return { monthlyTotal, annualised, avgPsf, expiringSoon, expired, unsigned };
   }, [filtered]);
 
   const handleExport = () => {
@@ -205,6 +205,11 @@ export function RentRollView() {
     setTimeout(() => setNotice(''), 3000);
   };
 
+  const uniqueCenters = useMemo(
+    () => Array.from(new Set(rows.map((r) => r.centerName))).sort(),
+    [rows]
+  );
+
   if (!orgId) {
     return (
       <div className="p-6 text-slate-500 text-sm">
@@ -212,11 +217,6 @@ export function RentRollView() {
       </div>
     );
   }
-
-  const uniqueCenters = useMemo(
-    () => Array.from(new Set(rows.map((r) => r.centerName))).sort(),
-    [rows]
-  );
 
   return (
     <div className="space-y-6">
@@ -246,7 +246,7 @@ export function RentRollView() {
       )}
 
       {/* KPI strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
         <Kpi label="Monthly rent" value={`E${kpis.monthlyTotal.toLocaleString()}`} />
         <Kpi label="Annualised" value={`E${kpis.annualised.toLocaleString()}`} />
         <Kpi label="Avg PSF" value={`E${kpis.avgPsf.toFixed(2)}/m²`} />
@@ -254,6 +254,11 @@ export function RentRollView() {
           label="Expiring ≤90d"
           value={kpis.expiringSoon}
           tone={kpis.expiringSoon > 0 ? 'amber' : 'slate'}
+        />
+        <Kpi
+          label="Expired"
+          value={kpis.expired}
+          tone={kpis.expired > 0 ? 'red' : 'slate'}
         />
         <Kpi
           label="Unsigned leases"
@@ -288,12 +293,11 @@ export function RentRollView() {
         </select>
         <select
           value={expiryFilter}
-          onChange={(e) =>
-            setExpiryFilter(e.target.value as 'all' | '90' | '180' | '365')
-          }
+          onChange={(e) => setExpiryFilter(e.target.value as ExpiryFilter)}
           className="px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
         >
           <option value="all">All expiries</option>
+          <option value="expired">Expired already</option>
           <option value="90">Expires ≤ 90 days</option>
           <option value="180">Expires ≤ 180 days</option>
           <option value="365">Expires ≤ 365 days</option>
@@ -368,7 +372,11 @@ export function RentRollView() {
                         {r.leaseEnd ?? '—'}
                       </td>
                       <td className={`px-3 py-3 text-right ${expiryTone}`}>
-                        {r.daysToExpiry !== null ? r.daysToExpiry : '—'}
+                        {r.daysToExpiry !== null
+                          ? r.daysToExpiry < 0
+                            ? `${Math.abs(r.daysToExpiry)}d ago`
+                            : r.daysToExpiry
+                          : '—'}
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex flex-col gap-0.5">
@@ -394,8 +402,9 @@ export function RentRollView() {
 
       <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
         <CalendarClock className="w-3 h-3" />
-        Days-to-expiry is computed against the current date on each render.
-        Expired leases remain visible under "All expiries".
+        Days-to-expiry is computed against today in your local timezone.
+        Expired leases appear under "Expired already" and also surface in
+        every forward-looking filter.
       </p>
     </div>
   );
@@ -427,6 +436,3 @@ function Kpi({
     </div>
   );
 }
-
-// Suppress unused-import lint when TrendingUp is not used.
-void TrendingUp;

@@ -26,14 +26,19 @@ import { CentrePulseView } from './ops/CentrePulseView';
 import { SlaMatrixView } from './ops/SlaMatrixView';
 import { PreventiveMaintenanceView } from './ops/PreventiveMaintenanceView';
 import { ProfileSettingsView } from './profile/ProfileSettingsView';
-import { CommercialEngineView } from './finance/CommercialEngineView';
 import { auth } from '../services/auth';
 import { emergencyBroadcasts as emergApi } from '../services/api/announcements';
 import { tickets as ticketsApi } from '../services/api/tickets';
 import { useSupabaseQuery } from '../hooks/useSupabaseQuery';
 import { useRealtime } from '../hooks/useRealtime';
-import type { User, UserRole } from '../types';
+import {
+  defaultTabForRole,
+  isTabAllowed,
+  useTabGuard,
+} from '../hooks/useTabGuard';
+import type { User } from '../types';
 import { Radio } from 'lucide-react';
+import { Z } from '../constants/zIndex';
 
 interface Props {
   currentUser: User;
@@ -42,130 +47,8 @@ interface Props {
 
 const TAB_STORAGE_KEY = 'uw_sidebar_tab';
 
-function defaultTab(role?: UserRole): string {
-  switch (role) {
-    case 'tenant':
-      return 'tenant_overview';
-    case 'property_manager':
-    case 'landlord':
-      return 'manager_overview';
-    case 'maintenance':
-      return 'maintenance_jobs';
-    case 'finance':
-      return 'finance_overview';
-    case 'admin':
-      return 'admin_overview';
-    case 'super_admin':
-      return 'super_overview';
-    default:
-      return 'overview';
-  }
-}
-
-function tabsForRole(role?: UserRole): Set<string> {
-  switch (role) {
-    case 'tenant':
-      return new Set([
-        'tenant_overview',
-        'tenant_tickets',
-        'report_issue',
-        'tenant_finance',
-        'messages',
-        'tenant_documents',
-        'tenant_lease',
-        'announcements',
-        'profile_settings',
-      ]);
-    case 'property_manager':
-    case 'landlord':
-      return new Set([
-        'manager_overview',
-        'centre_pulse',
-        'centres',
-        'units',
-        'properties',
-        'manager_tickets',
-        'sla_matrix',
-        'preventive_maintenance',
-        'maintenance_ops',
-        'tenants_list',
-        'leases',
-        'staff_schedule',
-        'vendors',
-        'finance_overview',
-        'announcements',
-        'analytics_reports',
-        'messages',
-        'profile_settings',
-      ]);
-    case 'maintenance':
-      return new Set([
-        'maintenance_jobs',
-        'staff_schedule',
-        'maintenance_completed',
-        'messages',
-        'profile_settings',
-      ]);
-    case 'finance':
-      return new Set([
-        'finance_overview',
-        'commercial_engine',
-        'rent_roll',
-        'expenses_ledger',
-        'transactions',
-        'financial_requests',
-        'finance_documents',
-        'analytics_reports',
-        'profile_settings',
-      ]);
-    case 'admin':
-      return new Set([
-        'admin_overview',
-        'overview',
-        'centre_pulse',
-        'centres',
-        'units',
-        'properties',
-        'tenants_list',
-        'leases',
-        'org_users',
-        'manager_tickets',
-        'sla_matrix',
-        'preventive_maintenance',
-        'staff_schedule',
-        'vendors',
-        'finance_overview',
-        'commercial_engine',
-        'announcements',
-        'analytics_reports',
-        'messages',
-        'org_settings',
-        'profile_settings',
-      ]);
-    case 'super_admin':
-      return new Set([
-        'super_overview',
-        'super_approvals',
-        'super_organizations',
-        'super_users',
-        'super_subscriptions',
-        'super_listings',
-        'analytics_reports',
-        'audit_logs',
-        'profile_settings',
-        'org_users',
-      ]);
-    default:
-      return new Set(['overview', 'centres', 'units', 'manager_tickets']);
-  }
-}
-
-function isTabAllowed(tab: string, role?: UserRole): boolean {
-  return tabsForRole(role).has(tab);
-}
-
-function readInitialTab(role?: UserRole): string {
-  const fallback = defaultTab(role);
+function readInitialTab(role?: User['role']): string {
+  const fallback = defaultTabForRole(role);
   try {
     const hash = window.location.hash.replace(/^#/, '');
     if (hash.startsWith('tab=')) {
@@ -227,9 +110,17 @@ export function OperationsApp({ currentUser, showToast }: Props) {
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [isBroadcastOpen, setIsBroadcastOpen] = useState(false);
 
+  // Persist whenever the tab changes.
   useEffect(() => {
     persistTab(sidebarActiveTab);
   }, [sidebarActiveTab]);
+
+  // Guard: any tab that isn't permitted for this role snaps back to the
+  // role's default. Fires for URL hash, sessionStorage restore, and
+  // programmatic setSidebarActiveTab calls that bypass the nav.
+  useTabGuard(sidebarActiveTab, currentUser.role, (safe) => {
+    setSidebarActiveTab(safe);
+  });
 
   const roleRef = useRef(currentUser.role);
   const userIdRef = useRef(currentUser.id);
@@ -239,17 +130,11 @@ export function OperationsApp({ currentUser, showToast }: Props) {
     if (roleChanged || userChanged) {
       roleRef.current = currentUser.role;
       userIdRef.current = currentUser.id;
-      const next = defaultTab(currentUser.role);
+      const next = defaultTabForRole(currentUser.role);
       setSidebarActiveTab(next);
       persistTab(next);
       return;
     }
-    setSidebarActiveTab((prev) => {
-      if (isTabAllowed(prev, currentUser.role)) return prev;
-      const next = defaultTab(currentUser.role);
-      persistTab(next);
-      return next;
-    });
   }, [currentUser.role, currentUser.id]);
 
   useEffect(() => {
@@ -292,7 +177,7 @@ export function OperationsApp({ currentUser, showToast }: Props) {
   return (
     <>
       {firstEmergency && (
-        <div className="bg-red-600 text-white px-4 py-2 text-xs font-semibold shadow-md z-40">
+        <div className={`bg-red-600 text-white px-4 py-2 text-xs font-semibold shadow-md ${Z.banner}`}>
           <div className="flex items-center gap-2 max-w-7xl mx-auto w-full">
             <Radio className="w-4 h-4 animate-pulse shrink-0" />
             <span className="font-bold uppercase tracking-wider text-[10px] bg-red-800 px-1.5 py-0.5 rounded">
