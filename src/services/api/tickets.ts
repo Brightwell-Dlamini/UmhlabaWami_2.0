@@ -58,6 +58,16 @@ export const tickets = {
     return unwrap(result) as unknown as Ticket[];
   },
 
+  /** Lightweight list without timeline/attachments for desk views. */
+  async listLite(orgId = requireOrgId()): Promise<Ticket[]> {
+    const result = await sb()
+      .from('tickets')
+      .select('*')
+      .eq('organization_id', orgId)
+      .order('created_at', { ascending: false });
+    return unwrap(result) as unknown as Ticket[];
+  },
+
   async get(id: string): Promise<Ticket> {
     const result = await sb()
       .from('tickets')
