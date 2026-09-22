@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Building2, PlusCircle, Search, Edit3, Trash2,
+  Building2, PlusCircle, Search, Edit3, Trash2, AlertCircle,
 } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { shops as shopsApi } from '../../services/api/shops';
@@ -37,21 +37,49 @@ export const UnitsDirectoryView: React.FC<Props> = ({ onSelectShop }) => {
   useRealtime({ table: 'shops', filter: `organization_id=eq.${orgId}`, invalidateKeys: ['shops'], enabled: !!orgId });
 
   const createShop = useSupabaseMutation({
-    mutationFn: (input: Parameters<typeof shopsApi.create>[0]) => shopsApi.create(input),
-    invalidateKeys: ['shops'],
+    mutationFn: async (input: Parameters<typeof shopsApi.create>[0]) => {
+      if (!input.shopping_center_id) {
+        throw new Error('Select a centre before creating a unit.');
+      }
+      let propertyId = input.property_id;
+      if (!propertyId) {
+        const centerName =
+          centers.find((c) => c.id === input.shopping_center_id)?.name ??
+          'Centre';
+        const prop = await propertiesApi.create({
+          shopping_center_id: input.shopping_center_id,
+          name: `${centerName} — main building`,
+          type: input.property_type || 'Retail shop',
+          address: '',
+          description: 'Auto-created when adding a unit',
+        });
+        propertyId = prop.id;
+      }
+      return shopsApi.create({ ...input, property_id: propertyId });
+    },
+    invalidateKeys: ['shops', 'properties'],
     onSuccess: (s) => {
-      toast.success('Unit created', `Unit ${s.shop_number}`);
+      toast.success('Unit created', `Unit ${s.shop_number} is now in the directory.`);
       setShowAddModal(false);
     },
+    onError: (e) => {
+      toast.error('Could not create unit', e.message);
+    },
   });
+
   const updateShop = useSupabaseMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: Partial<Shop> }) => shopsApi.update(id, patch),
+    mutationFn: ({ id, patch }: { id: string; patch: Partial<Shop> }) =>
+      shopsApi.update(id, patch),
     invalidateKeys: ['shops'],
     onSuccess: (s) => {
       toast.success('Unit updated', `Unit ${s.shop_number}`);
       setEditingShop(null);
     },
+    onError: (e) => {
+      toast.error('Could not update unit', e.message);
+    },
   });
+
   const deleteShop = useSupabaseMutation({
     mutationFn: (id: string) => shopsApi.remove(id),
     invalidateKeys: ['shops'],
@@ -95,7 +123,7 @@ export const UnitsDirectoryView: React.FC<Props> = ({ onSelectShop }) => {
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Units directory</h1>
           <p className="text-xs text-slate-500">Live occupancy, dimensions, leasing specs</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center px-3 py-2 bg-white dark:bg-slate-800 rounded-xl border text-xs">
             <Search className="w-3.5 h-3.5 text-slate-400 mr-2" />
             <input
@@ -116,13 +144,25 @@ export const UnitsDirectoryView: React.FC<Props> = ({ onSelectShop }) => {
             ))}
           </select>
           <button
+            type="button"
             onClick={() => setShowAddModal(true)}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+            disabled={centers.length === 0}
+            title={centers.length === 0 ? 'Add a centre first' : undefined}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
           >
             <PlusCircle className="w-4 h-4" /> Add unit
           </button>
         </div>
       </div>
+
+      {centers.length === 0 && (
+        <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/30 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>
+            Add at least one shopping centre under <strong>Centres</strong> before creating units.
+          </span>
+        </div>
+      )}
 
       {filtered.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700">
@@ -166,18 +206,21 @@ export const UnitsDirectoryView: React.FC<Props> = ({ onSelectShop }) => {
                 </div>
                 <div className="pt-2 flex items-center gap-2">
                   <button
+                    type="button"
                     onClick={() => onSelectShop?.(shop)}
                     className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold"
                   >
                     Details
                   </button>
                   <button
+                    type="button"
                     onClick={() => setEditingShop(shop)}
                     className="p-2 rounded-xl border text-slate-600 hover:bg-slate-100"
                   >
                     <Edit3 className="w-4 h-4" />
                   </button>
                   <button
+                    type="button"
                     onClick={() => handleDelete(shop)}
                     className="p-2 rounded-xl border text-red-500 hover:bg-red-50"
                   >
@@ -195,18 +238,25 @@ export const UnitsDirectoryView: React.FC<Props> = ({ onSelectShop }) => {
         centers={centers}
         properties={properties}
         initial={null}
+        submitting={createShop.loading}
+        formError={createShop.error?.message ?? null}
         onCancel={() => setShowAddModal(false)}
-        onSubmit={(input) => createShop.mutate(input as never)}
+        onSubmit={(input) => {
+          void createShop.mutate(input as Parameters<typeof shopsApi.create>[0]);
+        }}
       />
       <ShopForm
         open={!!editingShop}
         centers={centers}
         properties={properties}
         initial={editingShop}
+        submitting={updateShop.loading}
+        formError={updateShop.error?.message ?? null}
         onCancel={() => setEditingShop(null)}
-        onSubmit={(input) =>
-          editingShop && updateShop.mutate({ id: editingShop.id, patch: input as never })
-        }
+        onSubmit={(input) => {
+          if (!editingShop) return;
+          void updateShop.mutate({ id: editingShop.id, patch: input as never });
+        }}
       />
     </div>
   );
@@ -217,6 +267,8 @@ function ShopForm({
   centers,
   properties,
   initial,
+  submitting = false,
+  formError = null,
   onCancel,
   onSubmit,
 }: {
@@ -224,6 +276,8 @@ function ShopForm({
   centers: { id: string; name: string }[];
   properties: { id: string; shopping_center_id: string; name: string }[];
   initial: Shop | null;
+  submitting?: boolean;
+  formError?: string | null;
   onCancel: () => void;
   onSubmit: (input: Record<string, unknown>) => void;
 }) {
@@ -240,9 +294,11 @@ function ShopForm({
     property_type: (initial?.property_type ?? 'Retail shop') as Property['type'],
     description: initial?.description ?? '',
   });
+  const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    setLocalError(null);
     setForm({
       shop_number: initial?.shop_number ?? `G-${Math.floor(20 + Math.random() * 30)}`,
       shopping_center_id: initial?.shopping_center_id ?? centers[0]?.id ?? '',
@@ -256,7 +312,7 @@ function ShopForm({
       property_type: (initial?.property_type ?? 'Retail shop') as Property['type'],
       description: initial?.description ?? '',
     });
-  }, [open, initial?.id]);
+  }, [open, initial?.id, centers]);
 
   const availableProps = properties.filter((p) => p.shopping_center_id === form.shopping_center_id);
   const effectivePropertyId = form.property_id || availableProps[0]?.id || '';
@@ -271,6 +327,15 @@ function ShopForm({
       <form
         onSubmit={(e) => {
           e.preventDefault();
+          setLocalError(null);
+          if (!form.shopping_center_id) {
+            setLocalError('Select a shopping centre.');
+            return;
+          }
+          if (!form.shop_number.trim()) {
+            setLocalError('Unit number is required.');
+            return;
+          }
           onSubmit({
             ...form,
             property_id: effectivePropertyId,
@@ -281,6 +346,19 @@ function ShopForm({
         }}
         className="space-y-3 text-xs"
       >
+        {(localError || formError) && (
+          <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 text-red-800 dark:text-red-300 text-xs font-semibold flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{localError || formError}</span>
+          </div>
+        )}
+
+        {centers.length === 0 && (
+          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs">
+            No centres found. Create a centre first, then add units.
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block font-semibold mb-1">Unit number *</label>
@@ -294,16 +372,39 @@ function ShopForm({
           <div>
             <label className="block font-semibold mb-1">Center *</label>
             <select
+              required
               value={form.shopping_center_id}
               onChange={(e) => setForm({ ...form, shopping_center_id: e.target.value, property_id: '' })}
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
             >
+              {centers.length === 0 && <option value="">No centres</option>}
               {centers.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
           </div>
         </div>
+
+        {availableProps.length > 0 && (
+          <div>
+            <label className="block font-semibold mb-1">Building / property</label>
+            <select
+              value={effectivePropertyId}
+              onChange={(e) => setForm({ ...form, property_id: e.target.value })}
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
+            >
+              {availableProps.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {availableProps.length === 0 && form.shopping_center_id && (
+          <p className="text-[11px] text-slate-500">
+            No building linked to this centre yet. One will be created automatically when you save the unit.
+          </p>
+        )}
+
         <div className="grid grid-cols-3 gap-3">
           <div>
             <label className="block font-semibold mb-1">Type</label>
@@ -333,6 +434,7 @@ function ShopForm({
             <input
               type="number"
               required
+              min={1}
               value={form.size_sqm}
               onChange={(e) => setForm({ ...form, size_sqm: Number(e.target.value) })}
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
@@ -345,6 +447,7 @@ function ShopForm({
             <input
               type="number"
               required
+              min={0}
               value={form.rental_amount}
               onChange={(e) => setForm({ ...form, rental_amount: Number(e.target.value) })}
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
@@ -355,6 +458,7 @@ function ShopForm({
             <input
               type="number"
               required
+              min={0}
               value={form.deposit_amount}
               onChange={(e) => setForm({ ...form, deposit_amount: Number(e.target.value) })}
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
@@ -368,16 +472,24 @@ function ShopForm({
             onChange={(e) => setForm({ ...form, status: e.target.value as UnitStatus })}
             className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
           >
-            <option>Available</option><option>Occupied</option>
-            <option>Reserved</option><option>Under Maintenance</option>
+            <option>Available</option>
+            <option>Occupied</option>
+            <option>Reserved</option>
+            <option>Under Maintenance</option>
           </select>
         </div>
         <div className="pt-3 flex justify-end gap-2 border-t">
-          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border">
+          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border" disabled={submitting}>
             Cancel
           </button>
-          <button type="submit" className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold">
-            {initial ? 'Save changes' : 'Create unit'}
+          <button
+            type="submit"
+            disabled={submitting || centers.length === 0}
+            className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold"
+          >
+            {submitting
+              ? (initial ? 'Saving…' : 'Creating…')
+              : (initial ? 'Save changes' : 'Create unit')}
           </button>
         </div>
       </form>
