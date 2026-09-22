@@ -324,23 +324,49 @@ export const profiles = {
       );
     }
 
-    const { error: profileErr } = await sb()
-      .from('profiles')
-      .upsert(
-        {
-          id: userId,
-          email: cleanEmail,
-          name: args.name,
-          username,
-          role: args.role,
-          phone: args.phone ?? null,
-          organization_id: organizationId,
-          status: 'Active',
-        },
-        { onConflict: 'id' }
-      );
-    if (profileErr) {
-      throw new Error(`Profile row failed: ${profileErr.message}`);
+    // Prefer security-definer RPC (bypasses insert RLS safely after auth checks).
+    // Falls back to direct upsert if the RPC is not deployed yet.
+    const { error: rpcErr } = await sb().rpc('admin_upsert_staff_profile', {
+      p_user_id: userId,
+      p_email: cleanEmail,
+      p_name: args.name,
+      p_username: username,
+      p_role: args.role,
+      p_phone: args.phone ?? null,
+      p_organization_id: organizationId,
+      p_status: 'Active',
+    });
+
+    if (rpcErr) {
+      const tolerable =
+        rpcErr.code === 'PGRST202' ||
+        rpcErr.code === '42883' ||
+        /could not find the function|function does not exist/i.test(
+          rpcErr.message || ''
+        );
+
+      if (!tolerable) {
+        throw new Error(`Profile row failed: ${rpcErr.message}`);
+      }
+
+      const { error: profileErr } = await sb()
+        .from('profiles')
+        .upsert(
+          {
+            id: userId,
+            email: cleanEmail,
+            name: args.name,
+            username,
+            role: args.role,
+            phone: args.phone ?? null,
+            organization_id: organizationId,
+            status: 'Active',
+          },
+          { onConflict: 'id' }
+        );
+      if (profileErr) {
+        throw new Error(`Profile row failed: ${profileErr.message}`);
+      }
     }
 
     return { userId };
