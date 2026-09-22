@@ -85,8 +85,60 @@
 .animate-in {
   animation: uw-toast-in 180ms ease-out both;
 }
+
+/* ---------------------------------------------------------------- */
+/* UX UPGRADES — additive                                            */
+/* ---------------------------------------------------------------- */
+
+/* Consistent keyboard focus ring across interactive elements */
+:where(button, a, [role="button"], input, select, textarea):focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+}
+
+/* Reduced motion: respect user preference */
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
   .animate-in {
     animation: none;
+  }
+}
+
+/* Stale-data pill helper (opt-in) */
+.stale-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 700;
+  background-color: #fef3c7;
+  color: #92400e;
+}
+.dark .stale-pill {
+  background-color: rgba(146, 64, 14, 0.4);
+  color: #fcd34d;
+}
+
+/* Virtual list viewport optimization */
+.virtual-list-viewport {
+  contain: strict;
+  overflow-anchor: none;
+}
+
+/* Subtle press feedback */
+@media (hover: hover) {
+  button:not(:disabled):active,
+  a:active {
+    transform: translateY(0.5px);
   }
 }

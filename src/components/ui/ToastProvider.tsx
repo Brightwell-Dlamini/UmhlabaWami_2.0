@@ -13,25 +13,30 @@ import { Z } from '../../constants/zIndex';
 
 export type ToastTone = 'success' | 'error' | 'info';
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface ToastInput {
   title: string;
   message?: string;
   tone?: ToastTone;
   /** Milliseconds before auto-dismiss. Set to 0 to require manual close. */
   durationMs?: number;
+  /** Optional action button (Undo, Retry, etc.). */
+  action?: ToastAction;
 }
 
-interface Toast extends Required<Omit<ToastInput, 'message'>> {
+interface Toast extends Required<Omit<ToastInput, 'message' | 'action'>> {
   id: string;
   message?: string;
+  action?: ToastAction;
 }
 
 interface ToastContextValue {
-  /** Push a toast. Returns the id so the caller can dismiss it. */
   toast: (input: ToastInput) => string;
-  /** Dismiss a toast by id. */
   dismiss: (id: string) => void;
-  /** Convenience wrappers. */
   success: (title: string, message?: string) => string;
   error: (title: string, message?: string) => string;
   info: (title: string, message?: string) => string;
@@ -44,7 +49,9 @@ const MAX_VISIBLE = 4;
 const TONE_STYLES: Record<ToastTone, { bar: string; icon: React.ReactNode }> = {
   success: {
     bar: 'bg-emerald-600',
-    icon: <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />,
+    icon: (
+      <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+    ),
   },
   error: {
     bar: 'bg-red-600',
@@ -82,10 +89,13 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
         message: input.message,
         tone: input.tone ?? 'info',
         durationMs,
+        action: input.action,
       };
       setToasts((prev) => {
         const trimmed =
-          prev.length >= MAX_VISIBLE ? prev.slice(prev.length - MAX_VISIBLE + 1) : prev;
+          prev.length >= MAX_VISIBLE
+            ? prev.slice(prev.length - MAX_VISIBLE + 1)
+            : prev;
         return [...trimmed, next];
       });
       if (durationMs > 0) {
@@ -97,7 +107,6 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
     [dismiss]
   );
 
-  // Cleanup all timers on unmount.
   useEffect(() => {
     const map = timers.current;
     return () => {
@@ -120,7 +129,6 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
   return (
     <ToastContext.Provider value={value}>
       {children}
-      {/* Viewport */}
       <div
         className={`fixed bottom-6 right-6 ${Z.toast} flex flex-col gap-2 max-w-sm w-[calc(100vw-3rem)] sm:w-auto pointer-events-none`}
         role="region"
@@ -135,9 +143,11 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
               aria-live={t.tone === 'error' ? 'assertive' : 'polite'}
               className="pointer-events-auto relative flex items-start gap-3 pl-4 pr-10 py-3 rounded-2xl bg-white dark:bg-slate-800 shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden animate-in"
             >
-              <span className={`absolute left-0 top-0 bottom-0 w-1 ${tone.bar}`} />
+              <span
+                className={`absolute left-0 top-0 bottom-0 w-1 ${tone.bar}`}
+              />
               <div className="shrink-0 mt-0.5">{tone.icon}</div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="text-xs font-bold text-slate-900 dark:text-white">
                   {t.title}
                 </div>
@@ -145,6 +155,18 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
                   <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
                     {t.message}
                   </div>
+                )}
+                {t.action && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      t.action!.onClick();
+                      dismiss(t.id);
+                    }}
+                    className="mt-2 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-700 text-[11px] font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600"
+                  >
+                    {t.action.label}
+                  </button>
                 )}
               </div>
               <button
