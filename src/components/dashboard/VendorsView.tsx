@@ -1,5 +1,5 @@
 // src/components/dashboard/VendorsView.tsx
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Wrench,
   Search,
