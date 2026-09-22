@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
 import { ProductHome } from './components/ProductHome';
@@ -6,8 +6,10 @@ import { LoginModal } from './components/auth/LoginModal';
 import { RegisterOrgModal } from './components/auth/RegisterOrgModal';
 import { OperationsApp } from './components/OperationsApp';
 import { auth } from './services/auth';
-import { CheckCircle2, WifiOff } from 'lucide-react';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
+import { useToast } from './components/ui/ToastProvider';
+import { Z } from './constants/zIndex';
+import { WifiOff } from 'lucide-react';
 
 function readInitialDarkMode(): boolean {
   try {
@@ -25,13 +27,13 @@ function applyDarkClass(enabled: boolean) {
 }
 
 export default function App() {
-  const [booting, setBooting] = useState(true);
-  const [currentUser, setCurrentUser] = useState(auth.getCurrentUser());
-  const [isDarkMode, setIsDarkMode] = useState(readInitialDarkMode);
-  const [isLoginOpen, setIsLoginOpen] = useState(false);
-  const [isRegisterOrgOpen, setIsRegisterOrgOpen] = useState(false);
-  const [toast, setToast] = useState<{ title: string; message: string } | null>(null);
+  const [booting, setBooting] = React.useState(true);
+  const [currentUser, setCurrentUser] = React.useState(auth.getCurrentUser());
+  const [isDarkMode, setIsDarkMode] = React.useState(readInitialDarkMode);
+  const [isLoginOpen, setIsLoginOpen] = React.useState(false);
+  const [isRegisterOrgOpen, setIsRegisterOrgOpen] = React.useState(false);
   const isOnline = useOnlineStatus();
+  const toast = useToast();
 
   useEffect(() => { applyDarkClass(isDarkMode); }, [isDarkMode]);
 
@@ -43,7 +45,6 @@ export default function App() {
     return auth.subscribe((user) => {
       setCurrentUser((prev) => {
         if (!user) return null;
-        // Keep same reference when identity fields unchanged — prevents form remounts
         if (
           prev &&
           prev.id === user.id &&
@@ -64,10 +65,12 @@ export default function App() {
     setIsDarkMode((prev) => !prev);
   }, []);
 
-  const showToast = (title: string, message: string) => {
-    setToast({ title, message });
-    setTimeout(() => setToast(null), 4000);
-  };
+  const showToast = useCallback(
+    (title: string, message: string) => {
+      toast.success(title, message);
+    },
+    [toast]
+  );
 
   if (booting) {
     return (
@@ -80,7 +83,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">
       {!isOnline && (
-        <div className="bg-amber-500 text-amber-950 px-4 py-2 text-xs font-semibold flex items-center justify-center gap-2 z-40">
+        <div className={`bg-amber-500 text-amber-950 px-4 py-2 text-xs font-semibold flex items-center justify-center gap-2 ${Z.banner}`}>
           <WifiOff className="w-4 h-4" /> You are offline. Changes may not sync.
         </div>
       )}
@@ -106,16 +109,6 @@ export default function App() {
       </div>
 
       {!currentUser && <Footer />}
-
-      {toast && (
-        <div className="fixed bottom-6 right-6 z-50 p-4 rounded-2xl bg-slate-900 text-white shadow-2xl border border-slate-700 flex items-center gap-3 max-w-sm">
-          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-          <div>
-            <div className="text-xs font-bold">{toast.title}</div>
-            <div className="text-[11px] text-slate-300">{toast.message}</div>
-          </div>
-        </div>
-      )}
 
       <LoginModal
         isOpen={isLoginOpen}

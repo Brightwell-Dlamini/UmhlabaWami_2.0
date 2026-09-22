@@ -20,3 +20,23 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Toast entrance — subtle slide + fade. */
+@keyframes uw-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-in {
+  animation: uw-toast-in 180ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-in {
+    animation: none;
+  }
+}

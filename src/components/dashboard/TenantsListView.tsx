@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   Users, Search, PlusCircle, CheckCircle2, Edit3, Trash2, X,
 } from 'lucide-react';
+import { PasswordInput } from '../ui/PasswordInput';
 import { auth } from '../../services/auth';
 import { tenants as tenantsApi } from '../../services/api/tenants';
 import { shops as shopsApi } from '../../services/api/shops';
@@ -12,6 +13,8 @@ import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 import { useRealtime } from '../../hooks/useRealtime';
 import type { Tenant } from '../../types';
+import { useConfirm } from '../ui/ConfirmDialog';
+import { useToast } from '../ui/ToastProvider';
 
 interface Props {
   onOpenCreateTicketForShop?: (shopId: string) => void;
@@ -20,10 +23,12 @@ interface Props {
 
 export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, onViewLeases }) => {
   const orgId = auth.getCurrentOrganization()?.id ?? '';
+  const { confirm } = useConfirm();
+  const toast = useToast();
+
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [selectedCenter, setSelectedCenter] = useState('All');
-  const [feedback, setFeedback] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<Tenant | null>(null);
 
@@ -42,18 +47,23 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
   const create = useSupabaseMutation({
     mutationFn: (input: Parameters<typeof tenantsApi.create>[0]) => tenantsApi.create(input),
     invalidateKeys: ['tenants', 'shops', 'profiles'],
-    onSuccess: (t) => { setFeedback(`Tenant "${t.business_name}" registered.`); setTimeout(() => setFeedback(''), 3000); setShowAdd(false); },
-    onError: (e) => { setFeedback(`Failed: ${e.message}`); setTimeout(() => setFeedback(''), 6000); },
+    onSuccess: (t) => {
+      toast.success('Tenant registered', t.business_name);
+      setShowAdd(false);
+    },
+    onError: (e) => toast.error('Registration failed', e.message),
   });
   const update = useSupabaseMutation({
     mutationFn: ({ id, patch }: { id: string; patch: Partial<Tenant> }) => tenantsApi.update(id, patch),
     invalidateKeys: ['tenants'],
-    onSuccess: () => { setFeedback('Tenant updated.'); setTimeout(() => setFeedback(''), 3000); setEditing(null); },
+    onSuccess: () => {
+      toast.success('Tenant updated');
+      setEditing(null);
+    },
   });
   const remove = useSupabaseMutation({
     mutationFn: (id: string) => tenantsApi.remove(id),
     invalidateKeys: ['tenants', 'shops'],
-    onSuccess: () => { setFeedback('Tenant removed.'); setTimeout(() => setFeedback(''), 3000); },
   });
 
   const filtered = useMemo(() => tenants.filter((t) => {
@@ -70,6 +80,26 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
     }
     return true;
   }), [tenants, statusFilter, selectedCenter, search]);
+
+  const handleRemove = async (t: Tenant) => {
+    const ok = await confirm({
+      title: `Remove ${t.business_name}?`,
+      message:
+        'The tenant record will be detached from its unit. Historical invoices and tickets are kept.',
+      confirmLabel: 'Remove tenant',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await remove.mutate(t.id);
+      toast.success('Tenant removed');
+    } catch (e) {
+      toast.error(
+        'Remove failed',
+        e instanceof Error ? e.message : 'Could not remove tenant.'
+      );
+    }
+  };
 
   if (!orgId) return <div className="p-6 text-slate-500 text-sm">No organisation context.</div>;
 
@@ -93,14 +123,6 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
           </button>
         </div>
       </div>
-
-      {feedback && (
-        <div className={`p-3 rounded-xl text-xs flex items-center gap-2 border ${
-          /fail/i.test(feedback) ? 'bg-red-50 border-red-300 text-red-800' : 'bg-emerald-50 border-emerald-300 text-emerald-800'
-        }`}>
-          <CheckCircle2 className="w-4 h-4" /> {feedback}
-        </div>
-      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
@@ -204,7 +226,7 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
                             Log issue
                           </button>
                         )}
-                        <button onClick={() => { if (confirm(`Remove tenant ${t.business_name}?`)) remove.mutate(t.id); }} type="button"
+                        <button onClick={() => handleRemove(t)} type="button"
                           className="p-1.5 rounded-lg border text-red-500 hover:bg-red-50">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -234,7 +256,10 @@ export const TenantsListView: React.FC<Props> = ({ onOpenCreateTicketForShop, on
       )}
     </div>
   );
-};
+}
+
+// --- TenantForm (unchanged logic; uses .fixed overlay directly to avoid
+//     over-refactoring in Phase 2. Migrate to <Modal> in Phase 3 if desired.) ---
 
 function TenantForm({
   centers, shops, properties, portalUsers, initial, onCancel, onSubmit,

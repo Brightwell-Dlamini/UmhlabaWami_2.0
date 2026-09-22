@@ -5,7 +5,6 @@ import {
   Bell,
   PlusCircle,
   Send,
-  X,
   Trash2,
   FileText,
   Search,
@@ -37,6 +36,9 @@ import {
   suggestedReminderType,
 } from './calculators';
 import type { Tenant } from '../../types';
+import { Modal } from '../ui/Modal';
+import { useConfirm } from '../ui/ConfirmDialog';
+import { useToast } from '../ui/ToastProvider';
 
 export type ItemsSubTab =
   | 'items'
@@ -46,37 +48,20 @@ export type ItemsSubTab =
   | 'requisitions';
 
 interface Props {
-  /** Optional sub-tab to open on mount or when the prop changes. */
   initialSubTab?: ItemsSubTab;
 }
 
 export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
   const orgId = auth.getCurrentOrganization()?.id ?? '';
+  const toast = useToast();
+  const { confirm } = useConfirm();
 
-  const [subTab, setSubTab] = useState<ItemsSubTab>(
-    initialSubTab ?? 'items'
-  );
-  const [feedback, setFeedback] = useState<{
-    text: string;
-    tone: 'ok' | 'error';
-  } | null>(null);
+  const [subTab, setSubTab] = useState<ItemsSubTab>(initialSubTab ?? 'items');
 
-  // Sync when parent routes to a new sub-tab.
   useEffect(() => {
-    if (initialSubTab && initialSubTab !== subTab) {
-      setSubTab(initialSubTab);
-    }
+    if (initialSubTab && initialSubTab !== subTab) setSubTab(initialSubTab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSubTab]);
-
-  const showFeedback = (
-    text: string,
-    tone: 'ok' | 'error' = 'ok',
-    ms = 3500
-  ) => {
-    setFeedback({ text, tone });
-    setTimeout(() => setFeedback(null), ms);
-  };
 
   const [periodStart, setPeriodStart] = useState(() => {
     const d = new Date();
@@ -149,7 +134,6 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
     enabled: !!orgId,
   });
 
-  // ----- Items -----
   const createItem = useSupabaseMutation({
     mutationFn: (input: Parameters<typeof itemsApi.create>[0]) =>
       itemsApi.create(input),
@@ -165,7 +149,6 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
     invalidateKeys: ['invoice_items'],
   });
 
-  // ----- Expenses -----
   const createExpense = useSupabaseMutation({
     mutationFn: (input: {
       description: string;
@@ -191,7 +174,6 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
     invalidateKeys: ['finance_transactions'],
   });
 
-  // ----- Requisitions -----
   const createRequest = useSupabaseMutation({
     mutationFn: (input: Parameters<typeof reqApi.create>[0]) =>
       reqApi.create(input),
@@ -206,13 +188,11 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
     invalidateKeys: ['financial_requests', 'finance_transactions'],
   });
 
-  // ----- Reminders -----
   const sendReminder = useSupabaseMutation({
     mutationFn: (invoiceId: string) => remindersApi.sendReminder(invoiceId),
     invalidateKeys: ['invoices', 'payment_reminders'],
   });
 
-  // ----- Derived -----
   const overdue = useMemo(
     () => selectOverdueInvoices(invoices),
     [invoices]
@@ -233,7 +213,6 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
     [transactions]
   );
 
-  // ----- Actions -----
   const handleGenerateStatement = async (tenant: Tenant) => {
     const org = auth.getCurrentOrganization();
     if (!org) return;
@@ -250,14 +229,11 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
         periodEnd
       );
       generateStatementPdf(statement, tenant, invoices, payments, org);
-      showFeedback(`Statement generated for ${tenant.business_name}.`);
+      toast.success('Statement generated', `Ready for ${tenant.business_name}.`);
     } catch (e) {
-      showFeedback(
-        e instanceof Error
-          ? `Statement failed: ${e.message}`
-          : 'Statement failed.',
-        'error',
-        5000
+      toast.error(
+        'Statement failed',
+        e instanceof Error ? e.message : 'Could not generate statement.'
       );
     } finally {
       setGeneratingId(null);
@@ -270,12 +246,11 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
   ) => {
     try {
       await sendReminder.mutate(invoiceId);
-      showFeedback(`Reminder logged for ${invoiceNumber}.`);
+      toast.success('Reminder logged', `Reminder recorded for ${invoiceNumber}.`);
     } catch (e) {
-      showFeedback(
-        e instanceof Error ? e.message : 'Failed to send reminder.',
-        'error',
-        5000
+      toast.error(
+        'Reminder failed',
+        e instanceof Error ? e.message : 'Could not send reminder.'
       );
     }
   };
@@ -285,13 +260,13 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
   ) => {
     try {
       await createItem.mutate(input);
-      showFeedback('Item created.');
+      toast.success('Item created');
       setShowItemModal(false);
       setEditingItem(null);
     } catch (e) {
-      showFeedback(
-        e instanceof Error ? e.message : 'Failed to create item.',
-        'error'
+      toast.error(
+        'Create failed',
+        e instanceof Error ? e.message : 'Could not create item.'
       );
     }
   };
@@ -302,26 +277,32 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
   ) => {
     try {
       await updateItem.mutate({ id, patch });
-      showFeedback('Item updated.');
+      toast.success('Item updated');
       setShowItemModal(false);
       setEditingItem(null);
     } catch (e) {
-      showFeedback(
-        e instanceof Error ? e.message : 'Failed to update item.',
-        'error'
+      toast.error(
+        'Update failed',
+        e instanceof Error ? e.message : 'Could not update item.'
       );
     }
   };
 
   const handleRemoveItem = async (id: string, name: string) => {
-    if (!confirm(`Delete "${name}"?`)) return;
+    const ok = await confirm({
+      title: `Delete "${name}"?`,
+      message: 'This billing item will no longer be available for quotes and invoices.',
+      confirmLabel: 'Delete item',
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       await removeItem.mutate(id);
-      showFeedback('Item removed.');
+      toast.success('Item removed');
     } catch (e) {
-      showFeedback(
-        e instanceof Error ? e.message : 'Failed to remove item.',
-        'error'
+      toast.error(
+        'Remove failed',
+        e instanceof Error ? e.message : 'Could not remove item.'
       );
     }
   };
@@ -334,25 +315,31 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
   }) => {
     try {
       await createExpense.mutate(input);
-      showFeedback('Expense recorded.');
+      toast.success('Expense recorded');
       setShowExpenseModal(false);
     } catch (e) {
-      showFeedback(
-        e instanceof Error ? e.message : 'Failed to record expense.',
-        'error'
+      toast.error(
+        'Expense failed',
+        e instanceof Error ? e.message : 'Could not record expense.'
       );
     }
   };
 
   const handleDeleteExpense = async (id: string) => {
-    if (!confirm('Delete this expense?')) return;
+    const ok = await confirm({
+      title: 'Delete this expense?',
+      message: 'It will be removed from the ledger immediately.',
+      confirmLabel: 'Delete expense',
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       await deleteExpense.mutate(id);
-      showFeedback('Expense removed.');
+      toast.success('Expense removed');
     } catch (e) {
-      showFeedback(
-        e instanceof Error ? e.message : 'Failed to remove expense.',
-        'error'
+      toast.error(
+        'Remove failed',
+        e instanceof Error ? e.message : 'Could not remove expense.'
       );
     }
   };
@@ -360,11 +347,11 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
   const handleApproveRequest = async (id: string) => {
     try {
       await approveRequest.mutate(id);
-      showFeedback('Requisition approved.');
+      toast.success('Requisition approved');
     } catch (e) {
-      showFeedback(
-        e instanceof Error ? e.message : 'Failed to approve.',
-        'error'
+      toast.error(
+        'Approve failed',
+        e instanceof Error ? e.message : 'Could not approve.'
       );
     }
   };
@@ -372,11 +359,11 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
   const handleDisburseRequest = async (id: string) => {
     try {
       await disburseRequest.mutate(id);
-      showFeedback('Requisition disbursed.');
+      toast.success('Requisition disbursed');
     } catch (e) {
-      showFeedback(
-        e instanceof Error ? e.message : 'Failed to disburse.',
-        'error'
+      toast.error(
+        'Disburse failed',
+        e instanceof Error ? e.message : 'Could not disburse.'
       );
     }
   };
@@ -391,42 +378,14 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
 
   return (
     <div className="space-y-6">
-      {feedback && (
-        <div
-          className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
-            feedback.tone === 'ok'
-              ? 'bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 text-emerald-800 dark:text-emerald-200'
-              : 'bg-red-50 dark:bg-red-950/40 border border-red-300 text-red-800 dark:text-red-200'
-          }`}
-        >
-          {feedback.text}
-        </div>
-      )}
-
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 pb-2 flex-wrap">
         {(
           [
-            {
-              id: 'items',
-              label: `Items catalog (${catalog.length})`,
-              icon: Package,
-            },
+            { id: 'items', label: `Items catalog (${catalog.length})`, icon: Package },
             { id: 'statements', label: 'Statements', icon: FileText },
-            {
-              id: 'reminders',
-              label: `Overdue (${overdue.length})`,
-              icon: Bell,
-            },
-            {
-              id: 'expenses',
-              label: `Expenses (${expenseTransactions.length})`,
-              icon: Receipt,
-            },
-            {
-              id: 'requisitions',
-              label: `Requisitions (${requests.length})`,
-              icon: CreditCard,
-            },
+            { id: 'reminders', label: `Overdue (${overdue.length})`, icon: Bell },
+            { id: 'expenses', label: `Expenses (${expenseTransactions.length})`, icon: Receipt },
+            { id: 'requisitions', label: `Requisitions (${requests.length})`, icon: CreditCard },
           ] as {
             id: ItemsSubTab;
             label: string;
@@ -488,44 +447,28 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
               <tbody className="divide-y">
                 {catalog.length === 0 ? (
                   <tr>
-                    <td
-                      colSpan={6}
-                      className="p-8 text-center text-slate-400"
-                    >
+                    <td colSpan={6} className="p-8 text-center text-slate-400">
                       No items yet.
                     </td>
                   </tr>
                 ) : (
                   catalog.map((it) => (
                     <tr key={it.id}>
-                      <td className="px-3 py-3 font-mono">
-                        {it.code ?? '—'}
-                      </td>
+                      <td className="px-3 py-3 font-mono">{it.code ?? '—'}</td>
                       <td className="px-3 py-3 font-bold">{it.name}</td>
-                      <td className="px-3 py-3 text-slate-500">
-                        {it.category ?? '—'}
-                      </td>
-                      <td className="px-3 py-3 text-right font-bold">
-                        E{it.unit_price.toLocaleString()}
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        {(it.tax_rate * 100).toFixed(0)}%
-                      </td>
+                      <td className="px-3 py-3 text-slate-500">{it.category ?? '—'}</td>
+                      <td className="px-3 py-3 text-right font-bold">E{it.unit_price.toLocaleString()}</td>
+                      <td className="px-3 py-3 text-right">{(it.tax_rate * 100).toFixed(0)}%</td>
                       <td className="px-3 py-3 text-right">
                         <button
-                          onClick={() => {
-                            setEditingItem(it);
-                            setShowItemModal(true);
-                          }}
+                          onClick={() => { setEditingItem(it); setShowItemModal(true); }}
                           className="text-[11px] font-semibold text-blue-600 hover:underline mr-3"
                           type="button"
                         >
                           Edit
                         </button>
                         <button
-                          onClick={() =>
-                            handleRemoveItem(it.id, it.name)
-                          }
+                          onClick={() => handleRemoveItem(it.id, it.name)}
                           disabled={removeItem.loading}
                           className="p-1 text-slate-400 hover:text-red-500 disabled:opacity-60"
                           type="button"
@@ -584,12 +527,8 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
                   key={t.id}
                   className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 space-y-2"
                 >
-                  <div className="font-bold text-xs">
-                    {t.business_name}
-                  </div>
-                  <div className="text-[11px] text-slate-500">
-                    {t.contact_person}
-                  </div>
+                  <div className="font-bold text-xs">{t.business_name}</div>
+                  <div className="text-[11px] text-slate-500">{t.contact_person}</div>
                   <div className="pt-2 border-t">
                     <button
                       onClick={() => handleGenerateStatement(t)}
@@ -597,9 +536,7 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
                       className="text-[11px] font-semibold text-blue-600 hover:underline disabled:opacity-60"
                       type="button"
                     >
-                      {generatingId === t.id
-                        ? 'Generating…'
-                        : 'Generate PDF'}
+                      {generatingId === t.id ? 'Generating…' : 'Generate PDF'}
                     </button>
                   </div>
                 </div>
@@ -638,9 +575,7 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
                   <th className="px-3 py-2.5">Invoice</th>
                   <th className="px-3 py-2.5">Tenant</th>
                   <th className="px-3 py-2.5">Due</th>
-                  <th className="px-3 py-2.5 text-right">
-                    Days overdue
-                  </th>
+                  <th className="px-3 py-2.5 text-right">Days overdue</th>
                   <th className="px-3 py-2.5 text-right">Outstanding</th>
                   <th className="px-3 py-2.5">Suggested</th>
                   <th className="px-3 py-2.5 text-right">Action</th>
@@ -649,10 +584,7 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
               <tbody className="divide-y">
                 {filteredOverdue.length === 0 ? (
                   <tr>
-                    <td
-                      colSpan={7}
-                      className="p-8 text-center text-slate-400"
-                    >
+                    <td colSpan={7} className="p-8 text-center text-slate-400">
                       No overdue invoices.
                     </td>
                   </tr>
@@ -665,19 +597,12 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
                     const type = suggestedReminderType(days);
                     return (
                       <tr key={inv.id}>
-                        <td className="px-3 py-3 font-mono font-bold">
-                          {inv.invoice_number}
-                        </td>
+                        <td className="px-3 py-3 font-mono font-bold">{inv.invoice_number}</td>
                         <td className="px-3 py-3">{inv.tenant_name}</td>
-                        <td className="px-3 py-3 text-slate-500">
-                          {inv.due_date}
-                        </td>
-                        <td className="px-3 py-3 text-right font-bold text-red-600">
-                          {days}
-                        </td>
+                        <td className="px-3 py-3 text-slate-500">{inv.due_date}</td>
+                        <td className="px-3 py-3 text-right font-bold text-red-600">{days}</td>
                         <td className="px-3 py-3 text-right font-bold">
-                          E
-                          {(inv.total - inv.amount_paid).toLocaleString()}
+                          E{(inv.total - inv.amount_paid).toLocaleString()}
                         </td>
                         <td className="px-3 py-3">
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
@@ -686,12 +611,7 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
                         </td>
                         <td className="px-3 py-3 text-right">
                           <button
-                            onClick={() =>
-                              handleSendReminder(
-                                inv.id,
-                                inv.invoice_number
-                              )
-                            }
+                            onClick={() => handleSendReminder(inv.id, inv.invoice_number)}
                             disabled={sendReminder.loading}
                             className="text-[11px] font-semibold text-blue-600 hover:underline flex items-center gap-1 ml-auto disabled:opacity-60"
                             type="button"
@@ -716,8 +636,7 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
             <div>
               <h3 className="font-bold text-sm">Expense ledger</h3>
               <p className="text-xs text-slate-500 mt-1">
-                All outgoing payments — maintenance, utilities, security,
-                vendors
+                All outgoing payments — maintenance, utilities, security, vendors
               </p>
             </div>
             <button
@@ -745,30 +664,21 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
               <tbody className="divide-y">
                 {expenseTransactions.length === 0 ? (
                   <tr>
-                    <td
-                      colSpan={6}
-                      className="p-8 text-center text-slate-400"
-                    >
+                    <td colSpan={6} className="p-8 text-center text-slate-400">
                       No expenses recorded.
                     </td>
                   </tr>
                 ) : (
                   expenseTransactions.map((tx) => {
-                    const center = centers.find(
-                      (c) => c.id === tx.property_id
-                    );
+                    const center = centers.find((c) => c.id === tx.property_id);
                     return (
                       <tr key={tx.id}>
-                        <td className="px-3 py-3 text-slate-500">
-                          {tx.date}
-                        </td>
+                        <td className="px-3 py-3 text-slate-500">{tx.date}</td>
                         <td className="px-3 py-3 font-mono text-blue-600">
                           {tx.reference || tx.id.slice(0, 8)}
                         </td>
                         <td className="px-3 py-3">{tx.description}</td>
-                        <td className="px-3 py-3 text-slate-500">
-                          {center?.name || '—'}
-                        </td>
+                        <td className="px-3 py-3 text-slate-500">{center?.name || '—'}</td>
                         <td className="px-3 py-3 text-right font-bold">
                           E{tx.amount.toLocaleString()}
                         </td>
@@ -828,10 +738,7 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
               <tbody className="divide-y">
                 {requests.length === 0 ? (
                   <tr>
-                    <td
-                      colSpan={6}
-                      className="p-8 text-center text-slate-400"
-                    >
+                    <td colSpan={6} className="p-8 text-center text-slate-400">
                       No requisitions.
                     </td>
                   </tr>
@@ -881,70 +788,64 @@ export function ItemsRemindersTab({ initialSubTab }: Props = {}) {
       )}
 
       {/* Modals */}
-      {showItemModal && (
-        <ItemForm
-          initial={editingItem}
-          busy={createItem.loading || updateItem.loading}
-          onCancel={() => {
-            setShowItemModal(false);
-            setEditingItem(null);
-          }}
-          onSubmit={(input) => {
-            if (editingItem) {
-              handleUpdateItem(
-                editingItem.id,
-                input as Partial<InvoiceItem>
-              );
-            } else {
-              handleCreateItem(
-                input as Parameters<typeof itemsApi.create>[0]
-              );
-            }
-          }}
-        />
-      )}
+      <ItemForm
+        open={showItemModal}
+        initial={editingItem}
+        busy={createItem.loading || updateItem.loading}
+        onCancel={() => {
+          setShowItemModal(false);
+          setEditingItem(null);
+        }}
+        onSubmit={(input) => {
+          if (editingItem) {
+            handleUpdateItem(editingItem.id, input as Partial<InvoiceItem>);
+          } else {
+            handleCreateItem(input as Parameters<typeof itemsApi.create>[0]);
+          }
+        }}
+      />
 
-      {showExpenseModal && (
-        <ExpenseForm
-          centers={centers}
-          busy={createExpense.loading}
-          onCancel={() => setShowExpenseModal(false)}
-          onSubmit={handleCreateExpense}
-        />
-      )}
+      <ExpenseForm
+        open={showExpenseModal}
+        centers={centers}
+        busy={createExpense.loading}
+        onCancel={() => setShowExpenseModal(false)}
+        onSubmit={handleCreateExpense}
+      />
 
-      {showRequisitionModal && (
-        <RequisitionForm
-          busy={createRequest.loading}
-          onCancel={() => setShowRequisitionModal(false)}
-          onSubmit={async (input) => {
-            try {
-              await createRequest.mutate(input);
-              showFeedback('Requisition submitted.');
-              setShowRequisitionModal(false);
-            } catch (e) {
-              showFeedback(
-                e instanceof Error ? e.message : 'Failed to submit.',
-                'error'
-              );
-            }
-          }}
-        />
-      )}
+      <RequisitionForm
+        open={showRequisitionModal}
+        busy={createRequest.loading}
+        onCancel={() => setShowRequisitionModal(false)}
+        onSubmit={async (input) => {
+          try {
+            await createRequest.mutate(input);
+            toast.success('Requisition submitted');
+            setShowRequisitionModal(false);
+          } catch (e) {
+            toast.error(
+              'Submit failed',
+              e instanceof Error ? e.message : 'Could not submit.'
+            );
+          }
+        }}
+      />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Modals
+// Modals — all use the shared <Modal> primitive
 // ---------------------------------------------------------------------------
 
 function ItemForm({
+  open,
   initial,
   busy,
   onCancel,
   onSubmit,
 }: {
+  open: boolean;
   initial: InvoiceItem | null;
   busy: boolean;
   onCancel: () => void;
@@ -952,129 +853,134 @@ function ItemForm({
 }) {
   const [code, setCode] = useState(initial?.code ?? '');
   const [name, setName] = useState(initial?.name ?? '');
-  const [description, setDescription] = useState(
-    initial?.description ?? ''
-  );
+  const [description, setDescription] = useState(initial?.description ?? '');
   const [unitPrice, setUnitPrice] = useState(initial?.unit_price ?? 0);
   const [taxRate, setTaxRate] = useState(initial?.tax_rate ?? 0.15);
-  const [defaultQty, setDefaultQty] = useState(
-    initial?.default_quantity ?? 1
-  );
+  const [defaultQty, setDefaultQty] = useState(initial?.default_quantity ?? 1);
   const [category, setCategory] = useState(initial?.category ?? 'Other');
 
+  // Reset when reopened with a different `initial`.
+  useEffect(() => {
+    if (!open) return;
+    setCode(initial?.code ?? '');
+    setName(initial?.name ?? '');
+    setDescription(initial?.description ?? '');
+    setUnitPrice(initial?.unit_price ?? 0);
+    setTaxRate(initial?.tax_rate ?? 0.15);
+    setDefaultQty(initial?.default_quantity ?? 1);
+    setCategory(initial?.category ?? 'Other');
+  }, [open, initial?.id]);
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border border-slate-200 dark:border-slate-700 p-6 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-base">
-            {initial ? 'Edit item' : 'New billing item'}
-          </h3>
-          <button onClick={onCancel} type="button">
-            <X className="w-5 h-5 text-slate-400" />
+    <Modal
+      open={open}
+      onClose={onCancel}
+      title={initial ? 'Edit item' : 'New billing item'}
+      size="sm"
+    >
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit({
+            code: code.trim() || undefined,
+            name: name.trim(),
+            description: description.trim() || undefined,
+            unit_price: unitPrice,
+            tax_rate: taxRate,
+            default_quantity: defaultQty,
+            category: category || undefined,
+          });
+        }}
+        className="space-y-3 text-xs"
+      >
+        <input
+          placeholder="Code (optional)"
+          value={code}
+          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-mono"
+        />
+        <input
+          required
+          placeholder="Name *"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+        />
+        <input
+          placeholder="Description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+        />
+        <div className="grid grid-cols-3 gap-3">
+          <input
+            type="number"
+            placeholder="Unit price"
+            value={unitPrice}
+            onChange={(e) => setUnitPrice(Number(e.target.value) || 0)}
+            className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold"
+          />
+          <select
+            value={taxRate}
+            onChange={(e) => setTaxRate(Number(e.target.value))}
+            className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          >
+            <option value={0}>0%</option>
+            <option value={0.15}>15%</option>
+            <option value={0.14}>14%</option>
+          </select>
+          <input
+            type="number"
+            placeholder="Default qty"
+            value={defaultQty}
+            onChange={(e) => setDefaultQty(Number(e.target.value) || 0)}
+            className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          />
+        </div>
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+        >
+          <option>Rent</option>
+          <option>Service Charge</option>
+          <option>Utility</option>
+          <option>Parking</option>
+          <option>Signage</option>
+          <option>Penalty</option>
+          <option>Deposit</option>
+          <option>Fitout</option>
+          <option>Other</option>
+        </select>
+        <div className="pt-3 border-t flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={busy}
+            className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-60"
+          >
+            {busy ? 'Saving…' : initial ? 'Save' : 'Create'}
           </button>
         </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSubmit({
-              code: code.trim() || undefined,
-              name: name.trim(),
-              description: description.trim() || undefined,
-              unit_price: unitPrice,
-              tax_rate: taxRate,
-              default_quantity: defaultQty,
-              category: category || undefined,
-            });
-          }}
-          className="space-y-3 text-xs"
-        >
-          <input
-            placeholder="Code (optional)"
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-mono"
-          />
-          <input
-            required
-            placeholder="Name *"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-          />
-          <input
-            placeholder="Description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-          />
-          <div className="grid grid-cols-3 gap-3">
-            <input
-              type="number"
-              placeholder="Unit price"
-              value={unitPrice}
-              onChange={(e) => setUnitPrice(Number(e.target.value) || 0)}
-              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold"
-            />
-            <select
-              value={taxRate}
-              onChange={(e) => setTaxRate(Number(e.target.value))}
-              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-            >
-              <option value={0}>0%</option>
-              <option value={0.15}>15%</option>
-              <option value={0.14}>14%</option>
-            </select>
-            <input
-              type="number"
-              placeholder="Default qty"
-              value={defaultQty}
-              onChange={(e) => setDefaultQty(Number(e.target.value) || 0)}
-              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-            />
-          </div>
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-          >
-            <option>Rent</option>
-            <option>Service Charge</option>
-            <option>Utility</option>
-            <option>Parking</option>
-            <option>Signage</option>
-            <option>Penalty</option>
-            <option>Deposit</option>
-            <option>Fitout</option>
-            <option>Other</option>
-          </select>
-          <div className="pt-3 border-t flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={busy}
-              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-60"
-            >
-              {busy ? 'Saving…' : initial ? 'Save' : 'Create'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+      </form>
+    </Modal>
   );
 }
 
 function ExpenseForm({
+  open,
   centers,
   busy,
   onCancel,
   onSubmit,
 }: {
+  open: boolean;
   centers: { id: string; name: string }[];
   busy: boolean;
   onCancel: () => void;
@@ -1090,95 +996,90 @@ function ExpenseForm({
   const [amount, setAmount] = useState(0);
   const [centerId, setCenterId] = useState(centers[0]?.id ?? '');
 
+  useEffect(() => {
+    if (!open) return;
+    setDescription('');
+    setCategory('Maintenance');
+    setAmount(0);
+    setCenterId(centers[0]?.id ?? '');
+  }, [open, centers]);
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border border-slate-200 dark:border-slate-700 p-6 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-base flex items-center gap-2">
-            <Receipt className="w-5 h-5 text-blue-600" /> Record expense
-          </h3>
-          <button onClick={onCancel} type="button">
-            <X className="w-5 h-5 text-slate-400" />
+    <Modal
+      open={open}
+      onClose={onCancel}
+      title="Record expense"
+      icon={<Receipt className="w-5 h-5 text-blue-600" />}
+      size="sm"
+    >
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit({ description, category, amount, shopping_center_id: centerId });
+        }}
+        className="space-y-3 text-xs"
+      >
+        <input
+          required
+          placeholder="Description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+        />
+        <div className="grid grid-cols-2 gap-3">
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          >
+            <option>Maintenance</option>
+            <option>Utilities</option>
+            <option>Security</option>
+            <option>Other</option>
+          </select>
+          <select
+            value={centerId}
+            onChange={(e) => setCenterId(e.target.value)}
+            className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          >
+            {centers.length === 0 && <option value="">No centres</option>}
+            {centers.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+        <input
+          type="number"
+          required
+          placeholder="Amount (E)"
+          value={amount || ''}
+          onChange={(e) => setAmount(Number(e.target.value) || 0)}
+          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold"
+        />
+        <div className="pt-3 border-t flex justify-end gap-2">
+          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={busy}
+            className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-60"
+          >
+            {busy ? 'Saving…' : 'Save'}
           </button>
         </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSubmit({
-              description,
-              category,
-              amount,
-              shopping_center_id: centerId,
-            });
-          }}
-          className="space-y-3 text-xs"
-        >
-          <input
-            required
-            placeholder="Description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-          />
-          <div className="grid grid-cols-2 gap-3">
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-            >
-              <option>Maintenance</option>
-              <option>Utilities</option>
-              <option>Security</option>
-              <option>Other</option>
-            </select>
-            <select
-              value={centerId}
-              onChange={(e) => setCenterId(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-            >
-              {centers.length === 0 && <option value="">No centres</option>}
-              {centers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <input
-            type="number"
-            required
-            placeholder="Amount (E)"
-            value={amount || ''}
-            onChange={(e) => setAmount(Number(e.target.value) || 0)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold"
-          />
-          <div className="pt-3 border-t flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={busy}
-              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-60"
-            >
-              {busy ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+      </form>
+    </Modal>
   );
 }
 
 function RequisitionForm({
+  open,
   busy,
   onCancel,
   onSubmit,
 }: {
+  open: boolean;
   busy: boolean;
   onCancel: () => void;
   onSubmit: (input: {
@@ -1194,78 +1095,69 @@ function RequisitionForm({
   const [amount, setAmount] = useState(0);
   const [purpose, setPurpose] = useState('');
 
+  useEffect(() => {
+    if (!open) return;
+    setRequestedBy(user?.name ?? '');
+    setType('Petty Cash');
+    setAmount(0);
+    setPurpose('');
+  }, [open, user?.name]);
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border border-slate-200 dark:border-slate-700 p-6 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-base">New requisition</h3>
-          <button onClick={onCancel} type="button">
-            <X className="w-5 h-5 text-slate-400" />
+    <Modal open={open} onClose={onCancel} title="New requisition" size="sm">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit({ requested_by_name: requestedBy, type, amount, purpose });
+        }}
+        className="space-y-3 text-xs"
+      >
+        <input
+          required
+          placeholder="Requested by"
+          value={requestedBy}
+          onChange={(e) => setRequestedBy(e.target.value)}
+          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+        />
+        <select
+          value={type}
+          onChange={(e) => setType(e.target.value)}
+          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+        >
+          <option>Petty Cash</option>
+          <option>Purchase Request</option>
+          <option>Maintenance Funding</option>
+          <option>Vendor Payment</option>
+        </select>
+        <textarea
+          required
+          rows={2}
+          placeholder="Purpose"
+          value={purpose}
+          onChange={(e) => setPurpose(e.target.value)}
+          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+        />
+        <input
+          type="number"
+          required
+          placeholder="Amount (E)"
+          value={amount || ''}
+          onChange={(e) => setAmount(Number(e.target.value) || 0)}
+          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold"
+        />
+        <div className="pt-3 border-t flex justify-end gap-2">
+          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={busy}
+            className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-60"
+          >
+            {busy ? 'Submitting…' : 'Submit'}
           </button>
         </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSubmit({
-              requested_by_name: requestedBy,
-              type,
-              amount,
-              purpose,
-            });
-          }}
-          className="space-y-3 text-xs"
-        >
-          <input
-            required
-            placeholder="Requested by"
-            value={requestedBy}
-            onChange={(e) => setRequestedBy(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-          />
-          <select
-            value={type}
-            onChange={(e) => setType(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-          >
-            <option>Petty Cash</option>
-            <option>Purchase Request</option>
-            <option>Maintenance Funding</option>
-            <option>Vendor Payment</option>
-          </select>
-          <textarea
-            required
-            rows={2}
-            placeholder="Purpose"
-            value={purpose}
-            onChange={(e) => setPurpose(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
-          />
-          <input
-            type="number"
-            required
-            placeholder="Amount (E)"
-            value={amount || ''}
-            onChange={(e) => setAmount(Number(e.target.value) || 0)}
-            className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold"
-          />
-          <div className="pt-3 border-t flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={busy}
-              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-60"
-            >
-              {busy ? 'Submitting…' : 'Submit'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+      </form>
+    </Modal>
   );
 }

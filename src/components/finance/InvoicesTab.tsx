@@ -2,8 +2,6 @@ import React, { useMemo, useState } from 'react';
 import {
   FileText,
   PlusCircle,
-  CheckCircle2,
-  X,
   Trash2,
   Download,
   Search,
@@ -17,6 +15,10 @@ import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 import { useRealtime } from '../../hooks/useRealtime';
 import { generateInvoicePdf } from '../../services/pdf';
 import type { Invoice, PaymentRecord } from '../../types';
+import { Modal } from '../ui/Modal';
+import { useConfirm } from '../ui/ConfirmDialog';
+import { useToast } from '../ui/ToastProvider';
+import { EmptyState } from '../ui/EmptyState';
 
 const STATUS_FILTERS = [
   'All', 'Draft', 'Sent', 'Partially Paid', 'Paid', 'Overdue', 'Cancelled',
@@ -40,9 +42,9 @@ function orgBanking() {
 export function InvoicesTab() {
   const org = auth.getCurrentOrganization();
   const orgId = org?.id ?? '';
+  const toast = useToast();
+  const { confirm } = useConfirm();
 
-  const [feedback, setFeedback] = useState<string | null>(null);
-  const [feedbackTone, setFeedbackTone] = useState<'ok' | 'error'>('ok');
   const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
@@ -50,12 +52,6 @@ export function InvoicesTab() {
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState<PaymentRecord['method']>('EFT');
   const [payRef, setPayRef] = useState('');
-
-  const showFeedback = (text: string, tone: 'ok' | 'error' = 'ok', ms = 3500) => {
-    setFeedback(text);
-    setFeedbackTone(tone);
-    setTimeout(() => setFeedback(null), ms);
-  };
 
   const { data: invoices = [] } = useSupabaseQuery(
     ['invoices', orgId],
@@ -148,13 +144,19 @@ export function InvoicesTab() {
       const n = await bulkGenerate.mutate(undefined as never);
       const period = new Date();
       const label = period.toLocaleString(undefined, { month: 'long', year: 'numeric' });
-      showFeedback(
-        n > 0
-          ? `Generated ${n} rent invoice${n === 1 ? '' : 's'} for ${label}.`
-          : `No invoices generated for ${label}.`
-      );
+      if (n > 0) {
+        toast.success(
+          `Generated ${n} invoice${n === 1 ? '' : 's'}`,
+          `Rent invoices for ${label} are ready.`
+        );
+      } else {
+        toast.info('Nothing generated', `No rent invoices were needed for ${label}.`);
+      }
     } catch (e) {
-      showFeedback(e instanceof Error ? e.message : 'Failed to generate invoices.', 'error', 5000);
+      toast.error(
+        'Generation failed',
+        e instanceof Error ? e.message : 'Could not generate invoices.'
+      );
     }
   };
 
@@ -176,20 +178,35 @@ export function InvoicesTab() {
         method: payMethod,
         reference: payRef || undefined,
       });
-      showFeedback(`Payment of E${amount.toLocaleString()} recorded for ${payModal.invoice_number}.`);
+      toast.success(
+        'Payment recorded',
+        `E${amount.toLocaleString()} applied to ${payModal.invoice_number}.`
+      );
       setPayModal(null);
     } catch (e) {
-      showFeedback(e instanceof Error ? e.message : 'Failed to record payment.', 'error', 5000);
+      toast.error(
+        'Payment failed',
+        e instanceof Error ? e.message : 'Could not record payment.'
+      );
     }
   };
 
   const handleDelete = async (inv: Invoice) => {
-    if (!confirm(`Delete invoice ${inv.invoice_number}? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: `Delete invoice ${inv.invoice_number}?`,
+      message: 'This cannot be undone. Payment history attached to this invoice will be orphaned.',
+      confirmLabel: 'Delete invoice',
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       await deleteInvoice.mutate(inv.id);
-      showFeedback(`Invoice ${inv.invoice_number} deleted.`);
+      toast.success('Invoice deleted', `${inv.invoice_number} has been removed.`);
     } catch (e) {
-      showFeedback(e instanceof Error ? e.message : 'Failed to delete invoice.', 'error', 5000);
+      toast.error(
+        'Delete failed',
+        e instanceof Error ? e.message : 'Could not delete invoice.'
+      );
     }
   };
 
@@ -214,19 +231,6 @@ export function InvoicesTab() {
           {bulkGenerate.loading ? 'Generating…' : 'Generate rent invoices'}
         </button>
       </div>
-
-      {feedback && (
-        <div
-          className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
-            feedbackTone === 'ok'
-              ? 'bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 text-emerald-800 dark:text-emerald-200'
-              : 'bg-red-50 dark:bg-red-950/40 border border-red-300 text-red-800 dark:text-red-200'
-          }`}
-        >
-          {feedbackTone === 'ok' ? <CheckCircle2 className="w-4 h-4" /> : <X className="w-4 h-4" />}
-          {feedback}
-        </div>
-      )}
 
       <div className="flex items-center gap-2 flex-wrap">
         <div className="relative flex-1 min-w-[200px]">
@@ -269,7 +273,13 @@ export function InvoicesTab() {
             <tbody className="divide-y">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-8 text-center text-slate-400">No invoices match your filters.</td>
+                  <td colSpan={9}>
+                    <EmptyState
+                      icon={<FileText className="w-5 h-5" />}
+                      title="No invoices match your filters"
+                      message="Try clearing the search or status filter."
+                    />
+                  </td>
                 </tr>
               ) : (
                 filtered.map((inv) => (
@@ -317,13 +327,21 @@ export function InvoicesTab() {
         <InvoiceViewer invoice={viewingInvoice} shops={shops} onClose={() => setViewingInvoice(null)} />
       )}
 
-      {payModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border p-6 shadow-2xl space-y-4">
-            <h3 className="font-bold text-base">Record payment</h3>
+      <Modal
+        open={!!payModal}
+        onClose={() => setPayModal(null)}
+        title="Record payment"
+        subtitle={
+          payModal
+            ? `${payModal.invoice_number} · ${payModal.tenant_name}`
+            : undefined
+        }
+        size="sm"
+      >
+        {payModal && (
+          <>
             <p className="text-xs text-slate-500">
-              {payModal.invoice_number} · {payModal.tenant_name} · Balance due E
-              {(payModal.total - payModal.amount_paid).toLocaleString()}
+              Balance due E{(payModal.total - payModal.amount_paid).toLocaleString()}
             </p>
             <div className="space-y-3 text-xs">
               <div>
@@ -371,9 +389,9 @@ export function InvoicesTab() {
                 {recordPayment.loading ? 'Saving…' : 'Record payment'}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </Modal>
     </div>
   );
 }
@@ -409,79 +427,86 @@ function InvoiceViewer({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden">
-        <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/40">
-          <div className="flex items-center gap-2">
-            <FileText className="w-5 h-5 text-blue-600" />
-            <h3 className="font-bold text-sm">Invoice {invoice.invoice_number}</h3>
+    <Modal
+      open={true}
+      onClose={onClose}
+      title={`Invoice ${invoice.invoice_number}`}
+      icon={<FileText className="w-5 h-5 text-blue-600" />}
+      size="md"
+      panelClassName="!bg-white dark:!bg-slate-900"
+    >
+      <div className="space-y-4 text-xs">
+        <div className="flex justify-between">
+          <div>
+            <div className="text-[10px] text-slate-400 uppercase">Billed to</div>
+            <div className="font-bold">{invoice.tenant_name}</div>
+            <div className="text-slate-500">Unit {shop?.shop_number ?? '—'}</div>
           </div>
-          <div className="flex gap-2">
-            <button onClick={handlePdf} className="p-1.5 rounded-lg border text-slate-600" type="button">
-              <Download className="w-4 h-4" />
-            </button>
-            <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400" type="button">
-              <X className="w-5 h-5" />
-            </button>
+          <div className="text-right">
+            <div className="text-[10px] text-slate-400 uppercase">Issued</div>
+            <div>{invoice.issue_date}</div>
+            <div className="text-[10px] text-slate-400 uppercase mt-1">Due</div>
+            <div>{invoice.due_date}</div>
           </div>
         </div>
-        <div className="p-6 space-y-4 text-xs">
-          <div className="flex justify-between">
-            <div>
-              <div className="text-[10px] text-slate-400 uppercase">Billed to</div>
-              <div className="font-bold">{invoice.tenant_name}</div>
-              <div className="text-slate-500">Unit {shop?.shop_number ?? '—'}</div>
-            </div>
-            <div className="text-right">
-              <div className="text-[10px] text-slate-400 uppercase">Issued</div>
-              <div>{invoice.issue_date}</div>
-              <div className="text-[10px] text-slate-400 uppercase mt-1">Due</div>
-              <div>{invoice.due_date}</div>
-            </div>
-          </div>
-          <div className="border rounded-xl overflow-hidden">
-            <table className="w-full text-xs">
-              <thead className="bg-slate-100 dark:bg-slate-800/80">
-                <tr>
-                  <th className="p-2.5 text-left">Description</th>
-                  <th className="p-2.5 text-right">Amount</th>
+        <div className="border rounded-xl overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-100 dark:bg-slate-800/80">
+              <tr>
+                <th className="p-2.5 text-left">Description</th>
+                <th className="p-2.5 text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {invoice.lines.map((l) => (
+                <tr key={l.id}>
+                  <td className="p-2.5">{l.description}</td>
+                  <td className="p-2.5 text-right font-semibold">E{l.amount.toLocaleString()}</td>
                 </tr>
-              </thead>
-              <tbody className="divide-y">
-                {invoice.lines.map((l) => (
-                  <tr key={l.id}>
-                    <td className="p-2.5">{l.description}</td>
-                    <td className="p-2.5 text-right font-semibold">E{l.amount.toLocaleString()}</td>
-                  </tr>
-                ))}
-                <tr className="bg-slate-50 dark:bg-slate-800/40 font-bold">
-                  <td className="p-2.5 text-right">Total</td>
-                  <td className="p-2.5 text-right text-blue-600">E{invoice.total.toLocaleString()}</td>
+              ))}
+              <tr className="bg-slate-50 dark:bg-slate-800/40 font-bold">
+                <td className="p-2.5 text-right">Total</td>
+                <td className="p-2.5 text-right text-blue-600">E{invoice.total.toLocaleString()}</td>
+              </tr>
+              <tr className="bg-slate-50 dark:bg-slate-800/40">
+                <td className="p-2.5 text-right text-slate-500">Paid</td>
+                <td className="p-2.5 text-right">E{invoice.amount_paid.toLocaleString()}</td>
+              </tr>
+              {invoice.total - invoice.amount_paid > 0 && (
+                <tr className="bg-amber-50 dark:bg-amber-950/40 font-bold">
+                  <td className="p-2.5 text-right text-amber-700">Balance due</td>
+                  <td className="p-2.5 text-right text-amber-700">
+                    E{(invoice.total - invoice.amount_paid).toLocaleString()}
+                  </td>
                 </tr>
-                <tr className="bg-slate-50 dark:bg-slate-800/40">
-                  <td className="p-2.5 text-right text-slate-500">Paid</td>
-                  <td className="p-2.5 text-right">E{invoice.amount_paid.toLocaleString()}</td>
-                </tr>
-                {invoice.total - invoice.amount_paid > 0 && (
-                  <tr className="bg-amber-50 dark:bg-amber-950/40 font-bold">
-                    <td className="p-2.5 text-right text-amber-700">Balance due</td>
-                    <td className="p-2.5 text-right text-amber-700">
-                      E{(invoice.total - invoice.amount_paid).toLocaleString()}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          <div className="p-3 rounded-xl border text-[11px] space-y-1">
-            <div className="font-bold">Banking details</div>
-            <div>Bank: {bank.bank}</div>
-            {bank.accountName && <div>Account name: {bank.accountName}</div>}
-            <div>Account #: {bank.account} • Branch: {bank.branch}</div>
-            <div className="text-slate-400">Ref: {invoice.invoice_number}</div>
-          </div>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="p-3 rounded-xl border text-[11px] space-y-1">
+          <div className="font-bold">Banking details</div>
+          <div>Bank: {bank.bank}</div>
+          {bank.accountName && <div>Account name: {bank.accountName}</div>}
+          <div>Account #: {bank.account} • Branch: {bank.branch}</div>
+          <div className="text-slate-400">Ref: {invoice.invoice_number}</div>
+        </div>
+        <div className="flex justify-end gap-2 pt-2 border-t">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl border text-xs font-semibold"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            onClick={handlePdf}
+            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5"
+          >
+            <Download className="w-3.5 h-3.5" /> Download PDF
+          </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
