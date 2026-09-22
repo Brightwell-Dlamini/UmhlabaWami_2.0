@@ -71,6 +71,37 @@ export const ManagerDashboard: React.FC<Props> = ({
     };
   }, [tickets, shops]);
 
+  const attention = useMemo(() => {
+    const items: { id: string; label: string; tone: string }[] = [];
+    const emergencies = tickets.filter(
+      (t) => t.priority === 'Emergency' && t.status !== 'Closed' && t.status !== 'Resolved'
+    );
+    const overdue = tickets.filter((t) => {
+      if (t.status === 'Resolved' || t.status === 'Closed') return false;
+      return t.resolution_deadline && new Date(t.resolution_deadline).getTime() < Date.now();
+    });
+    const awaiting = tickets.filter((t) => t.status === 'Resolved');
+    if (emergencies.length)
+      items.push({
+        id: 'em',
+        label: `${emergencies.length} emergency ticket${emergencies.length === 1 ? '' : 's'} need action`,
+        tone: 'red',
+      });
+    if (overdue.length)
+      items.push({
+        id: 'ov',
+        label: `${overdue.length} ticket${overdue.length === 1 ? '' : 's'} past SLA deadline`,
+        tone: 'amber',
+      });
+    if (awaiting.length)
+      items.push({
+        id: 'aw',
+        label: `${awaiting.length} awaiting tenant confirmation`,
+        tone: 'blue',
+      });
+    return items;
+  }, [tickets]);
+
   const filtered = useMemo(() => {
     return tickets.filter((t) => {
       if (quickFilter === 'open' && t.status !== 'Open') return false;
@@ -111,6 +142,31 @@ export const ManagerDashboard: React.FC<Props> = ({
 
   return (
     <div className="space-y-6 pb-12">
+      {attention.length > 0 && (
+        <div className="rounded-2xl border border-amber-200 dark:border-amber-900/50 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-950/30 p-4 space-y-2">
+          <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200">
+            <AlertTriangle className="w-4 h-4" />
+            <span className="text-xs font-bold uppercase tracking-wider">Needs attention</span>
+          </div>
+          <ul className="space-y-1">
+            {attention.map((a) => (
+              <li
+                key={a.id}
+                className={`text-xs font-semibold ${
+                  a.tone === 'red'
+                    ? 'text-red-700 dark:text-red-300'
+                    : a.tone === 'amber'
+                      ? 'text-amber-800 dark:text-amber-200'
+                      : 'text-blue-700 dark:text-blue-300'
+                }`}
+              >
+                • {a.label}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-start gap-3 min-w-0">
           {auth.getCurrentOrganization()?.logo_url && (
@@ -154,70 +210,28 @@ export const ManagerDashboard: React.FC<Props> = ({
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <KpiCard
-          label="Occupancy"
-          value={`${kpis.occupancy}%`}
-          icon={Clock}
-        />
+        <KpiCard label="Occupancy" value={`${kpis.occupancy}%`} icon={Clock} />
         <button onClick={() => toggleQuick('open')} type="button" className="text-left">
-          <KpiCard
-            label="Open"
-            value={kpis.open}
-            icon={AlertTriangle}
-            highlight={quickFilter === 'open'}
-          />
+          <KpiCard label="Open" value={kpis.open} icon={AlertTriangle} highlight={quickFilter === 'open'} />
         </button>
-        <button
-          onClick={() => toggleQuick('emergency')}
-          type="button"
-          className="text-left"
-        >
-          <KpiCard
-            label="Emergencies"
-            value={kpis.emergency}
-            icon={AlertTriangle}
-            highlight={quickFilter === 'emergency'}
-          />
+        <button onClick={() => toggleQuick('emergency')} type="button" className="text-left">
+          <KpiCard label="Emergencies" value={kpis.emergency} icon={AlertTriangle} highlight={quickFilter === 'emergency'} />
         </button>
-        <button
-          onClick={() => toggleQuick('in_progress')}
-          type="button"
-          className="text-left"
-        >
-          <KpiCard
-            label="In progress"
-            value={kpis.inProgress}
-            icon={Clock}
-            highlight={quickFilter === 'in_progress'}
-          />
+        <button onClick={() => toggleQuick('in_progress')} type="button" className="text-left">
+          <KpiCard label="In progress" value={kpis.inProgress} icon={Clock} highlight={quickFilter === 'in_progress'} />
         </button>
-        <button
-          onClick={() => toggleQuick('awaiting')}
-          type="button"
-          className="text-left"
-        >
-          <KpiCard
-            label="Awaiting confirm"
-            value={kpis.awaiting}
-            icon={AlertTriangle}
-            highlight={quickFilter === 'awaiting'}
-          />
+        <button onClick={() => toggleQuick('awaiting')} type="button" className="text-left">
+          <KpiCard label="Awaiting confirm" value={kpis.awaiting} icon={AlertTriangle} highlight={quickFilter === 'awaiting'} />
         </button>
         <KpiCard label="Tenant CSAT" value="4.9 ★" icon={AlertTriangle} />
       </div>
 
       <div className="space-y-3">
-        <h2 className="text-sm font-bold uppercase tracking-wider">
-          Managed centres
-        </h2>
+        <h2 className="text-sm font-bold uppercase tracking-wider">Managed centres</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {centers.map((c) => {
-            const cShops = shops.filter(
-              (s) => s.shopping_center_id === c.id
-            );
-            const occupied = cShops.filter(
-              (s) => s.status === 'Occupied'
-            ).length;
+            const cShops = shops.filter((s) => s.shopping_center_id === c.id);
+            const occupied = cShops.filter((s) => s.status === 'Occupied').length;
             const openTickets = tickets.filter(
               (t) => t.shopping_center_id === c.id && t.status !== 'Closed'
             ).length;
@@ -227,9 +241,7 @@ export const ManagerDashboard: React.FC<Props> = ({
                 t.priority === 'Emergency' &&
                 t.status !== 'Closed'
             ).length;
-            const occ = cShops.length
-              ? Math.round((occupied / cShops.length) * 100)
-              : 0;
+            const occ = cShops.length ? Math.round((occupied / cShops.length) * 100) : 0;
             const hot = emergencies >= 2;
             return (
               <div
@@ -240,17 +252,11 @@ export const ManagerDashboard: React.FC<Props> = ({
               >
                 <div className="flex items-center gap-3">
                   {c.image && (
-                    <img
-                      src={c.image}
-                      alt=""
-                      className="w-12 h-12 rounded-xl object-cover"
-                    />
+                    <img src={c.image} alt="" className="w-12 h-12 rounded-xl object-cover" />
                   )}
                   <div className="min-w-0">
                     <h3 className="font-bold text-sm truncate">{c.name}</h3>
-                    <p className="text-xs text-slate-500 truncate">
-                      {c.location}
-                    </p>
+                    <p className="text-xs text-slate-500 truncate">{c.location}</p>
                   </div>
                 </div>
                 <div>
@@ -259,10 +265,7 @@ export const ManagerDashboard: React.FC<Props> = ({
                     <strong>{occ}%</strong>
                   </div>
                   <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-                    <div
-                      className="h-full bg-blue-600"
-                      style={{ width: `${occ}%` }}
-                    />
+                    <div className="h-full bg-blue-600" style={{ width: `${occ}%` }} />
                   </div>
                 </div>
                 <div className="flex justify-between text-[11px] text-slate-500">
@@ -339,10 +342,7 @@ export const ManagerDashboard: React.FC<Props> = ({
             <tbody className="divide-y">
               {filtered.length === 0 ? (
                 <tr>
-                  <td
-                    colSpan={6}
-                    className="px-3 py-8 text-center text-slate-400"
-                  >
+                  <td colSpan={6} className="px-3 py-8 text-center text-slate-400">
                     No tickets match the current filters.
                   </td>
                 </tr>
@@ -353,14 +353,10 @@ export const ManagerDashboard: React.FC<Props> = ({
                     onClick={() => onViewTicket(t.id)}
                     className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/40"
                   >
-                    <td className="px-3 py-3 font-mono font-bold">
-                      {t.ticket_number}
-                    </td>
+                    <td className="px-3 py-3 font-mono font-bold">{t.ticket_number}</td>
                     <td className="px-3 py-3">
                       <div className="font-semibold">{t.title}</div>
-                      <div className="text-[10px] text-slate-400">
-                        {t.category}
-                      </div>
+                      <div className="text-[10px] text-slate-400">{t.category}</div>
                     </td>
                     <td className="px-3 py-3">
                       <span
@@ -385,9 +381,7 @@ export const ManagerDashboard: React.FC<Props> = ({
                         })}
                       </div>
                     </td>
-                    <td className="px-3 py-3 text-right text-blue-600 font-semibold">
-                      Manage →
-                    </td>
+                    <td className="px-3 py-3 text-right text-blue-600 font-semibold">Manage →</td>
                   </tr>
                 ))
               )}
