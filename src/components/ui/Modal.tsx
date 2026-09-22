@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { Z } from '../../constants/zIndex';
 
-export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
+export type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
 
 export interface ModalProps {
   open: boolean;
@@ -28,6 +28,10 @@ export interface ModalProps {
   panelClassName?: string;
   /** Hide the default padding around the body. Useful for tables. */
   bareBody?: boolean;
+  /** Optional ref that receives focus when the modal opens. */
+  initialFocusRef?: React.RefObject<HTMLElement | null>;
+  /** Optional aria label when no visible title. */
+  ariaLabel?: string;
 }
 
 const SIZE_CLASSES: Record<ModalSize, string> = {
@@ -35,6 +39,7 @@ const SIZE_CLASSES: Record<ModalSize, string> = {
   md: 'max-w-lg',
   lg: 'max-w-2xl',
   xl: 'max-w-4xl',
+  full: 'max-w-[min(100vw-1rem,1400px)]',
 };
 
 const FOCUSABLE_SELECTOR = [
@@ -52,6 +57,13 @@ const FOCUSABLE_SELECTOR = [
  *   <Modal open={open} onClose={close} title="New item" icon={<Package />}>
  *     …form…
  *   </Modal>
+ *
+ * - Portalled to <body>.
+ * - Locks body scroll while open.
+ * - Escape + backdrop dismissal (both configurable).
+ * - Focus trap with Tab cycling.
+ * - Restores focus on close.
+ * - Mobile: panel slides up from bottom; desktop: centred.
  */
 export const Modal: React.FC<ModalProps> = ({
   open,
@@ -66,9 +78,13 @@ export const Modal: React.FC<ModalProps> = ({
   showCloseButton = true,
   panelClassName = '',
   bareBody = false,
+  initialFocusRef,
+  ariaLabel,
 }) => {
   const panelRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
+  const openRef = useRef(open);
+  openRef.current = open;
 
   // Remember who had focus so we can restore it on close.
   useEffect(() => {
@@ -100,22 +116,29 @@ export const Modal: React.FC<ModalProps> = ({
     return () => document.removeEventListener('keydown', handler);
   }, [open, dismissOnEscape, onClose]);
 
-  // Autofocus: prefer the first input; fall back to the panel itself.
+  // Autofocus: prefer initialFocusRef, then first input, then panel.
   useEffect(() => {
     if (!open) return;
     const id = window.setTimeout(() => {
       const panel = panelRef.current;
       if (!panel) return;
+      // Don't steal focus from an element that already owns it inside the panel.
+      if (panel.contains(document.activeElement)) return;
+
+      const externalTarget = initialFocusRef?.current;
+      if (externalTarget && panel.contains(externalTarget)) {
+        externalTarget.focus({ preventScroll: true });
+        return;
+      }
+
       const firstInput = panel.querySelector<HTMLElement>(
         'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled])'
       );
       const target = firstInput ?? panel;
-      // Don't steal focus from an element that already owns it inside the panel.
-      if (panel.contains(document.activeElement)) return;
       target.focus({ preventScroll: true });
     }, 30);
     return () => window.clearTimeout(id);
-  }, [open]);
+  }, [open, initialFocusRef]);
 
   // Restore focus when the modal closes.
   useEffect(() => {
@@ -158,9 +181,10 @@ export const Modal: React.FC<ModalProps> = ({
 
   const panel = (
     <div
-      className={`fixed inset-0 ${Z.modal} flex items-center justify-center p-3 sm:p-4 overflow-y-auto`}
+      className={`fixed inset-0 ${Z.modal} flex items-end sm:items-center justify-center sm:p-4 overflow-y-auto`}
       aria-modal="true"
       role="dialog"
+      aria-label={ariaLabel}
     >
       {/* Backdrop */}
       <div
@@ -176,11 +200,21 @@ export const Modal: React.FC<ModalProps> = ({
         ref={panelRef}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className={`relative w-full ${SIZE_CLASSES[size]} bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 my-auto max-h-[92vh] flex flex-col ${panelClassName}`}
+        className={`relative w-full ${SIZE_CLASSES[size]} bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-700 flex flex-col
+          rounded-t-2xl sm:rounded-2xl
+          mt-auto sm:my-auto
+          max-h-[92vh] sm:max-h-[92vh]
+          animate-modal-in sm:animate-modal-in-desktop
+          ${panelClassName}`}
       >
         {(title || showCloseButton) && (
           <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
             <div className="flex items-center gap-3 min-w-0">
+              {/* Mobile grabber hint */}
+              <span
+                aria-hidden="true"
+                className="sm:hidden absolute left-1/2 top-1.5 -translate-x-1/2 w-10 h-1 rounded-full bg-slate-200 dark:bg-slate-700"
+              />
               {icon && (
                 <div className="shrink-0 text-slate-600 dark:text-slate-300">
                   {icon}
@@ -214,7 +248,9 @@ export const Modal: React.FC<ModalProps> = ({
 
         <div
           className={
-            bareBody ? 'flex-1 overflow-y-auto' : 'p-5 sm:p-6 space-y-4 flex-1 overflow-y-auto'
+            bareBody
+              ? 'flex-1 overflow-y-auto'
+              : 'p-5 sm:p-6 space-y-4 flex-1 overflow-y-auto'
           }
         >
           {children}

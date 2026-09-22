@@ -48,8 +48,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [showRoleMenu, setShowRoleMenu] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
   const [logoSrc, setLogoSrc] = useState(LOGO_SRC);
+  const [isMac, setIsMac] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
   const { openPalette } = useCommandPalette();
+
+  useEffect(() => {
+    if (typeof navigator !== 'undefined') {
+      setIsMac(/Mac|iPhone|iPad|iPod/.test(navigator.platform));
+    }
+  }, []);
 
   useEffect(() => {
     return auth.subscribe(() => {
@@ -58,7 +65,6 @@ export const Navbar: React.FC<NavbarProps> = ({
     });
   }, []);
 
-  // Seed a welcome notification once so the bell is never permanently empty.
   useEffect(() => {
     if (!currentUser) return;
     void notifApi
@@ -137,6 +143,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const count = typeof unreadCount === 'number' ? unreadCount : 0;
+  const shortcutLabel = isMac ? '⌘K' : 'Ctrl K';
 
   return (
     <header className="sticky top-0 z-50 border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md">
@@ -261,12 +268,28 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 onClick={onToggleDarkMode}
                 className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
               >
                 {isDarkMode ? (
                   <Sun className="w-4 h-4" />
                 ) : (
                   <Moon className="w-4 h-4" />
                 )}
+              </button>
+
+              {/* Global search + shortcut hint */}
+              <button
+                type="button"
+                onClick={openPalette}
+                className="hidden md:flex items-center gap-2 text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-600 transition w-56"
+                title={`Search or jump to… (${shortcutLabel})`}
+                aria-label={`Open command palette (${shortcutLabel})`}
+              >
+                <Search className="w-3.5 h-3.5 shrink-0" />
+                <span className="flex-1 text-left truncate">Search…</span>
+                <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 shrink-0">
+                  {shortcutLabel}
+                </kbd>
               </button>
 
               <div className="relative">
@@ -337,36 +360,28 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
         </div>
 
-        {/* Global search hint — desktop only, signed-in only */}
-        {currentUser && (
-          <div className="hidden md:flex items-center">
-            <button
-              type="button"
-              onClick={openPalette}
-              className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 transition w-56"
-              title="Search or jump to… (Ctrl/Cmd-K)"
-            >
-              <Search className="w-3.5 h-3.5" />
-              <span className="flex-1 text-left truncate">Search…</span>
-              <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700">
-                ⌘K
-              </kbd>
-            </button>
-          </div>
-        )}
-
         <div className="flex md:hidden items-center gap-1">
           {currentUser && (
-            <button
-              type="button"
-              onClick={() => setShowNotifs((v) => !v)}
-              className="relative p-2 rounded-lg text-slate-500"
-            >
-              <Bell className="w-4 h-4" />
-              {count > 0 && (
-                <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-red-500" />
-              )}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={openPalette}
+                className="p-2 rounded-lg text-slate-500"
+                aria-label="Open command palette"
+              >
+                <Search className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowNotifs((v) => !v)}
+                className="relative p-2 rounded-lg text-slate-500"
+              >
+                <Bell className="w-4 h-4" />
+                {count > 0 && (
+                  <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-red-500" />
+                )}
+              </button>
+            </>
           )}
           <button
             onClick={onToggleDarkMode}

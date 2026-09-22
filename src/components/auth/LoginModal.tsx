@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Lock,
   Building,
@@ -9,6 +9,8 @@ import {
   Eye,
   EyeOff,
   Mail,
+  AlertTriangle,
+  Check,
 } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { Modal } from '../ui/Modal';
@@ -19,6 +21,71 @@ interface LoginModalProps {
   onClose: () => void;
   onOpenRegisterOrg: () => void;
   onLoginSuccess: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Password strength — compact scorer for the register/change flows.
+// Not used to gate submission in login; shown only when typing a new one.
+// ---------------------------------------------------------------------------
+
+type StrengthLevel = 0 | 1 | 2 | 3 | 4;
+
+interface StrengthResult {
+  level: StrengthLevel;
+  label: string;
+  tone: string;
+}
+
+function scorePassword(pw: string): StrengthResult {
+  if (!pw) return { level: 0, label: '', tone: '' };
+  let score = 0;
+  if (pw.length >= 8) score++;
+  if (pw.length >= 12) score++;
+  if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score++;
+  if (/\d/.test(pw)) score++;
+  if (/[^A-Za-z0-9]/.test(pw)) score++;
+
+  const level = Math.min(4, score) as StrengthLevel;
+
+  const map: Record<StrengthLevel, StrengthResult> = {
+    0: { level: 0, label: '', tone: '' },
+    1: {
+      level: 1,
+      label: 'Weak',
+      tone: 'bg-red-500',
+    },
+    2: {
+      level: 2,
+      label: 'Fair',
+      tone: 'bg-amber-500',
+    },
+    3: {
+      level: 3,
+      label: 'Strong',
+      tone: 'bg-emerald-500',
+    },
+    4: {
+      level: 4,
+      label: 'Excellent',
+      tone: 'bg-emerald-600',
+    },
+  };
+
+  return map[level];
+}
+
+// ---------------------------------------------------------------------------
+// Caps Lock detection
+// ---------------------------------------------------------------------------
+
+function useCapsLock(): boolean {
+  const [active, setActive] = useState(false);
+  const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (typeof e.getModifierState === 'function') {
+      setActive(e.getModifierState('CapsLock'));
+    }
+  };
+  return active;
 }
 
 export const LoginModal: React.FC<LoginModalProps> = ({
@@ -36,6 +103,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [showFindOrg, setShowFindOrg] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
+  const [capsLock, setCapsLock] = useState(false);
+
+  const strength = useMemo(() => scorePassword(password), [password]);
+
+  const handleCapsCheck = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (typeof e.getModifierState === 'function') {
+      setCapsLock(e.getModifierState('CapsLock'));
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,6 +133,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       setErrorMsg(res.error || 'Login failed');
     }
   };
+
+  // Reset caps-lock badge when the modal closes so the next open is clean.
+  React.useEffect(() => {
+    if (!isOpen) {
+      setCapsLock(false);
+    }
+  }, [isOpen]);
 
   return (
     <>
@@ -98,6 +181,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 onChange={(e) => setOrgCode(e.target.value.toUpperCase())}
                 placeholder="e.g. ACME or SUPER"
                 className="w-full bg-transparent text-xs text-slate-900 dark:text-white focus:outline-none font-mono uppercase"
+                autoComplete="organization"
               />
             </div>
           </div>
@@ -115,6 +199,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="your.username"
                 className="w-full bg-transparent text-xs text-slate-900 dark:text-white focus:outline-none"
+                autoComplete="username"
               />
             </div>
           </div>
@@ -139,8 +224,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={handleCapsCheck}
+                onKeyUp={handleCapsCheck}
+                onBlur={() => setCapsLock(false)}
                 placeholder="••••••••"
                 className="w-full bg-transparent text-xs text-slate-900 dark:text-white focus:outline-none"
+                autoComplete="current-password"
               />
               <button
                 type="button"
@@ -149,9 +238,44 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 className="ml-1 p-1 rounded-lg text-slate-400 hover:text-slate-600"
                 title={showPassword ? 'Hide password' : 'Show password'}
               >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                {showPassword ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
               </button>
             </div>
+
+            {capsLock && (
+              <div className="mt-2 flex items-center gap-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                Caps Lock is on
+              </div>
+            )}
+
+            {password && (
+              <div className="mt-2 space-y-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-1 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                    <div
+                      className={`h-full transition-all ${strength.tone}`}
+                      style={{ width: `${(strength.level / 4) * 100}%` }}
+                    />
+                  </div>
+                  <span
+                    className={`text-[10px] font-bold w-14 text-right ${
+                      strength.level === 1
+                        ? 'text-red-600'
+                        : strength.level === 2
+                          ? 'text-amber-600'
+                          : 'text-emerald-600'
+                    }`}
+                  >
+                    {strength.label}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="p-2.5 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
@@ -211,7 +335,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 };
 
 // ---------------------------------------------------------------------------
-// Forgot password
+// Forgot password — unchanged logic; kept intact
 // ---------------------------------------------------------------------------
 
 function ForgotPasswordModal({
@@ -234,7 +358,6 @@ function ForgotPasswordModal({
     | { kind: 'error'; message: string }
   >({ kind: 'idle' });
 
-  // Reflect parent defaults whenever the modal is opened.
   React.useEffect(() => {
     if (isOpen) {
       setOrgCode((prev) => prev || defaultOrgCode);
