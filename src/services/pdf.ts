@@ -10,8 +10,6 @@ import type {
 } from '../types';
 import type { Quote, Statement } from './api/accounting';
 
-// ---------- shared helpers ----------
-
 const BRAND_FALLBACK = '#2563eb';
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -32,17 +30,37 @@ function formatMoney(n: number, currency = 'SZL'): string {
   })}`;
 }
 
-/** YYYY-MM-DD portion of an ISO date or timestamp. */
 function datePart(iso: string): string {
   return iso.slice(0, 10);
 }
 
-/** True when `iso`'s calendar day is within [from, to] inclusive (UTC days). */
 function withinPeriod(iso: string, from: string, to: string): boolean {
   const d = datePart(iso);
   const f = datePart(from);
   const t = datePart(to);
   return d >= f && d <= t;
+}
+
+type OrgBank = Organization & {
+  bank_name?: string;
+  bank_account_name?: string;
+  bank_account_number?: string;
+  bank_branch_code?: string;
+  bank_swift?: string;
+};
+
+function orgBankLine(org: Organization): string {
+  const bank = org as OrgBank;
+  const parts = [
+    bank.bank_name && `Bank: ${bank.bank_name}`,
+    bank.bank_account_name && `A/C name: ${bank.bank_account_name}`,
+    bank.bank_account_number && `A/C: ${bank.bank_account_number}`,
+    bank.bank_branch_code && `Branch: ${bank.bank_branch_code}`,
+    bank.bank_swift && `SWIFT: ${bank.bank_swift}`,
+  ].filter(Boolean);
+  return parts.length
+    ? parts.join('  •  ')
+    : 'Banking: set bank details in Organisation Settings';
 }
 
 interface DocumentHeaderArgs {
@@ -258,8 +276,6 @@ function download(doc: jsPDF, filename: string) {
   doc.save(filename);
 }
 
-// ---------- Invoice PDF ----------
-
 export function generateInvoicePdf(
   invoice: Invoice,
   org: Organization,
@@ -364,14 +380,12 @@ export function generateInvoicePdf(
   }
 
   drawFooter(doc, [
-    'Banking: First National Bank Eswatini  •  A/C 62890123456  •  Branch 280164',
+    orgBankLine(org),
     `Payment reference: ${invoice.invoice_number}`,
   ]);
 
   download(doc, `Invoice-${invoice.invoice_number}.pdf`);
 }
-
-// ---------- Quote PDF ----------
 
 export function generateQuotePdf(quote: Quote, org: Organization): void {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
@@ -471,13 +485,12 @@ export function generateQuotePdf(quote: Quote, org: Organization): void {
   }
 
   drawFooter(doc, [
+    orgBankLine(org),
     `This quotation is valid until ${quote.valid_until ?? 'N/A'}.`,
   ]);
 
   download(doc, `Quote-${quote.quote_number}.pdf`);
 }
-
-// ---------- Statement PDF ----------
 
 interface StatementActivityRow {
   date: string;
@@ -543,7 +556,6 @@ export function generateStatementPdf(
 
   y = leftY + 8;
 
-  // ----- Build activity rows using timezone-safe day comparison -----
   const rows: StatementActivityRow[] = [];
   const periodStart = statement.period_start;
   const periodEnd = statement.period_end;
@@ -589,9 +601,7 @@ export function generateStatementPdf(
 
   autoTable(doc, {
     startY: y,
-    head: [
-      ['Date', 'Reference', 'Description', 'Debit', 'Credit', 'Balance'],
-    ],
+    head: [['Date', 'Reference', 'Description', 'Debit', 'Credit', 'Balance']],
     body: rows.map((r) => [
       r.date,
       r.reference,
@@ -636,6 +646,7 @@ export function generateStatementPdf(
   });
 
   drawFooter(doc, [
+    orgBankLine(org),
     statement.sent_at
       ? `Sent on ${new Date(statement.sent_at).toLocaleDateString()} to ${
           statement.sent_to ?? tenant.email
@@ -651,8 +662,6 @@ export function generateStatementPdf(
     )}-${statement.period_start}_${statement.period_end}.pdf`
   );
 }
-
-// ---------- Lease Certificate PDF ----------
 
 export function generateLeaseCertificatePdf(
   lease: Lease,
@@ -738,29 +747,26 @@ export function generateLeaseCertificatePdf(
     margin: { left: 20, right: 20 },
   });
 
-  // @ts-expect-error — lastAutoTable is added by the plugin at runtime
+  // @ts-expect-error
   y = (doc.lastAutoTable?.finalY ?? y) + 10;
 
-  if (lease.document_url) {
+  const termsBody = (lease as Lease & { terms_body?: string }).terms_body;
+  if (termsBody) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(100, 116, 139);
-    doc.text('Original document', 20, y);
-    y += 5;
+    doc.text('Lease terms', 20, y);
+    y += 4;
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(37, 99, 235);
-    doc.textWithLink(lease.document_url, 20, y, { url: lease.document_url });
+    doc.setFontSize(8);
+    doc.setTextColor(51, 65, 85);
+    const wrapped = doc.splitTextToSize(termsBody, pageWidth - 40);
+    doc.text(wrapped, 20, y);
   }
 
-  drawFooter(doc, [
-    'This certificate reflects terms on file. The signed lease agreement is the legally binding document.',
-  ]);
-
+  drawFooter(doc, [orgBankLine(org)]);
   download(
     doc,
-    `Lease-Certificate-${
-      tenant?.business_name?.replace(/[^a-zA-Z0-9]/g, '_') || 'tenant'
-    }.pdf`
+    `Lease-${(lease.document_title || lease.id).replace(/[^a-zA-Z0-9]/g, '_')}.pdf`
   );
 }
