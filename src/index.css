@@ -3,59 +3,136 @@
 /* Class-based dark mode (toggle adds .dark on <html>) */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ------------------------------------------------------------------ */
+/* FONT FACES                                                          */
+/* ------------------------------------------------------------------ */
+/* Loaded via <link> in index.html (Inter Variable + Geist Mono).      */
+/* Fallbacks declared in designTokens.ts so nothing breaks if the CDN  */
+/* is unavailable.                                                     */
+
+/* ------------------------------------------------------------------ */
+/* BASE                                                                */
+/* ------------------------------------------------------------------ */
+
 @layer base {
+  :root {
+    color-scheme: light;
+    --uw-bg: #fafafb;
+    --uw-surface: #ffffff;
+    --uw-surface-raised: #ffffff;
+    --uw-border: #eeeeF1;
+    --uw-border-soft: #e3e3e8;
+    --uw-border-strong: #cfcfd6;
+    --uw-text: #0d0d10;
+    --uw-text-muted: #5c5c68;
+    --uw-text-subtle: #8a8a95;
+    --uw-accent: #7c5cff;
+    --uw-accent-hover: #6a45f5;
+    --uw-focus-ring: 0 0 0 1px #7c5cff, 0 0 0 3px rgba(124, 92, 255, 0.25);
+    --uw-shadow-panel: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  }
+
+  .dark {
+    color-scheme: dark;
+    --uw-bg: #08080a;
+    --uw-surface: #111114;
+    --uw-surface-raised: #16161a;
+    --uw-border: rgba(255, 255, 255, 0.06);
+    --uw-border-soft: rgba(255, 255, 255, 0.09);
+    --uw-border-strong: rgba(255, 255, 255, 0.14);
+    --uw-text: #f5f5f7;
+    --uw-text-muted: #72727e;
+    --uw-text-subtle: #5c5c68;
+    --uw-accent: #8e7bff;
+    --uw-accent-hover: #7c5cff;
+    --uw-focus-ring: 0 0 0 1px #8e7bff, 0 0 0 3px rgba(142, 123, 255, 0.28);
+    --uw-shadow-panel:
+      0 0 0 1px rgba(255, 255, 255, 0.04),
+      0 12px 32px rgba(0, 0, 0, 0.5);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+    font-feature-settings:
+      'cv02' on,
+      'cv03' on,
+      'cv04' on,
+      'cv11' on;
+  }
+
   body {
-    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    font-family: 'Inter Variable', 'Inter', system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--uw-text);
+    background-color: var(--uw-bg);
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   h1, h2, h3, h4, .font-display {
-    font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+    font-family: 'Inter Display', 'Inter Variable', system-ui, sans-serif;
+    letter-spacing: -0.015em;
+    font-weight: 600;
+    color: var(--uw-text);
   }
 
-  /*
-   * System-wide form readability in dark mode.
-   */
-  .dark input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']),
-  .dark select,
-  .dark textarea {
-    color: #f1f5f9;
-    background-color: #0f172a;
-    border-color: #475569;
+  /* Tabular numerals for anything numeric. */
+  .tabular,
+  .font-mono,
+  .tabular-nums {
+    font-variant-numeric: tabular-nums lining-nums;
   }
 
-  .dark input::placeholder,
-  .dark textarea::placeholder {
-    color: #94a3b8;
+  /* Every input field honours the token surface. */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']),
+  select,
+  textarea {
+    color: var(--uw-text);
+    background-color: var(--uw-surface);
+    border-color: var(--uw-border);
+    font-size: 13px;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--uw-text-subtle);
     opacity: 1;
   }
 
-  .dark option,
-  .dark optgroup {
-    background-color: #0f172a;
-    color: #f1f5f9;
+  option, optgroup {
+    background-color: var(--uw-surface);
+    color: var(--uw-text);
   }
 
-  .dark label {
-    color: #cbd5e1;
+  label {
+    color: var(--uw-text-muted);
   }
 
-  .dark input:-webkit-autofill,
-  .dark input:-webkit-autofill:hover,
-  .dark input:-webkit-autofill:focus,
-  .dark textarea:-webkit-autofill,
-  .dark select:-webkit-autofill {
-    -webkit-text-fill-color: #f1f5f9;
-    -webkit-box-shadow: 0 0 0px 1000px #0f172a inset;
+  /* Autofill — matching surface, no yellow flash. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill,
+  select:-webkit-autofill {
+    -webkit-text-fill-color: var(--uw-text);
+    -webkit-box-shadow: 0 0 0px 1000px var(--uw-surface) inset;
     transition: background-color 9999s ease-in-out 0s;
-    caret-color: #f1f5f9;
+    caret-color: var(--uw-text);
   }
 
-  .dark input:focus-visible,
-  .dark select:focus-visible,
-  .dark textarea:focus-visible {
-    outline-color: #3b82f6;
+  /* Selection — brand-tinted. */
+  ::selection {
+    background-color: rgba(124, 92, 255, 0.28);
+    color: var(--uw-text);
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* UTILITIES                                                           */
+/* ------------------------------------------------------------------ */
 
 .scrollbar-none::-webkit-scrollbar {
   display: none;
@@ -65,77 +142,98 @@
   scrollbar-width: none;
 }
 
-/* Mobile-friendly tables */
-@media (max-width: 1023px) {
-  .overflow-x-auto {
-    -webkit-overflow-scrolling: touch;
-  }
+/* Hairline scrollbar for panels that need one. */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: rgba(124, 92, 255, 0.2);
+  border-radius: 9999px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(124, 92, 255, 0.4);
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Semantic surface helpers — read from CSS vars so theme flips are free. */
+.surface         { background-color: var(--uw-surface); }
+.surface-raised  { background-color: var(--uw-surface-raised); }
+.text-muted      { color: var(--uw-text-muted); }
+.text-subtle     { color: var(--uw-text-subtle); }
+.border-hairline { border-color: var(--uw-border); }
+.border-soft     { border-color: var(--uw-border-soft); }
+.border-strong   { border-color: var(--uw-border-strong); }
+
+/* Mobile tables */
+@media (max-width: 1023px) {
+  .overflow-x-auto { -webkit-overflow-scrolling: touch; }
+}
+
+/* ------------------------------------------------------------------ */
+/* FOCUS RINGS                                                         */
+/* ------------------------------------------------------------------ */
+
+:where(button, a, [role="button"], input, select, textarea):focus-visible {
+  outline: none;
+  box-shadow: var(--uw-focus-ring);
+  border-radius: 6px;
+}
+
+/* ------------------------------------------------------------------ */
+/* ANIMATIONS                                                          */
+/* ------------------------------------------------------------------ */
 
 @keyframes uw-toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 .animate-in {
-  animation: uw-toast-in 180ms ease-out both;
+  animation: uw-toast-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-
-/* ---------------------------------------------------------------- */
-/* MODAL — mobile slide-up + desktop scale-fade                       */
-/* ---------------------------------------------------------------- */
 
 @keyframes uw-modal-in {
-  from {
-    opacity: 0;
-    transform: translateY(24px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
-
 @keyframes uw-modal-in-desktop {
-  from {
-    opacity: 0;
-    transform: scale(0.97) translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
+  from { opacity: 0; transform: scale(0.97) translateY(6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
 }
-
 .animate-modal-in {
   animation: uw-modal-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-
 .animate-modal-in-desktop {
   animation: uw-modal-in-desktop 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* ---------------------------------------------------------------- */
-/* UX UPGRADES — additive                                            */
-/* ---------------------------------------------------------------- */
-
-/* Consistent keyboard focus ring across interactive elements */
-:where(button, a, [role="button"], input, select, textarea):focus-visible {
-  outline: 2px solid #3b82f6;
-  outline-offset: 2px;
-  border-radius: 0.5rem;
+/* Dropdown / menu reveal. */
+@keyframes uw-menu-in {
+  from { opacity: 0; transform: scale(0.96) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.animate-menu-in {
+  animation: uw-menu-in 120ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: top right;
 }
 
-/* Reduced motion: respect user preference */
+/* Row highlight when a target is scrolled into view via command palette. */
+@keyframes uw-highlight-pulse {
+  0%, 100% { background-color: transparent; }
+  30%      { background-color: rgba(124, 92, 255, 0.14); }
+}
+.animate-highlight {
+  animation: uw-highlight-pulse 1400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ------------------------------------------------------------------ */
+/* PREFERS REDUCED MOTION                                              */
+/* ------------------------------------------------------------------ */
+
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  *, *::before, *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
@@ -143,38 +241,58 @@
   }
   .animate-in,
   .animate-modal-in,
-  .animate-modal-in-desktop {
+  .animate-modal-in-desktop,
+  .animate-menu-in,
+  .animate-highlight {
     animation: none;
   }
 }
 
-/* Stale-data pill helper (opt-in) */
-.stale-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.125rem 0.5rem;
-  border-radius: 9999px;
-  font-size: 10px;
-  font-weight: 700;
-  background-color: #fef3c7;
-  color: #92400e;
-}
-.dark .stale-pill {
-  background-color: rgba(146, 64, 14, 0.4);
-  color: #fcd34d;
-}
+/* ------------------------------------------------------------------ */
+/* VIRTUAL LIST                                                        */
+/* ------------------------------------------------------------------ */
 
-/* Virtual list viewport optimization */
 .virtual-list-viewport {
   contain: strict;
   overflow-anchor: none;
 }
 
-/* Subtle press feedback */
+/* ------------------------------------------------------------------ */
+/* PRESS FEEDBACK                                                      */
+/* ------------------------------------------------------------------ */
+
 @media (hover: hover) {
   button:not(:disabled):active,
   a:active {
     transform: translateY(0.5px);
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* INTERACTION DENSITY HELPERS                                         */
+/* ------------------------------------------------------------------ */
+
+/* Hairline horizontal rule that respects theme. */
+.hairline {
+  height: 1px;
+  background-color: var(--uw-border);
+  border: 0;
+}
+
+/* Kbd chip — used in command palette, help modal, shortcut hints. */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background-color: var(--uw-surface-raised);
+  border: 1px solid var(--uw-border-soft);
+  color: var(--uw-text-muted);
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
 }
