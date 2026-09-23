@@ -5,6 +5,7 @@ import type {
   TicketCategory,
   TicketStatus,
 } from '../../types';
+import { notifications } from './notifications';
 
 const TICKET_SELECT = `
   *,
@@ -12,7 +13,6 @@ const TICKET_SELECT = `
   attachments:ticket_attachments(*)
 `;
 
-/** Allowed status transitions — prevents double-resolve, assign-on-closed, etc. */
 async function loadTicketStatus(ticketId: string): Promise<string> {
   const result = await sb()
     .from('tickets')
@@ -58,7 +58,6 @@ export const tickets = {
     return unwrap(result) as unknown as Ticket[];
   },
 
-  /** Lightweight list without timeline/attachments for desk views. */
   async listLite(orgId = requireOrgId()): Promise<Ticket[]> {
     const result = await sb()
       .from('tickets')
@@ -98,6 +97,9 @@ export const tickets = {
     const user = requireUser();
     const status = await loadTicketStatus(ticketId);
     assertStatus(status, ['Open', 'In Progress', 'Reopened'], 'assign');
+
+    const ticket = await this.get(ticketId);
+
     const { error } = await sb().rpc('assign_ticket', {
       p_ticket_id: ticketId,
       p_technician_id: technicianId,
@@ -105,6 +107,15 @@ export const tickets = {
       p_actor_name: user.name,
     });
     if (error) throw new Error(error.message);
+
+    // Backup notification in case DB notify_user did not fire (RLS / missing migration).
+    await notifications.create({
+      user_id: technicianId,
+      title: 'New job assigned',
+      message: `You were assigned: ${ticket.title}`,
+      type: 'ticket_assigned',
+      link: ticketId,
+    });
   },
 
   async accept(ticketId: string) {
