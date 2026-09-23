@@ -74,7 +74,42 @@ export const shops = {
     return unwrap(result) as unknown as Shop;
   },
 
+  /**
+   * Safe delete: refuse if open tickets still reference this unit.
+   * Detach tenants (clear shop_id) so FK cascades do not null organization_id
+   * on tickets via broken triggers.
+   */
   async remove(id: string): Promise<void> {
+    const orgId = requireOrgId();
+
+    const { count: ticketCount, error: tErr } = await sb()
+      .from('tickets')
+      .select('id', { count: 'exact', head: true })
+      .eq('shop_id', id)
+      .eq('organization_id', orgId)
+      .not('status', 'in', '(Closed,Cancelled)');
+    if (tErr) throw new Error(tErr.message);
+    if ((ticketCount ?? 0) > 0) {
+      throw new Error(
+        `Cannot delete this unit: ${ticketCount} open ticket(s) still reference it. Close or reassign those tickets first.`
+      );
+    }
+
+    // Detach tenants so they are not hard-orphaned without a clear error.
+    await sb()
+      .from('tenants')
+      .update({ shop_id: null })
+      .eq('shop_id', id)
+      .eq('organization_id', orgId);
+
+    // Cancel any leftover closed tickets' shop link is fine; open ones already blocked.
+    // Soft-detach closed tickets to avoid ON DELETE SET NULL wiping organization_id.
+    await sb()
+      .from('tickets')
+      .update({ shop_id: null })
+      .eq('shop_id', id)
+      .eq('organization_id', orgId);
+
     const { error } = await sb().from('shops').delete().eq('id', id);
     if (error) throw new Error(error.message);
   },
