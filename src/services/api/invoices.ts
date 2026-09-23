@@ -1,5 +1,5 @@
 // src/services/api/invoices.ts
-import { sb, unwrap, requireOrgId, requireUser } from './_helpers';
+import { sb, unwrap, requireOrgId, requireUser, throwFriendly } from './_helpers';
 import type { Invoice, InvoiceType, PaymentRecord } from '../../types';
 import { isPayableStatus, isSettledStatus } from '../../constants/invoiceStatus';
 import { notifications } from './notifications';
@@ -56,7 +56,6 @@ export const invoices = {
     if (!input.lines || input.lines.length === 0) {
       throw new Error('An invoice must have at least one line.');
     }
-    // Tax is zero unless the caller explicitly passes a rate.
     const taxRate = input.tax_rate ?? 0;
     const { data, error } = await sb().rpc('create_invoice_with_lines', {
       p_organization_id: requireOrgId(),
@@ -69,7 +68,7 @@ export const invoices = {
       p_lines: input.lines,
       p_notes: input.notes ?? null,
     });
-    if (error) throw new Error(error.message);
+    if (error) throwFriendly(error);
     return data as unknown as Invoice;
   },
 
@@ -80,6 +79,8 @@ export const invoices = {
       method: PaymentRecord['method'];
       reference?: string;
       notes?: string;
+      /** Optional proof-of-payment URL stored in notes until a dedicated column exists. */
+      proof_url?: string;
     }
   ): Promise<PaymentRecord> {
     if (args.amount <= 0) {
@@ -91,7 +92,7 @@ export const invoices = {
       .select('total, amount_paid, status')
       .eq('id', invoiceId)
       .single();
-    if (loadErr) throw new Error(loadErr.message);
+    if (loadErr) throwFriendly(loadErr);
 
     if (isSettledStatus(String(invRow.status))) {
       throw new Error('Invoice is already settled.');
@@ -110,31 +111,65 @@ export const invoices = {
       );
     }
 
+    const notes =
+      [args.notes, args.proof_url ? `POP: ${args.proof_url}` : null]
+        .filter(Boolean)
+        .join(' | ') || null;
+
     const { data, error } = await sb().rpc('record_payment', {
       p_invoice_id: invoiceId,
       p_amount: args.amount,
       p_method: args.method,
       p_reference: args.reference ?? null,
-      p_notes: args.notes ?? null,
+      p_notes: notes,
     });
-    if (error) throw new Error(error.message);
+    if (error) throwFriendly(error);
     return data as unknown as PaymentRecord;
   },
 
-  /** Bulk rent — tax stays 0 unless explicitly overridden. */
   async bulkGenerateRent(periodDate: string, taxRate = 0): Promise<number> {
     const { data, error } = await sb().rpc('bulk_generate_rent_invoices', {
       p_organization_id: requireOrgId(),
       p_period_date: periodDate,
       p_tax_rate: taxRate,
     });
-    if (error) throw new Error(error.message);
+    if (error) throwFriendly(error);
     return (data as number) ?? 0;
   },
 
+  /**
+   * Safe delete:
+   * - Refuse if any payment_records exist (keep audit trail).
+   * - Delete invoice_lines first, then the invoice.
+   */
   async remove(id: string): Promise<void> {
-    const { error } = await sb().from('invoices').delete().eq('id', id);
-    if (error) throw new Error(error.message);
+    const orgId = requireOrgId();
+
+    const { count: payCount, error: payErr } = await sb()
+      .from('payment_records')
+      .select('id', { count: 'exact', head: true })
+      .eq('invoice_id', id);
+    if (payErr) throwFriendly(payErr);
+
+    if ((payCount ?? 0) > 0) {
+      throw new Error(
+        `Cannot delete this invoice: ${payCount} payment record(s) are linked to it. ` +
+          'Cancel the invoice or reverse those payments if you need to correct the books.'
+      );
+    }
+
+    const { error: lineErr } = await sb()
+      .from('invoice_lines')
+      .delete()
+      .eq('invoice_id', id);
+    if (lineErr) throwFriendly(lineErr);
+
+    const { error } = await sb()
+      .from('invoices')
+      .delete()
+      .eq('id', id)
+      .eq('organization_id', orgId);
+    if (error) throwFriendly(error);
   },
 
   async paymentsForInvoice(invoiceId: string): Promise<PaymentRecord[]> {
@@ -146,10 +181,6 @@ export const invoices = {
     return unwrap(result) as unknown as PaymentRecord[];
   },
 
-  /**
-   * Send payment reminders for selected invoices.
-   * Creates in-app notifications for each tenant's portal user (when linked).
-   */
   async sendReminders(invoiceIds: string[]): Promise<number> {
     if (!invoiceIds.length) return 0;
     const actor = requireUser();
@@ -160,7 +191,7 @@ export const invoices = {
       .select('id, invoice_number, tenant_id, tenant_name, total, amount_paid, due_date, status')
       .in('id', invoiceIds)
       .eq('organization_id', orgId);
-    if (error) throw new Error(error.message);
+    if (error) throwFriendly(error);
 
     const allTenants = await tenantsApi.list(orgId);
     let sent = 0;
