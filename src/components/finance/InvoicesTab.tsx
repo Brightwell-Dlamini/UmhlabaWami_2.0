@@ -1,5 +1,4 @@
 // src/components/finance/InvoicesTab.tsx
-// Streamlined restore — core invoice list, payments, PDF, reminders.
 import React, { useMemo, useState } from 'react';
 import {
   FileText,
@@ -9,6 +8,8 @@ import {
   Search,
   Send,
   X,
+  Ban,
+  Paperclip,
 } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { invoices as invoiceApi } from '../../services/api/invoices';
@@ -53,11 +54,16 @@ export function InvoicesTab() {
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState<PaymentRecord['method']>('EFT');
   const [payRef, setPayRef] = useState('');
+  const [payFile, setPayFile] = useState<File | null>(null);
+  const [payBusy, setPayBusy] = useState(false);
+  const [creditModal, setCreditModal] = useState<Invoice | null>(null);
+  const [creditAmount, setCreditAmount] = useState('');
+  const [creditReason, setCreditReason] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useInvoiceStatusSync({ orgId });
 
-  const { data: invoices = [] } = useSupabaseQuery(
+  const { data: invoices = [], refetch } = useSupabaseQuery(
     ['invoices', orgId],
     () => invoiceApi.list(),
     { enabled: !!orgId }
@@ -75,30 +81,6 @@ export function InvoicesTab() {
     enabled: !!orgId,
   });
 
-  const recordPayment = useSupabaseMutation({
-    mutationFn: ({
-      invoice, amount, method, reference,
-    }: {
-      invoice: Invoice;
-      amount: number;
-      method?: PaymentRecord['method'];
-      reference?: string;
-    }) => {
-      const remaining = invoice.total - invoice.amount_paid;
-      if (remaining <= 0) throw new Error('Invoice is already settled.');
-      if (amount <= 0) throw new Error('Payment amount must be greater than zero.');
-      if (amount > remaining + 0.001) {
-        throw new Error(`Amount exceeds balance due (E${remaining.toLocaleString()}).`);
-      }
-      return invoiceApi.recordPayment(invoice.id, {
-        amount,
-        method: method ?? 'EFT',
-        reference: reference ?? `PAY-${invoice.invoice_number}`,
-      });
-    },
-    invalidateKeys: ['invoices', 'finance_transactions'],
-  });
-
   const bulkGenerate = useSupabaseMutation({
     mutationFn: () => {
       const period = new Date();
@@ -110,6 +92,11 @@ export function InvoicesTab() {
 
   const deleteInvoice = useSupabaseMutation({
     mutationFn: (id: string) => invoiceApi.remove(id),
+    invalidateKeys: ['invoices'],
+  });
+
+  const cancelInvoice = useSupabaseMutation({
+    mutationFn: (id: string) => invoiceApi.cancel(id),
     invalidateKeys: ['invoices'],
   });
 
@@ -154,33 +141,59 @@ export function InvoicesTab() {
 
   const openPayModal = (invoice: Invoice) => {
     const remaining = Math.max(0, invoice.total - invoice.amount_paid);
+    const claim = invoiceApi.parseLatestClaim(invoice.notes);
     setPayModal(invoice);
-    setPayAmount(String(remaining));
-    setPayMethod('EFT');
-    setPayRef(`PAY-${invoice.invoice_number}`);
+    setPayAmount(String(claim?.amount ?? remaining));
+    setPayMethod((claim?.method as PaymentRecord['method']) || 'EFT');
+    setPayRef(claim?.reference || `PAY-${invoice.invoice_number}`);
+    setPayFile(null);
   };
 
   const handleRecordPayment = async () => {
     if (!payModal) return;
     const amount = Number(payAmount);
+    setPayBusy(true);
     try {
-      await recordPayment.mutate({
-        invoice: payModal,
+      let proof_url: string | undefined;
+      if (payFile) {
+        proof_url = await invoiceApi.uploadProof(payModal.id, payFile);
+      }
+      await invoiceApi.recordPayment(payModal.id, {
         amount,
         method: payMethod,
         reference: payRef || undefined,
+        proof_url,
       });
       toast.success('Payment recorded', `E${amount.toLocaleString()} applied to ${payModal.invoice_number}.`);
       setPayModal(null);
+      void refetch?.();
     } catch (e) {
       toast.error('Payment failed', e instanceof Error ? e.message : 'Could not record payment.');
+    } finally {
+      setPayBusy(false);
+    }
+  };
+
+  const handleCancel = async (inv: Invoice) => {
+    const ok = await confirm({
+      title: `Cancel invoice ${inv.invoice_number}?`,
+      message: 'The invoice stays on record as Cancelled. Prefer this over delete when the invoice was ever sent.',
+      confirmLabel: 'Cancel invoice',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await cancelInvoice.mutate(inv.id);
+      toast.success('Invoice cancelled', `${inv.invoice_number} is now Cancelled.`);
+    } catch (e) {
+      toast.error('Cancel failed', e instanceof Error ? e.message : 'Could not cancel.');
     }
   };
 
   const handleDelete = async (inv: Invoice) => {
     const ok = await confirm({
       title: `Delete invoice ${inv.invoice_number}?`,
-      message: 'This cannot be undone.',
+      message: 'Only use for drafts with no payments. Prefer Cancel for sent invoices.',
       confirmLabel: 'Delete invoice',
       tone: 'danger',
     });
@@ -190,6 +203,25 @@ export function InvoicesTab() {
       toast.success('Invoice deleted', `${inv.invoice_number} has been removed.`);
     } catch (e) {
       toast.error('Delete failed', e instanceof Error ? e.message : 'Could not delete invoice.');
+    }
+  };
+
+  const handleCredit = async () => {
+    if (!creditModal) return;
+    const amount = Number(creditAmount);
+    if (!creditReason.trim()) {
+      toast.error('Reason required', 'Enter why you are issuing this credit note.');
+      return;
+    }
+    try {
+      await invoiceApi.issueCreditNote(creditModal.id, amount, creditReason.trim());
+      toast.success('Credit note applied', `E${amount.toLocaleString()} credited on ${creditModal.invoice_number}.`);
+      setCreditModal(null);
+      setCreditAmount('');
+      setCreditReason('');
+      void refetch?.();
+    } catch (e) {
+      toast.error('Credit failed', e instanceof Error ? e.message : 'Could not issue credit.');
     }
   };
 
@@ -222,7 +254,7 @@ export function InvoicesTab() {
       <div className="p-4 border-b bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-center justify-between flex-wrap gap-3">
         <div>
           <h3 className="font-bold text-sm">Invoices</h3>
-          <p className="text-xs text-slate-500">Generate, send, and reconcile invoices for your tenants</p>
+          <p className="text-xs text-slate-500">Generate, collect, cancel, and credit invoices</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -314,7 +346,9 @@ export function InvoicesTab() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {filtered.map((inv) => (
+                {filtered.map((inv) => {
+                  const claim = invoiceApi.parseLatestClaim(inv.notes);
+                  return (
                   <tr key={inv.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30">
                     <td className="px-3 py-2">
                       <input
@@ -331,7 +365,12 @@ export function InvoicesTab() {
                         className="w-3.5 h-3.5 rounded"
                       />
                     </td>
-                    <td className="px-3 py-2 font-mono font-bold">{inv.invoice_number}</td>
+                    <td className="px-3 py-2 font-mono font-bold">
+                      {inv.invoice_number}
+                      {claim && inv.status !== 'Paid' && inv.status !== 'Cancelled' && (
+                        <span className="ml-1 text-[9px] font-bold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded-full">POP claim</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2">{inv.tenant_name}</td>
                     <td className="px-3 py-2 text-slate-500">{inv.due_date}</td>
                     <td className="px-3 py-2">
@@ -341,25 +380,42 @@ export function InvoicesTab() {
                     </td>
                     <td className="px-3 py-2 text-right font-bold">E{inv.total.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-2 flex-wrap">
                         <button type="button" onClick={() => handlePdf(inv, true)} className="text-blue-600 font-semibold hover:underline">
-                          View PDF
+                          PDF
                         </button>
                         <button type="button" onClick={() => setViewingInvoice(inv)} className="text-blue-600 font-semibold hover:underline">
                           View
                         </button>
                         {inv.status !== 'Paid' && inv.status !== 'Cancelled' && (
-                          <button type="button" onClick={() => openPayModal(inv)} className="text-emerald-600 font-semibold hover:underline">
-                            Pay
-                          </button>
+                          <>
+                            <button type="button" onClick={() => openPayModal(inv)} className="text-emerald-600 font-semibold hover:underline">
+                              Pay
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCreditModal(inv);
+                                setCreditAmount(String(Math.max(0, inv.total - inv.amount_paid)));
+                                setCreditReason('');
+                              }}
+                              className="text-violet-600 font-semibold hover:underline"
+                            >
+                              Credit
+                            </button>
+                            <button type="button" onClick={() => void handleCancel(inv)} className="text-amber-600 font-semibold hover:underline" title="Cancel">
+                              <Ban className="w-3.5 h-3.5 inline" />
+                            </button>
+                          </>
                         )}
-                        <button type="button" onClick={() => handleDelete(inv)} className="p-1 text-slate-400 hover:text-red-500">
+                        <button type="button" onClick={() => void handleDelete(inv)} className="p-1 text-slate-400 hover:text-red-500">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -369,6 +425,22 @@ export function InvoicesTab() {
       {payModal && (
         <Modal open onClose={() => setPayModal(null)} title={`Record payment — ${payModal.invoice_number}`} size="sm">
           <div className="space-y-3 text-xs">
+            {(() => {
+              const claim = invoiceApi.parseLatestClaim(payModal.notes);
+              if (!claim) return null;
+              return (
+                <div className="p-3 rounded-xl bg-violet-50 dark:bg-violet-950/30 border border-violet-200 text-violet-900 dark:text-violet-200">
+                  <div className="font-bold mb-1">Tenant payment claim</div>
+                  <p>E{Number(claim.amount).toLocaleString()} · {claim.method}{claim.reference ? ` · ${claim.reference}` : ''}</p>
+                  <p className="text-[10px] mt-0.5 opacity-80">By {claim.by} · {new Date(claim.at).toLocaleString()}</p>
+                  {claim.proof_url && (
+                    <a href={claim.proof_url} target="_blank" rel="noreferrer" className="text-blue-600 font-semibold underline mt-1 inline-block">
+                      View submitted POP
+                    </a>
+                  )}
+                </div>
+              );
+            })()}
             <div>
               <label className="block font-semibold mb-1">Amount (E)</label>
               <input type="number" min={0} step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)}
@@ -389,10 +461,46 @@ export function InvoicesTab() {
               <input value={payRef} onChange={(e) => setPayRef(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" />
             </div>
+            <div>
+              <label className="block font-semibold mb-1 flex items-center gap-1">
+                <Paperclip className="w-3.5 h-3.5" /> Proof of payment (optional)
+              </label>
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                onChange={(e) => setPayFile(e.target.files?.[0] ?? null)}
+                className="w-full text-xs"
+              />
+              {payFile && <p className="text-[10px] text-slate-500 mt-1">{payFile.name}</p>}
+            </div>
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setPayModal(null)} className="px-4 py-2 rounded-xl border">Cancel</button>
-              <button type="button" onClick={() => void handleRecordPayment()} className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
-                Record payment
+              <button type="button" disabled={payBusy} onClick={() => void handleRecordPayment()} className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold disabled:opacity-60">
+                {payBusy ? 'Saving…' : 'Record payment'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {creditModal && (
+        <Modal open onClose={() => setCreditModal(null)} title={`Credit note — ${creditModal.invoice_number}`} size="sm">
+          <div className="space-y-3 text-xs">
+            <p className="text-slate-500">Reduces the outstanding balance (applied as a credit payment on the invoice).</p>
+            <div>
+              <label className="block font-semibold mb-1">Amount (E)</label>
+              <input type="number" min={0} step="0.01" value={creditAmount} onChange={(e) => setCreditAmount(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Reason *</label>
+              <input value={creditReason} onChange={(e) => setCreditReason(e.target.value)} placeholder="e.g. Partial rent waiver"
+                className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setCreditModal(null)} className="px-4 py-2 rounded-xl border">Close</button>
+              <button type="button" onClick={() => void handleCredit()} className="px-4 py-2 rounded-xl bg-violet-600 text-white font-bold">
+                Apply credit
               </button>
             </div>
           </div>
@@ -406,6 +514,11 @@ export function InvoicesTab() {
             <p><strong>Status:</strong> {viewingInvoice.status}</p>
             <p><strong>Total:</strong> E{viewingInvoice.total.toLocaleString()}</p>
             <p><strong>Paid:</strong> E{viewingInvoice.amount_paid.toLocaleString()}</p>
+            {viewingInvoice.notes && (
+              <div className="p-2 rounded-lg bg-slate-50 dark:bg-slate-900 border whitespace-pre-wrap max-h-40 overflow-y-auto">
+                {viewingInvoice.notes}
+              </div>
+            )}
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => handlePdf(viewingInvoice, true)} className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">
                 View PDF
