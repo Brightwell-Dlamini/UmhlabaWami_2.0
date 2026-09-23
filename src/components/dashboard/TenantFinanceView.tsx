@@ -5,12 +5,15 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  FileText,
 } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { invoices as invoicesApi } from '../../services/api/invoices';
 import { tenants as tenantsApi } from '../../services/api/tenants';
 import { leases as leasesApi } from '../../services/api/leases';
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
+import { generateInvoicePdf } from '../../services/pdf';
+import type { Invoice } from '../../types';
 
 /**
  * Tenant-facing financial snapshot: open balance, invoices, rent obligations.
@@ -18,7 +21,8 @@ import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
  */
 export const TenantFinanceView: React.FC = () => {
   const user = auth.getCurrentUser();
-  const orgId = user?.organization_id ?? '';
+  const org = auth.getCurrentOrganization();
+  const orgId = user?.organization_id ?? org?.id ?? '';
 
   const { data: tenants = [] } = useSupabaseQuery(
     ['tenants', orgId],
@@ -75,7 +79,12 @@ export const TenantFinanceView: React.FC = () => {
     () =>
       myInvoices
         .filter((inv) => inv.status !== 'Paid' && inv.status !== 'Cancelled')
-        .reduce((sum, inv) => sum + (Number((inv as { balance_due?: number; total?: number }).balance_due ?? (inv as { total?: number }).total ?? 0)), 0),
+        .reduce(
+          (sum, inv) =>
+            sum +
+            Math.max(0, Number(inv.total ?? 0) - Number(inv.amount_paid ?? 0)),
+          0
+        ),
     [myInvoices]
   );
 
@@ -88,8 +97,13 @@ export const TenantFinanceView: React.FC = () => {
           inv.issue_date &&
           new Date(inv.issue_date).getFullYear() === year
       )
-      .reduce((sum, inv) => sum + (Number((inv as { total?: number }).total ?? 0)), 0);
+      .reduce((sum, inv) => sum + Number(inv.total ?? 0), 0);
   }, [myInvoices]);
+
+  const handleViewPdf = (inv: Invoice) => {
+    if (!org) return;
+    void generateInvoicePdf(inv, org, myTenant, { open: true });
+  };
 
   if (!orgId) {
     return (
@@ -156,7 +170,7 @@ export const TenantFinanceView: React.FC = () => {
       <div className="bg-white dark:bg-slate-800 rounded-2xl border overflow-hidden">
         <div className="px-4 py-3 border-b flex items-center gap-2">
           <Receipt className="w-4 h-4 text-blue-600" />
-          <h2 className="text-sm font-bold">Invoices</h2>
+          <h2 className="text-sm font-bold">Invoices sent to you</h2>
         </div>
         {myInvoices.length === 0 ? (
           <div className="p-8 text-center text-xs text-slate-400">
@@ -166,11 +180,13 @@ export const TenantFinanceView: React.FC = () => {
           <div className="divide-y">
             {myInvoices.map((inv) => {
               const isPaid = inv.status === 'Paid';
+              const balance =
+                Number(inv.total ?? 0) - Number(inv.amount_paid ?? 0);
               const isOverdue =
                 !isPaid &&
                 inv.due_date &&
                 new Date(inv.due_date).getTime() < Date.now();
-              const total = Number((inv as { total?: number }).total ?? 0);
+              const total = Number(inv.total ?? 0);
               return (
                 <div
                   key={inv.id}
@@ -178,33 +194,46 @@ export const TenantFinanceView: React.FC = () => {
                 >
                   <div className="min-w-0">
                     <div className="font-semibold truncate">
-                      {(inv as { invoice_number?: string }).invoice_number ?? inv.type ?? 'Invoice'}
+                      {inv.invoice_number ?? inv.type ?? 'Invoice'}
                     </div>
                     <div className="text-[11px] text-slate-500 mt-0.5">
                       Issued {inv.issue_date}
                       {inv.due_date ? ` · Due ${inv.due_date}` : ''}
+                      {!isPaid && balance > 0
+                        ? ` · Balance E${balance.toLocaleString()}`
+                        : ''}
                     </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <div className="font-bold">
-                      E{total.toLocaleString()}
+                  <div className="text-right shrink-0 flex items-center gap-3">
+                    <div>
+                      <div className="font-bold">
+                        E{total.toLocaleString()}
+                      </div>
+                      <div
+                        className={`text-[10px] font-bold flex items-center justify-end gap-1 mt-0.5 ${
+                          isPaid
+                            ? 'text-emerald-600'
+                            : isOverdue
+                              ? 'text-red-600'
+                              : 'text-amber-600'
+                        }`}
+                      >
+                        {isPaid ? (
+                          <CheckCircle2 className="w-3 h-3" />
+                        ) : (
+                          <Clock className="w-3 h-3" />
+                        )}
+                        {isPaid ? 'Paid' : isOverdue ? 'Overdue' : inv.status}
+                      </div>
                     </div>
-                    <div
-                      className={`text-[10px] font-bold flex items-center justify-end gap-1 mt-0.5 ${
-                        isPaid
-                          ? 'text-emerald-600'
-                          : isOverdue
-                            ? 'text-red-600'
-                            : 'text-amber-600'
-                      }`}
+                    <button
+                      type="button"
+                      onClick={() => handleViewPdf(inv)}
+                      className="px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold text-blue-600 hover:bg-blue-50 flex items-center gap-1"
+                      title="View invoice PDF"
                     >
-                      {isPaid ? (
-                        <CheckCircle2 className="w-3 h-3" />
-                      ) : (
-                        <Clock className="w-3 h-3" />
-                      )}
-                      {isPaid ? 'Paid' : isOverdue ? 'Overdue' : inv.status}
-                    </div>
+                      <FileText className="w-3.5 h-3.5" /> View PDF
+                    </button>
                   </div>
                 </div>
               );
