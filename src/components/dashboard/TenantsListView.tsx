@@ -5,7 +5,7 @@ import { auth } from '../../services/auth';
 import { tenants as tenantsApi } from '../../services/api/tenants';
 import { shops as shopsApi } from '../../services/api/shops';
 import { shoppingCenters as centersApi } from '../../services/api/shoppingCenters';
-import type { Tenant, Shop, ShoppingCenter } from '../../types';
+import type { Tenant, Shop } from '../../types';
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 import { useToast } from '../ui/ToastProvider';
@@ -20,7 +20,7 @@ export const TenantsListView: React.FC = () => {
   const [showAssign, setShowAssign] = useState(false);
   const [editing, setEditing] = useState<Tenant | null>(null);
 
-  const { data: tenants = [], isLoading, refetch } = useSupabaseQuery(
+  const { data: tenants = [], loading, refetch } = useSupabaseQuery(
     ['tenants', orgId],
     () => tenantsApi.list(),
     { enabled: !!orgId }
@@ -95,7 +95,7 @@ export const TenantsListView: React.FC = () => {
         />
       </div>
 
-      {isLoading ? (
+      {loading ? (
         <div className="text-sm text-slate-500">Loading…</div>
       ) : filtered.length === 0 ? (
         <EmptyState
