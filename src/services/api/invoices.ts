@@ -1,7 +1,9 @@
 // src/services/api/invoices.ts
-import { sb, unwrap, requireOrgId } from './_helpers';
+import { sb, unwrap, requireOrgId, requireUser } from './_helpers';
 import type { Invoice, InvoiceType, PaymentRecord } from '../../types';
 import { isPayableStatus, isSettledStatus } from '../../constants/invoiceStatus';
+import { notifications } from './notifications';
+import { tenants as tenantsApi } from './tenants';
 
 export interface InvoiceLineInput {
   description: string;
@@ -15,6 +17,7 @@ export interface CreateInvoiceInput {
   issue_date: string;
   due_date: string;
   currency?: string;
+  /** Explicit tax rate (0–1). Defaults to 0 — never assume VAT. */
   tax_rate?: number;
   lines: InvoiceLineInput[];
   notes?: string;
@@ -53,6 +56,8 @@ export const invoices = {
     if (!input.lines || input.lines.length === 0) {
       throw new Error('An invoice must have at least one line.');
     }
+    // Tax is zero unless the caller explicitly passes a rate.
+    const taxRate = input.tax_rate ?? 0;
     const { data, error } = await sb().rpc('create_invoice_with_lines', {
       p_organization_id: requireOrgId(),
       p_tenant_id: input.tenant_id,
@@ -60,7 +65,7 @@ export const invoices = {
       p_issue_date: input.issue_date,
       p_due_date: input.due_date,
       p_currency: input.currency ?? 'SZL',
-      p_tax_rate: input.tax_rate ?? 0.15,
+      p_tax_rate: taxRate,
       p_lines: input.lines,
       p_notes: input.notes ?? null,
     });
@@ -116,7 +121,8 @@ export const invoices = {
     return data as unknown as PaymentRecord;
   },
 
-  async bulkGenerateRent(periodDate: string, taxRate = 0.15): Promise<number> {
+  /** Bulk rent — tax stays 0 unless explicitly overridden. */
+  async bulkGenerateRent(periodDate: string, taxRate = 0): Promise<number> {
     const { data, error } = await sb().rpc('bulk_generate_rent_invoices', {
       p_organization_id: requireOrgId(),
       p_period_date: periodDate,
@@ -138,6 +144,48 @@ export const invoices = {
       .eq('invoice_id', invoiceId)
       .order('paid_at', { ascending: false });
     return unwrap(result) as unknown as PaymentRecord[];
+  },
+
+  /**
+   * Send payment reminders for selected invoices.
+   * Creates in-app notifications for each tenant's portal user (when linked).
+   */
+  async sendReminders(invoiceIds: string[]): Promise<number> {
+    if (!invoiceIds.length) return 0;
+    const actor = requireUser();
+    const orgId = requireOrgId();
+
+    const { data: rows, error } = await sb()
+      .from('invoices')
+      .select('id, invoice_number, tenant_id, tenant_name, total, amount_paid, due_date, status')
+      .in('id', invoiceIds)
+      .eq('organization_id', orgId);
+    if (error) throw new Error(error.message);
+
+    const allTenants = await tenantsApi.list(orgId);
+    let sent = 0;
+
+    for (const inv of rows ?? []) {
+      if (inv.status === 'Paid' || inv.status === 'Cancelled') continue;
+      const balance = Number(inv.total) - Number(inv.amount_paid ?? 0);
+      if (balance <= 0) continue;
+
+      const tenant = allTenants.find((t) => t.id === inv.tenant_id);
+      const userId = tenant?.user_id;
+      if (!userId) continue;
+
+      const due = inv.due_date ? String(inv.due_date) : 'soon';
+      await notifications.create({
+        user_id: userId,
+        title: `Payment reminder — ${inv.invoice_number}`,
+        message: `Balance due E${balance.toLocaleString()} (due ${due}). Please arrange payment. — ${actor.name}`,
+        type: 'lease_reminder',
+        link: inv.id,
+      });
+      sent += 1;
+    }
+
+    return sent;
   },
 };
 
