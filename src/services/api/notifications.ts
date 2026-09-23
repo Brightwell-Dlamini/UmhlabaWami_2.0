@@ -1,4 +1,4 @@
-import { sb, unwrap, requireUser } from './_helpers';
+import { sb, unwrap, requireUser, requireOrgId } from './_helpers';
 import type { NotificationItem } from '../../types';
 
 export const notifications = {
@@ -47,14 +47,23 @@ export const notifications = {
     link?: string | null;
   }): Promise<NotificationItem | null> {
     try {
+      let organizationId: string | null = null;
+      try {
+        organizationId = requireOrgId();
+      } catch {
+        organizationId = null;
+      }
+
       const result = await sb()
         .from('notifications')
         .insert({
           user_id: input.user_id,
+          organization_id: organizationId,
           title: input.title,
           message: input.message,
           type: input.type ?? 'info',
           link: input.link ?? null,
+          link_id: input.link ?? null,
           read: false,
           created_at: new Date().toISOString(),
         })
@@ -71,7 +80,6 @@ export const notifications = {
     }
   },
 
-  /** Ensure the current user has at least a welcome row so the bell is not empty forever. */
   async ensureWelcome(): Promise<void> {
     const user = requireUser();
     const { count } = await sb()
