@@ -1,5 +1,7 @@
 import { sb, unwrap, requireOrgId, requireUser } from './_helpers';
-import type { Tenant } from '../../types';
+import { profiles } from './profiles';
+import { shops } from './shops';
+import type { Tenant, Shop } from '../../types';
 
 export interface TenantInput {
   property_id: string;
@@ -13,6 +15,22 @@ export interface TenantInput {
   move_in_date?: string;
   status?: Tenant['status'];
   user_id?: string;
+}
+
+export interface AssignTenantInput {
+  shop: Pick<
+    Shop,
+    'id' | 'property_id' | 'shopping_center_id' | 'shop_number' | 'rental_amount'
+  >;
+  business_name: string;
+  contact_person: string;
+  phone: string;
+  email: string;
+  trade_type?: string;
+  move_in_date?: string;
+  /** When true, creates a portal login (role=tenant) and links it. */
+  createPortal?: boolean;
+  password?: string;
 }
 
 export const tenants = {
@@ -35,7 +53,6 @@ export const tenants = {
   },
 
   async create(input: TenantInput): Promise<Tenant> {
-    const user = requireUser();
     const orgId = requireOrgId();
     const { data, error } = await sb().rpc('add_tenant', {
       p_organization_id: orgId,
@@ -53,6 +70,57 @@ export const tenants = {
     });
     if (error) throw new Error(error.message);
     return data as unknown as Tenant;
+  },
+
+  /**
+   * Unit-first happy path: create tenant on a vacant unit, optionally create
+   * portal login, then mark the unit Occupied. One call, no dual staff/tenant flow.
+   */
+  async assignToUnit(input: AssignTenantInput): Promise<Tenant> {
+    const email = input.email.trim().toLowerCase();
+    const contact = input.contact_person.trim();
+    const business = input.business_name.trim();
+    if (!business) throw new Error('Business name is required.');
+    if (!contact) throw new Error('Contact person is required.');
+    if (!email) throw new Error('Email is required.');
+
+    let userId: string | undefined;
+
+    if (input.createPortal) {
+      if (!input.password || input.password.length < 8) {
+        throw new Error('Portal password must be at least 8 characters.');
+      }
+      const { userId: id } = await profiles.addStaff({
+        email,
+        name: contact,
+        role: 'tenant',
+        password: input.password,
+        phone: input.phone?.trim() || undefined,
+      });
+      userId = id;
+    }
+
+    const tenant = await this.create({
+      property_id: input.shop.property_id,
+      shopping_center_id: input.shop.shopping_center_id,
+      shop_id: input.shop.id,
+      business_name: business,
+      contact_person: contact,
+      phone: input.phone?.trim() || '',
+      email,
+      trade_type: input.trade_type?.trim() || 'Retail',
+      move_in_date: input.move_in_date,
+      status: 'Active',
+      user_id: userId,
+    });
+
+    try {
+      await shops.update(input.shop.id, { status: 'Occupied' });
+    } catch (e) {
+      console.warn('[tenants.assignToUnit] unit status update failed', e);
+    }
+
+    return tenant;
   },
 
   async update(id: string, patch: Partial<Tenant>): Promise<Tenant> {
