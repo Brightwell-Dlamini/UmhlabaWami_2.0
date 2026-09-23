@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Building2, PlusCircle, Search, Edit3, Trash2, AlertCircle,
+  Building2, PlusCircle, Search, Edit3, Trash2, AlertCircle, UserPlus,
 } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { shops as shopsApi } from '../../services/api/shops';
@@ -14,6 +14,7 @@ import { Modal } from '../ui/Modal';
 import { useConfirm } from '../ui/ConfirmDialog';
 import { useToast } from '../ui/ToastProvider';
 import { EmptyState } from '../ui/EmptyState';
+import { AssignTenantModal } from './AssignTenantModal';
 
 interface Props {
   onSelectShop?: (shop: Shop) => void;
@@ -29,8 +30,9 @@ export const UnitsDirectoryView: React.FC<Props> = ({ onSelectShop }) => {
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingShop, setEditingShop] = useState<Shop | null>(null);
+  const [assignShop, setAssignShop] = useState<Shop | null>(null);
 
-  const { data: shops = [] } = useSupabaseQuery(['shops', orgId], () => shopsApi.list(), { enabled: !!orgId });
+  const { data: shops = [], refetch: refetchShops } = useSupabaseQuery(['shops', orgId], () => shopsApi.list(), { enabled: !!orgId });
   const { data: centers = [] } = useSupabaseQuery(['centers', orgId], () => centersApi.list(), { enabled: !!orgId });
   const { data: properties = [] } = useSupabaseQuery(['properties', orgId], () => propertiesApi.list(), { enabled: !!orgId });
 
@@ -204,11 +206,20 @@ export const UnitsDirectoryView: React.FC<Props> = ({ onSelectShop }) => {
                     </div>
                   </div>
                 </div>
-                <div className="pt-2 flex items-center gap-2">
+                <div className="pt-2 flex items-center gap-2 flex-wrap">
+                  {shop.status === 'Available' && (
+                    <button
+                      type="button"
+                      onClick={() => setAssignShop(shop)}
+                      className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" /> Assign Tenant
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => onSelectShop?.(shop)}
-                    className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold"
+                    className={`${shop.status === 'Available' ? '' : 'flex-1 '}py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold`}
                   >
                     Details
                   </button>
@@ -216,6 +227,7 @@ export const UnitsDirectoryView: React.FC<Props> = ({ onSelectShop }) => {
                     type="button"
                     onClick={() => setEditingShop(shop)}
                     className="p-2 rounded-xl border text-slate-600 hover:bg-slate-100"
+                    title="Edit unit"
                   >
                     <Edit3 className="w-4 h-4" />
                   </button>
@@ -223,6 +235,7 @@ export const UnitsDirectoryView: React.FC<Props> = ({ onSelectShop }) => {
                     type="button"
                     onClick={() => handleDelete(shop)}
                     className="p-2 rounded-xl border text-red-500 hover:bg-red-50"
+                    title="Delete unit"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -257,6 +270,18 @@ export const UnitsDirectoryView: React.FC<Props> = ({ onSelectShop }) => {
           if (!editingShop) return;
           void updateShop.mutate({ id: editingShop.id, patch: input as never });
         }}
+      />
+
+      <AssignTenantModal
+        open={!!assignShop}
+        onClose={() => setAssignShop(null)}
+        onAssigned={() => {
+          setAssignShop(null);
+          void refetchShops();
+        }}
+        shop={assignShop}
+        vacantShops={shops.filter((s) => s.status === 'Available')}
+        centers={centers}
       />
     </div>
   );
