@@ -123,6 +123,7 @@ export const VendorsView: React.FC = () => {
           </p>
         </div>
         <button
+          type="button"
           onClick={() => { setEditing(null); setShowModal(true); }}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
         >
@@ -156,7 +157,17 @@ export const VendorsView: React.FC = () => {
         {filtered.map((v) => (
           <div
             key={v.id}
-            className="p-5 rounded-2xl bg-white dark:bg-slate-800 border space-y-3 flex flex-col"
+            role="button"
+            tabIndex={0}
+            onClick={() => { setEditing(v); setShowModal(true); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setEditing(v);
+                setShowModal(true);
+              }
+            }}
+            className="p-5 rounded-2xl bg-white dark:bg-slate-800 border space-y-3 flex flex-col cursor-pointer hover:border-blue-300 transition"
           >
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-700">
@@ -171,14 +182,16 @@ export const VendorsView: React.FC = () => {
             <div className="text-xs text-slate-500">Contact: {v.contact_person}</div>
             <div className="text-xs">{v.phone}</div>
             <div className="text-[11px] text-slate-400 truncate">{v.email}</div>
-            <div className="pt-3 border-t flex gap-2">
+            <div className="pt-3 border-t flex gap-2" onClick={(e) => e.stopPropagation()}>
               <button
+                type="button"
                 onClick={() => { setEditing(v); setShowModal(true); }}
                 className="p-1.5 rounded-lg border text-slate-600 hover:bg-slate-100"
               >
                 <Edit3 className="w-3.5 h-3.5" />
               </button>
               <button
+                type="button"
                 onClick={() => handleDelete(v)}
                 className="p-1.5 rounded-lg border text-red-500 hover:bg-red-50"
               >
