@@ -19,7 +19,6 @@ export interface CreateInvoiceInput {
   issue_date: string;
   due_date: string;
   currency?: string;
-  /** Explicit tax rate (0–1). Defaults to 0 — never assume VAT. */
   tax_rate?: number;
   lines: InvoiceLineInput[];
   notes?: string;
@@ -76,8 +75,20 @@ export const invoices = {
     return data as unknown as Invoice;
   },
 
-  /** Soft-cancel: keeps the row for audit; blocks further payments. */
+  /** Soft-cancel via RPC when migration 017 is applied; falls back to direct update. */
   async cancel(id: string, reason?: string): Promise<Invoice> {
+    const { data, error } = await sb().rpc('cancel_invoice', {
+      p_invoice_id: id,
+      p_reason: reason ?? null,
+    });
+    if (!error && data) {
+      return data as unknown as Invoice;
+    }
+    // Fallback if RPC not deployed yet
+    if (error && !/could not find the function|function.*does not exist/i.test(error.message)) {
+      throwFriendly(error);
+    }
+
     const orgId = requireOrgId();
     const inv = await this.get(id);
     if (inv.status === 'Cancelled') {
@@ -102,10 +113,6 @@ export const invoices = {
     return unwrap(result) as unknown as Invoice;
   },
 
-  /**
-   * Credit note = payment applied with CREDIT_NOTE notes so outstanding falls.
-   * Does not delete audit history.
-   */
   async issueCreditNote(
     invoiceId: string,
     amount: number,
@@ -174,9 +181,6 @@ export const invoices = {
     return data as unknown as PaymentRecord;
   },
 
-  /**
-   * Upload POP file to private storage and return a path (or signed URL hint).
-   */
   async uploadProof(invoiceId: string, file: File): Promise<string> {
     const orgId = requireOrgId();
     const { path, publicUrl } = await uploadFile({
@@ -194,8 +198,7 @@ export const invoices = {
   },
 
   /**
-   * Tenant reports "I paid" with optional POP. Does NOT mark the invoice paid.
-   * Appends a claim marker to notes and notifies finance/admin users.
+   * Tenant "I paid" — prefers RPC submit_invoice_payment_claim (migration 017).
    */
   async submitPaymentClaim(
     invoiceId: string,
@@ -220,25 +223,40 @@ export const invoices = {
       throw new Error('This invoice is already settled.');
     }
 
-    const claim = {
-      at: new Date().toISOString(),
-      by: actor.name,
-      amount: args.amount,
-      method: args.method,
-      reference: args.reference ?? '',
-      proof_url: args.proof_url ?? '',
-      notes: args.notes ?? '',
-    };
-    const claimLine = `${POP_CLAIM_MARKER}${JSON.stringify(claim)}`;
-    const notes = inv.notes ? `${inv.notes}\n${claimLine}` : claimLine;
+    const { error: rpcErr } = await sb().rpc('submit_invoice_payment_claim', {
+      p_invoice_id: invoiceId,
+      p_amount: args.amount,
+      p_method: args.method,
+      p_reference: args.reference ?? null,
+      p_proof_url: args.proof_url ?? null,
+      p_notes: args.notes ?? null,
+    });
 
-    const { error } = await sb()
-      .from('invoices')
-      .update({ notes })
-      .eq('id', invoiceId);
-    if (error) throwFriendly(error);
+    if (rpcErr) {
+      const missing = /could not find the function|function.*does not exist/i.test(
+        rpcErr.message || ''
+      );
+      if (!missing) throwFriendly(rpcErr);
 
-    // Notify finance + admin
+      // Fallback: direct notes update (needs RLS to allow tenant update)
+      const claim = {
+        at: new Date().toISOString(),
+        by: actor.name,
+        amount: args.amount,
+        method: args.method,
+        reference: args.reference ?? '',
+        proof_url: args.proof_url ?? '',
+        notes: args.notes ?? '',
+      };
+      const claimLine = `${POP_CLAIM_MARKER}${JSON.stringify(claim)}`;
+      const notes = inv.notes ? `${inv.notes}\n${claimLine}` : claimLine;
+      const { error } = await sb()
+        .from('invoices')
+        .update({ notes })
+        .eq('id', invoiceId);
+      if (error) throwFriendly(error);
+    }
+
     try {
       const staff = await profiles.list();
       const targets = staff.filter(
@@ -260,7 +278,6 @@ export const invoices = {
     }
   },
 
-  /** Parse latest POP claim from invoice notes, if any. */
   parseLatestClaim(notes?: string | null): {
     at: string;
     by: string;
