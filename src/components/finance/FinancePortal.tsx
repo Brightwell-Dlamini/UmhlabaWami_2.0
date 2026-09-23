@@ -8,6 +8,7 @@ import { ItemsRemindersTab } from './ItemsRemindersTab';
 import type { ItemsSubTab } from './ItemsRemindersTab';
 import { CommercialEngineView } from './CommercialEngineView';
 import { RentRollView } from './RentRollView';
+import { BankReconcileView } from './BankReconcileView';
 
 type Tab =
   | 'dashboard'
@@ -15,28 +16,14 @@ type Tab =
   | 'quotes'
   | 'engine'
   | 'rent_roll'
-  | 'items';
+  | 'items'
+  | 'bank';
 
 interface PortalRoute {
   tab: Tab;
-  /** Only meaningful for tab === 'items' */
   itemsSubTab?: ItemsSubTab;
 }
 
-/**
- * Maps the sidebar's granular item ids to the coarse tab + optional
- * sub-tab we render.
- *
- *   rent_roll             → rent_roll
- *   invoices              → invoices
- *   transactions          → items / expenses
- *   expenses_ledger       → items / expenses
- *   financial_requests    → items / requisitions
- *   finance_documents     → invoices
- *   commercial_engine     → engine
- *   quotes / orders       → quotes
- *   items / reminders     → items
- */
 function resolveRoute(initialTab?: string): PortalRoute {
   if (!initialTab) return { tab: 'dashboard' };
   switch (initialTab) {
@@ -59,6 +46,10 @@ function resolveRoute(initialTab?: string): PortalRoute {
       return { tab: 'items', itemsSubTab: 'reminders' };
     case 'commercial_engine':
       return { tab: 'engine' };
+    case 'bank':
+    case 'reconciliation':
+    case 'bank_transactions':
+      return { tab: 'bank' };
     default:
       return { tab: 'dashboard' };
   }
@@ -69,6 +60,7 @@ const TAB_LABELS: { id: Tab; label: string }[] = [
   { id: 'rent_roll', label: 'Rent Roll' },
   { id: 'invoices', label: 'Invoices' },
   { id: 'quotes', label: 'Quotes & Orders' },
+  { id: 'bank', label: 'Bank' },
   { id: 'engine', label: 'Commercial Engine' },
   { id: 'items', label: 'Items, Statements & Reminders' },
 ];
@@ -115,7 +107,7 @@ export const FinancePortal: React.FC<{ initialTab?: string }> = ({
           </div>
           <h1 className="text-2xl font-bold mt-1">{header.companyName}</h1>
           <p className="text-xs text-emerald-100">
-            Invoicing, collections, expenses, and reconciliation
+            Invoicing, collections, bank match, and reconciliation
             <span className="ml-2 font-mono opacity-80">
               {header.orgCode}
             </span>
@@ -147,6 +139,7 @@ export const FinancePortal: React.FC<{ initialTab?: string }> = ({
       {tab === 'rent_roll' && <RentRollView />}
       {tab === 'invoices' && <InvoicesTab />}
       {tab === 'quotes' && <QuotesOrdersTab />}
+      {tab === 'bank' && <BankReconcileView />}
       {tab === 'engine' && <CommercialEngineView />}
       {tab === 'items' && <ItemsRemindersTab initialSubTab={itemsSubTab} />}
     </div>
