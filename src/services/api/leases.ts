@@ -1,4 +1,4 @@
-import { sb, unwrap, requireOrgId } from './_helpers';
+import { sb, unwrap, requireOrgId, requireUser } from './_helpers';
 import type { Lease } from '../../types';
 
 export interface LeaseInput {
@@ -63,10 +63,6 @@ export const leases = {
     return unwrap(result) as unknown as Lease;
   },
 
-  /**
-   * Direct insert — the old add_lease RPC was never shipped in migrations,
-   * which is why create/save silently failed in production.
-   */
   async create(input: LeaseInput): Promise<Lease> {
     const orgId = requireOrgId();
     const base = {
@@ -82,7 +78,6 @@ export const leases = {
       document_url: input.document_url ?? '',
       is_digitally_signed: false,
     };
-    // Prefer terms_body; if column not migrated yet, fall back to document_url.
     const withTerms = {
       ...base,
       terms_body: input.terms_body ?? null,
@@ -138,10 +133,46 @@ export const leases = {
     if (error) throw new Error(error.message);
   },
 
+  /**
+   * Only the tenant linked to this lease may sign.
+   * Staff/admin cannot "Mark signed" on behalf of the tenant.
+   */
   async sign(id: string, signerName: string): Promise<Lease> {
+    const user = requireUser();
+    const lease = await this.get(id);
+
+    if (lease.is_digitally_signed) {
+      throw new Error('This lease is already signed.');
+    }
+
+    // Resolve tenant row and verify the caller owns it.
+    const { data: tenant, error: tErr } = await sb()
+      .from('tenants')
+      .select('id, user_id, email, contact_person')
+      .eq('id', lease.tenant_id)
+      .single();
+    if (tErr || !tenant) {
+      throw new Error('Tenant record for this lease was not found.');
+    }
+
+    const linked =
+      tenant.user_id === user.id ||
+      (tenant.email &&
+        user.email &&
+        tenant.email.toLowerCase() === user.email.toLowerCase());
+
+    if (!linked || user.role !== 'tenant') {
+      throw new Error(
+        'Only the tenant on this lease can digitally sign it. Staff cannot sign on their behalf.'
+      );
+    }
+
+    const name =
+      signerName?.trim() || user.name || tenant.contact_person || 'Tenant';
+
     const { data, error } = await sb().rpc('sign_lease', {
       p_lease_id: id,
-      p_signer_name: signerName,
+      p_signer_name: name,
     });
     if (!error && data) {
       return data as unknown as Lease;
@@ -149,7 +180,7 @@ export const leases = {
     return this.update(id, {
       is_digitally_signed: true,
       signed_at: new Date().toISOString(),
-      signer_name: signerName,
+      signer_name: name,
     });
   },
 };
