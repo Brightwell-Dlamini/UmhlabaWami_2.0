@@ -56,6 +56,23 @@ function orgBanking() {
   };
 }
 
+function statusTone(status: string): string {
+  switch (status) {
+    case 'Paid':
+      return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300';
+    case 'Partially Paid':
+      return 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300';
+    case 'Overdue':
+      return 'bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300';
+    case 'Sent':
+      return 'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300';
+    case 'Cancelled':
+      return 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300';
+    default:
+      return 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300';
+  }
+}
+
 export function InvoicesTab() {
   const org = auth.getCurrentOrganization();
   const orgId = org?.id ?? '';
@@ -180,11 +197,11 @@ export function InvoicesTab() {
 
   const clearSelection = () => setSelected(new Set());
 
-  const handlePdf = (inv: Invoice) => {
+  const handlePdf = (inv: Invoice, open = false) => {
     const currentOrg = auth.getCurrentOrganization();
     if (!currentOrg) return;
     const tenant = tenants.find((t) => t.id === inv.tenant_id);
-    generateInvoicePdf(inv, currentOrg, tenant);
+    void generateInvoicePdf(inv, currentOrg, tenant, { open });
   };
 
   const handleBulkGenerate = async () => {
@@ -375,11 +392,18 @@ export function InvoicesTab() {
           <div className="flex items-center justify-end gap-3">
             <span>E{inv.amount_paid.toLocaleString()}</span>
             <button
-              onClick={() => handlePdf(inv)}
+              onClick={() => handlePdf(inv, true)}
+              className="text-[11px] font-semibold text-blue-600 hover:underline"
+              type="button"
+            >
+              View PDF
+            </button>
+            <button
+              onClick={() => handlePdf(inv, false)}
               className="text-[11px] font-semibold text-slate-600 hover:underline"
               type="button"
             >
-              PDF
+              Download
             </button>
             <button
               onClick={() => setViewingInvoice(inv)}
@@ -551,16 +575,85 @@ export function InvoicesTab() {
               >
                 <div style={{ height: virtual.totalHeight, position: 'relative' }}>
                   <div style={{ transform: `translateY(${virtual.offsetY}px)` }}>
-                    {virtual.virtualItems.map(renderRow)}
+                    {virtual.visibleItems.map((inv) => renderRow(inv))}
                   </div>
                 </div>
               </div>
             ) : (
-              <div>{filtered.map(renderRow)}</div>
+              filtered.map((inv) => renderRow(inv))
             )}
           </>
         )}
       </div>
+
+      {payModal && (
+        <Modal
+          open
+          onClose={() => setPayModal(null)}
+          title={`Record payment — ${payModal.invoice_number}`}
+          size="sm"
+        >
+          <div className="space-y-3 text-xs">
+            <div>
+              Balance due:{' '}
+              <strong>
+                E{(payModal.total - payModal.amount_paid).toLocaleString()}
+              </strong>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Amount</label>
+              <input
+                type="number"
+                step="0.01"
+                value={payAmount}
+                onChange={(e) => setPayAmount(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Method</label>
+              <select
+                value={payMethod}
+                onChange={(e) =>
+                  setPayMethod(e.target.value as PaymentRecord['method'])
+                }
+                className="w-full px-3 py-2 rounded-xl border"
+              >
+                <option value="EFT">EFT</option>
+                <option value="Cash">Cash</option>
+                <option value="Card">Card</option>
+                <option value="Cheque">Cheque</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Reference</label>
+              <input
+                value={payRef}
+                onChange={(e) => setPayRef(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setPayModal(null)}
+                className="px-4 py-2 rounded-xl border font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRecordPayment}
+                disabled={recordPayment.loading}
+                className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold disabled:opacity-60"
+              >
+                {recordPayment.loading ? 'Saving…' : 'Record payment'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {viewingInvoice && (
         <InvoiceViewer
@@ -569,98 +662,8 @@ export function InvoicesTab() {
           onClose={() => setViewingInvoice(null)}
         />
       )}
-
-      <Modal
-        open={!!payModal}
-        onClose={() => setPayModal(null)}
-        title="Record payment"
-        subtitle={
-          payModal
-            ? `${payModal.invoice_number} · ${payModal.tenant_name}`
-            : undefined
-        }
-        size="sm"
-      >
-        {payModal && (
-          <>
-            <p className="text-xs text-slate-500">
-              Balance due E
-              {(payModal.total - payModal.amount_paid).toLocaleString()}
-            </p>
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block font-semibold mb-1">Amount (E)</label>
-                <input
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  value={payAmount}
-                  onChange={(e) => setPayAmount(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
-                />
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Enter less than the balance for a partial payment.
-                </p>
-              </div>
-              <div>
-                <label className="block font-semibold mb-1">Method</label>
-                <select
-                  value={payMethod}
-                  onChange={(e) =>
-                    setPayMethod(e.target.value as PaymentRecord['method'])
-                  }
-                  className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
-                >
-                  <option value="EFT">EFT</option>
-                  <option value="Cash">Cash</option>
-                  <option value="Card">Card</option>
-                  <option value="Other">Other</option>
-                </select>
-              </div>
-              <div>
-                <label className="block font-semibold mb-1">Reference</label>
-                <input
-                  value={payRef}
-                  onChange={(e) => setPayRef(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
-                />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-2 border-t">
-              <button
-                type="button"
-                onClick={() => setPayModal(null)}
-                className="px-4 py-2 rounded-xl border text-xs font-semibold"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleRecordPayment()}
-                disabled={recordPayment.loading}
-                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold"
-              >
-                {recordPayment.loading ? 'Saving…' : 'Record payment'}
-              </button>
-            </div>
-          </>
-        )}
-      </Modal>
     </div>
   );
-}
-
-function statusTone(status: string): string {
-  switch (status) {
-    case 'Paid':
-      return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300';
-    case 'Overdue':
-      return 'bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300';
-    case 'Partially Paid':
-      return 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300';
-    default:
-      return 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300';
-  }
 }
 
 function InvoiceViewer({
@@ -675,9 +678,9 @@ function InvoiceViewer({
   const shop = shops.find((s) => s.id === invoice.shop_id);
   const bank = orgBanking();
 
-  const handlePdf = () => {
+  const handlePdf = (open = false) => {
     const o = auth.getCurrentOrganization();
-    if (o) generateInvoicePdf(invoice, o);
+    if (o) void generateInvoicePdf(invoice, o, undefined, { open });
   };
 
   return (
@@ -699,13 +702,14 @@ function InvoiceViewer({
             </div>
           </div>
           <div className="text-right">
-            <div className="text-[10px] text-slate-400 uppercase">Issued</div>
-            <div>{invoice.issue_date}</div>
-            <div className="text-[10px] text-slate-400 uppercase mt-1">Due</div>
-            <div>{invoice.due_date}</div>
+            <div className="text-[10px] text-slate-400 uppercase">Status</div>
+            <div className="font-bold">{invoice.status}</div>
+            <div className="text-slate-500">
+              Issued {invoice.issue_date} · Due {invoice.due_date}
+            </div>
           </div>
         </div>
-        <div className="border rounded-xl overflow-hidden">
+        <div className="rounded-xl border overflow-hidden">
           <table className="w-full text-xs">
             <thead className="bg-slate-100 dark:bg-slate-800/80">
               <tr>
@@ -714,7 +718,7 @@ function InvoiceViewer({
               </tr>
             </thead>
             <tbody className="divide-y">
-              {invoice.lines.map((l) => (
+              {(invoice.lines ?? []).map((l) => (
                 <tr key={l.id}>
                   <td className="p-2.5">{l.description}</td>
                   <td className="p-2.5 text-right font-semibold">
@@ -766,7 +770,14 @@ function InvoiceViewer({
           </button>
           <button
             type="button"
-            onClick={handlePdf}
+            onClick={() => handlePdf(true)}
+            className="px-4 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5"
+          >
+            View PDF
+          </button>
+          <button
+            type="button"
+            onClick={() => handlePdf(false)}
             className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5"
           >
             <Download className="w-3.5 h-3.5" /> Download PDF
