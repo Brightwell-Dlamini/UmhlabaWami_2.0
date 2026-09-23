@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   DollarSign,
   Receipt,
@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Clock,
   FileText,
+  Upload,
 } from 'lucide-react';
 import { auth } from '../../services/auth';
 import { invoices as invoicesApi } from '../../services/api/invoices';
@@ -13,23 +14,29 @@ import { tenants as tenantsApi } from '../../services/api/tenants';
 import { leases as leasesApi } from '../../services/api/leases';
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { generateInvoicePdf } from '../../services/pdf';
-import type { Invoice } from '../../types';
+import type { Invoice, PaymentRecord } from '../../types';
+import { Modal } from '../ui/Modal';
+import { useToast } from '../ui/ToastProvider';
 
-/**
- * Tenant-facing financial snapshot: open balance, invoices, rent obligations.
- * Read-only — tenants never mutate finance records from this view.
- */
 export const TenantFinanceView: React.FC = () => {
   const user = auth.getCurrentUser();
   const org = auth.getCurrentOrganization();
   const orgId = user?.organization_id ?? org?.id ?? '';
+  const toast = useToast();
+
+  const [claimInv, setClaimInv] = useState<Invoice | null>(null);
+  const [amount, setAmount] = useState('');
+  const [method, setMethod] = useState<PaymentRecord['method']>('EFT');
+  const [reference, setReference] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const { data: tenants = [] } = useSupabaseQuery(
     ['tenants', orgId],
     () => tenantsApi.list(),
     { enabled: !!orgId }
   );
-  const { data: invoices = [] } = useSupabaseQuery(
+  const { data: invoices = [], refetch } = useSupabaseQuery(
     ['invoices', orgId],
     () => invoicesApi.list(),
     { enabled: !!orgId }
@@ -103,6 +110,50 @@ export const TenantFinanceView: React.FC = () => {
   const handleViewPdf = (inv: Invoice) => {
     if (!org) return;
     void generateInvoicePdf(inv, org, myTenant, { open: true });
+  };
+
+  const openClaim = (inv: Invoice) => {
+    const bal = Math.max(0, Number(inv.total) - Number(inv.amount_paid ?? 0));
+    setClaimInv(inv);
+    setAmount(String(bal));
+    setMethod('EFT');
+    setReference('');
+    setFile(null);
+  };
+
+  const submitClaim = async () => {
+    if (!claimInv) return;
+    const n = Number(amount);
+    if (!(n > 0)) {
+      toast.error('Invalid amount', 'Enter how much you paid.');
+      return;
+    }
+    setBusy(true);
+    try {
+      let proof_url: string | undefined;
+      if (file) {
+        proof_url = await invoicesApi.uploadProof(claimInv.id, file);
+      }
+      await invoicesApi.submitPaymentClaim(claimInv.id, {
+        amount: n,
+        method,
+        reference: reference || undefined,
+        proof_url,
+      });
+      toast.success(
+        'Payment reported',
+        'Finance has been notified. They will confirm and update your balance.'
+      );
+      setClaimInv(null);
+      void refetch?.();
+    } catch (e) {
+      toast.error(
+        'Could not submit',
+        e instanceof Error ? e.message : 'Please try again.'
+      );
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (!orgId) {
@@ -180,13 +231,16 @@ export const TenantFinanceView: React.FC = () => {
           <div className="divide-y">
             {myInvoices.map((inv) => {
               const isPaid = inv.status === 'Paid';
+              const isCancelled = inv.status === 'Cancelled';
               const balance =
                 Number(inv.total ?? 0) - Number(inv.amount_paid ?? 0);
               const isOverdue =
                 !isPaid &&
+                !isCancelled &&
                 inv.due_date &&
                 new Date(inv.due_date).getTime() < Date.now();
               const total = Number(inv.total ?? 0);
+              const claim = invoicesApi.parseLatestClaim(inv.notes);
               return (
                 <div
                   key={inv.id}
@@ -202,9 +256,14 @@ export const TenantFinanceView: React.FC = () => {
                       {!isPaid && balance > 0
                         ? ` · Balance E${balance.toLocaleString()}`
                         : ''}
+                      {claim && !isPaid && (
+                        <span className="ml-1 text-violet-600 font-semibold">
+                          · Claim submitted
+                        </span>
+                      )}
                     </div>
                   </div>
-                  <div className="text-right shrink-0 flex items-center gap-3">
+                  <div className="text-right shrink-0 flex items-center gap-2 flex-wrap justify-end">
                     <div>
                       <div className="font-bold">
                         E{total.toLocaleString()}
@@ -230,10 +289,18 @@ export const TenantFinanceView: React.FC = () => {
                       type="button"
                       onClick={() => handleViewPdf(inv)}
                       className="px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold text-blue-600 hover:bg-blue-50 flex items-center gap-1"
-                      title="View invoice PDF"
                     >
-                      <FileText className="w-3.5 h-3.5" /> View PDF
+                      <FileText className="w-3.5 h-3.5" /> PDF
                     </button>
+                    {!isPaid && !isCancelled && balance > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => openClaim(inv)}
+                        className="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white text-[11px] font-semibold hover:bg-emerald-700 flex items-center gap-1"
+                      >
+                        <Upload className="w-3.5 h-3.5" /> I paid
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -241,6 +308,84 @@ export const TenantFinanceView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {claimInv && (
+        <Modal
+          open
+          onClose={() => setClaimInv(null)}
+          title={`Report payment — ${claimInv.invoice_number}`}
+          size="sm"
+        >
+          <div className="space-y-3 text-xs">
+            <p className="text-slate-500">
+              Tell finance you have paid. Attach a proof of payment if you have one.
+              Your balance updates after they confirm.
+            </p>
+            <div>
+              <label className="block font-semibold mb-1">Amount paid (E)</label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Method</label>
+              <select
+                value={method}
+                onChange={(e) => setMethod(e.target.value as PaymentRecord['method'])}
+                className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+              >
+                <option value="EFT">EFT / Bank transfer</option>
+                <option value="Cash">Cash</option>
+                <option value="Card">Card</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Bank reference</label>
+              <input
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
+                placeholder="Optional"
+                className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Proof of payment</label>
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                className="w-full text-xs"
+              />
+              {file && (
+                <p className="text-[10px] text-slate-500 mt-1">{file.name}</p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setClaimInv(null)}
+                className="px-4 py-2 rounded-xl border"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void submitClaim()}
+                className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold disabled:opacity-60"
+              >
+                {busy ? 'Submitting…' : 'Submit to finance'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };
