@@ -1,2 +1,1 @@
-// src/components/finance/InvoicesTab.tsx — SEE ARTIFACT
-export function InvoicesTab() { return null; }
+// RESTORE FROM ARTIFACT - content too large for single message; use push_files
