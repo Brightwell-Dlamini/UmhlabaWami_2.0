@@ -65,12 +65,16 @@ export const TenantDocumentsView: React.FC = () => {
     setTimeout(() => setDownloadMsg(null), ms);
   };
 
-  const handleDownload = async (row: DocRow) => {
+  const handlePdf = async (row: DocRow, open = false) => {
     if (!org) return;
     setBusyId(row.lease.id);
     try {
-      generateLeaseCertificatePdf(row.lease, org, row.tenant);
-      flash(`Downloaded lease for ${row.tenant?.business_name ?? 'your unit'}.`);
+      await generateLeaseCertificatePdf(row.lease, org, row.tenant, { open });
+      flash(
+        open
+          ? `Opened lease for ${row.tenant?.business_name ?? 'your unit'}.`
+          : `Downloaded lease for ${row.tenant?.business_name ?? 'your unit'}.`
+      );
     } catch (e) {
       flash(
         e instanceof Error ? `Failed: ${e.message}` : 'Failed to generate PDF.',
@@ -199,16 +203,25 @@ export const TenantDocumentsView: React.FC = () => {
                       type="button"
                     >
                       <Eye className="w-3.5 h-3.5" />
-                      <span>View</span>
+                      <span>View terms</span>
                     </button>
                     <button
-                      onClick={() => handleDownload(row)}
+                      onClick={() => handlePdf(row, true)}
+                      disabled={busyId === row.lease.id}
+                      className="px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-blue-600 hover:text-white text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold transition flex items-center justify-center gap-2 disabled:opacity-60"
+                      type="button"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>{busyId === row.lease.id ? 'Generating…' : 'View PDF'}</span>
+                    </button>
+                    <button
+                      onClick={() => handlePdf(row, false)}
                       disabled={busyId === row.lease.id}
                       className="px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-blue-600 hover:text-white text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold transition flex items-center justify-center gap-2 disabled:opacity-60"
                       type="button"
                     >
                       <Download className="w-3.5 h-3.5" />
-                      <span>{busyId === row.lease.id ? 'Generating…' : 'Download'}</span>
+                      <span>Download</span>
                     </button>
                   </div>
                 </div>
@@ -245,7 +258,14 @@ export const TenantDocumentsView: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => handleDownload(reading)}
+                onClick={() => handlePdf(reading, true)}
+                className="px-4 py-2 rounded-xl border text-xs font-semibold"
+              >
+                View PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePdf(reading, false)}
                 className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold"
               >
                 Download PDF
