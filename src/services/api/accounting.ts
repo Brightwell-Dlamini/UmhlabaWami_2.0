@@ -1,4 +1,4 @@
-import { sb, unwrap, requireOrgId, requireUser } from './_helpers';
+import { sb, unwrap, requireOrgId, requireUser, throwFriendly } from './_helpers';
 import type { Invoice, PaymentRecord } from '../../types';
 
 // ---------- Types ----------
@@ -137,10 +137,14 @@ export const items = {
       .from('invoice_items')
       .insert({
         organization_id: requireOrgId(),
-        tax_rate: 0.15,
-        default_quantity: 1,
+        tax_rate: input.tax_rate ?? 0,
+        default_quantity: input.default_quantity ?? 1,
         is_active: true,
-        ...input,
+        code: input.code ?? null,
+        name: input.name,
+        description: input.description ?? null,
+        unit_price: input.unit_price,
+        category: input.category ?? null,
       })
       .select()
       .single();
@@ -159,7 +163,7 @@ export const items = {
 
   async remove(id: string): Promise<void> {
     const { error } = await sb().from('invoice_items').delete().eq('id', id);
-    if (error) throw new Error(error.message);
+    if (error) throwFriendly(error);
   },
 };
 
@@ -205,6 +209,10 @@ export const quotes = {
     notes?: string;
     terms?: string;
   }): Promise<Quote> {
+    const lines = input.lines.map((l) => ({
+      ...l,
+      tax_rate: l.tax_rate ?? 0,
+    }));
     const { data, error } = await sb().rpc('create_quote_with_lines', {
       p_organization_id: requireOrgId(),
       p_type: input.type,
@@ -217,11 +225,11 @@ export const quotes = {
       p_issue_date: input.issue_date,
       p_valid_until: input.valid_until ?? null,
       p_currency: input.currency ?? 'SZL',
-      p_lines: input.lines,
+      p_lines: lines,
       p_notes: input.notes ?? null,
       p_terms: input.terms ?? null,
     });
-    if (error) throw new Error(error.message);
+    if (error) throwFriendly(error);
     return data as unknown as Quote;
   },
 
@@ -237,13 +245,13 @@ export const quotes = {
 
   async convertToInvoice(id: string): Promise<Invoice> {
     const { data, error } = await sb().rpc('convert_quote_to_invoice', { p_quote_id: id });
-    if (error) throw new Error(error.message);
+    if (error) throwFriendly(error);
     return data as unknown as Invoice;
   },
 
   async remove(id: string): Promise<void> {
     const { error } = await sb().from('quotes').delete().eq('id', id);
-    if (error) throw new Error(error.message);
+    if (error) throwFriendly(error);
   },
 };
 
@@ -279,14 +287,14 @@ export const salesOrders = {
       0
     );
     const tax = input.lines.reduce(
-      (s, l) => s + l.quantity * l.unit_amount * (l.tax_rate ?? 0.15),
+      (s, l) => s + l.quantity * l.unit_amount * (l.tax_rate ?? 0),
       0
     );
 
     const { data: numData, error: numErr } = await sb().rpc('generate_order_number', {
       p_org_id: orgId,
     });
-    if (numErr) throw new Error(numErr.message);
+    if (numErr) throwFriendly(numErr);
 
     const result = await sb()
       .from('sales_orders')
@@ -316,7 +324,7 @@ export const salesOrders = {
         description: l.description,
         quantity: l.quantity,
         unit_amount: l.unit_amount,
-        tax_rate: l.tax_rate ?? 0.15,
+        tax_rate: l.tax_rate ?? 0,
         amount: l.quantity * l.unit_amount,
         line_order: i,
       });
@@ -337,7 +345,7 @@ export const salesOrders = {
 
   async convertToInvoice(id: string): Promise<Invoice> {
     const { data, error } = await sb().rpc('convert_order_to_invoice', { p_order_id: id });
-    if (error) throw new Error(error.message);
+    if (error) throwFriendly(error);
     return data as unknown as Invoice;
   },
 };
@@ -359,7 +367,7 @@ export const statements = {
       p_period_start: periodStart,
       p_period_end: periodEnd,
     });
-    if (error) throw new Error(error.message);
+    if (error) throwFriendly(error);
     return data as unknown as Statement;
   },
 
@@ -404,9 +412,8 @@ export const reminders = {
   },
 
   async sendReminder(invoiceId: string): Promise<PaymentReminder> {
-    // Looks at invoice, determines severity, records the send.
     const inv = await sb().from('invoices').select('*').eq('id', invoiceId).single();
-    if (inv.error) throw new Error(inv.error.message);
+    if (inv.error) throwFriendly(inv.error);
     const invoice = inv.data;
 
     const daysOverdue = Math.floor(
@@ -427,16 +434,14 @@ export const reminders = {
 
 // ---------- EXTENDED INVOICE HELPERS ----------
 export const invoiceExtensions = {
-  /** Attach a salesperson attribution to an invoice. */
   async attributeSalesperson(invoiceId: string, salespersonName: string): Promise<void> {
     const { error } = await sb()
       .from('invoices')
       .update({ salesperson_name: salespersonName })
       .eq('id', invoiceId);
-    if (error) throw new Error(error.message);
+    if (error) throwFriendly(error);
   },
 
-  /** Overdue invoices, ordered by days overdue descending. */
   async overdue(orgId = requireOrgId()): Promise<Invoice[]> {
     const result = await sb()
       .from('invoices')
