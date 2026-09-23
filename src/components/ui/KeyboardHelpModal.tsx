@@ -2,6 +2,7 @@
 import React from 'react';
 import { Modal } from './Modal';
 import { Command } from 'lucide-react';
+import { Kbd } from './Kbd';
 
 const ROWS: { keys: string[]; label: string }[] = [
   { keys: ['⌘', 'K'], label: 'Open command palette' },
@@ -23,23 +24,18 @@ export const KeyboardHelpModal: React.FC<{
     onClose={onClose}
     size="sm"
     title="Keyboard shortcuts"
-    icon={<Command className="w-5 h-5 text-blue-600" />}
+    icon={<Command className="w-4 h-4" strokeWidth={1.75} />}
   >
-    <ul className="space-y-2">
+    <ul className="space-y-0.5">
       {ROWS.map((r) => (
         <li
           key={r.label}
-          className="flex items-center justify-between text-xs py-1.5 border-b border-slate-100 dark:border-slate-700 last:border-0"
+          className="flex items-center justify-between text-[12px] py-2 border-b border-[var(--uw-border)] last:border-0"
         >
-          <span className="text-slate-600 dark:text-slate-300">{r.label}</span>
+          <span className="text-[var(--uw-text-muted)]">{r.label}</span>
           <span className="flex items-center gap-1">
             {r.keys.map((k) => (
-              <kbd
-                key={k}
-                className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-[10px] font-semibold"
-              >
-                {k}
-              </kbd>
+              <Kbd key={k}>{k}</Kbd>
             ))}
           </span>
         </li>

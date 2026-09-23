@@ -7,9 +7,9 @@ import {
   Users,
   FileText,
   Ticket as TicketIcon,
-  ArrowRight,
   CornerDownLeft,
   History,
+  ArrowUpDown,
 } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { auth } from '../services/auth';
@@ -24,13 +24,11 @@ import { tickets as ticketsApi } from '../services/api/tickets';
 import { Z } from '../constants/zIndex';
 
 interface Props {
-  /** Called when the user picks a nav target — the parent switches tab. */
   onNavigateTab?: (tab: string) => void;
-  /** Called when the user picks a ticket — the parent opens the detail modal. */
   onOpenTicket?: (id: string) => void;
 }
 
-type Kind = 'nav' | 'tenant' | 'shop' | 'center' | 'invoice' | 'ticket' | 'recent';
+type Kind = 'nav' | 'tenant' | 'shop' | 'center' | 'invoice' | 'ticket';
 
 interface Result {
   id: string;
@@ -87,7 +85,6 @@ export const CommandPalette: React.FC<Props> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Global shortcut
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -102,14 +99,12 @@ export const CommandPalette: React.FC<Props> = ({
     return () => document.removeEventListener('keydown', handler);
   }, [open, togglePalette, closePalette]);
 
-  // Autofocus on open
   useEffect(() => {
     if (!open) return;
     const id = window.setTimeout(() => inputRef.current?.focus(), 20);
     return () => window.clearTimeout(id);
   }, [open]);
 
-  // Body scroll lock while open
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
@@ -119,7 +114,6 @@ export const CommandPalette: React.FC<Props> = ({
     };
   }, [open]);
 
-  // Reset query when closed
   useEffect(() => {
     if (!open) {
       setQuery('');
@@ -127,7 +121,6 @@ export const CommandPalette: React.FC<Props> = ({
     }
   }, [open]);
 
-  // Data (only fetched when the palette is open and the user has an org)
   const enabled = open && !!orgId;
   const { data: tenants = [] } = useSupabaseQuery(
     ['tenants', orgId],
@@ -155,8 +148,6 @@ export const CommandPalette: React.FC<Props> = ({
     { enabled }
   );
 
-  // Build the "all results" index once per data load — used for recents
-  // resolution and as the fuzzy-search pool.
   const allIndex = useMemo<Map<string, Result>>(() => {
     const role = user?.role ?? 'tenant';
     const allowedNav = NAV_ITEMS.filter(
@@ -172,7 +163,7 @@ export const CommandPalette: React.FC<Props> = ({
         label: n.label,
         sub: 'Go to',
         tab: n.tab,
-        icon: <CommandIcon className="w-4 h-4 text-slate-500" />,
+        icon: <CommandIcon className="w-3.5 h-3.5" strokeWidth={1.75} />,
       });
     }
 
@@ -183,7 +174,7 @@ export const CommandPalette: React.FC<Props> = ({
         label: t.business_name,
         sub: `${t.contact_person} · ${t.phone}`,
         tab: 'tenants_list',
-        icon: <Users className="w-4 h-4 text-emerald-600" />,
+        icon: <Users className="w-3.5 h-3.5" strokeWidth={1.75} />,
       });
     }
 
@@ -194,7 +185,7 @@ export const CommandPalette: React.FC<Props> = ({
         label: `Unit ${s.shop_number}`,
         sub: `${s.property_type} · ${s.size_sqm} m²`,
         tab: 'units',
-        icon: <Building2 className="w-4 h-4 text-blue-600" />,
+        icon: <Building2 className="w-3.5 h-3.5" strokeWidth={1.75} />,
       });
     }
 
@@ -205,7 +196,7 @@ export const CommandPalette: React.FC<Props> = ({
         label: c.name,
         sub: c.location,
         tab: 'centres',
-        icon: <Building2 className="w-4 h-4 text-indigo-600" />,
+        icon: <Building2 className="w-3.5 h-3.5" strokeWidth={1.75} />,
       });
     }
 
@@ -217,7 +208,7 @@ export const CommandPalette: React.FC<Props> = ({
           label: inv.invoice_number,
           sub: `${inv.tenant_name} · E${inv.total.toLocaleString()}`,
           tab: 'invoices',
-          icon: <FileText className="w-4 h-4 text-amber-600" />,
+          icon: <FileText className="w-3.5 h-3.5" strokeWidth={1.75} />,
         });
       }
     }
@@ -229,7 +220,7 @@ export const CommandPalette: React.FC<Props> = ({
         label: `${t.ticket_number} — ${t.title}`,
         sub: `${t.status} · ${t.priority}`,
         ticketId: t.id,
-        icon: <TicketIcon className="w-4 h-4 text-red-600" />,
+        icon: <TicketIcon className="w-3.5 h-3.5" strokeWidth={1.75} />,
       });
     }
 
@@ -239,7 +230,6 @@ export const CommandPalette: React.FC<Props> = ({
   const results = useMemo<Result[]>(() => {
     const q = query.trim();
 
-    // Empty query → recents + navigation.
     if (!q) {
       const recentResults: Result[] = [];
       for (const id of recents) {
@@ -260,24 +250,14 @@ export const CommandPalette: React.FC<Props> = ({
       return [...recentResults, ...navResults].slice(0, MAX_RESULTS);
     }
 
-    // Fuzzy match across all pools.
     const pool = Array.from(allIndex.values());
-    const matched = fuzzyFilter(
-      pool,
-      q,
-      (r) => `${r.label} ${r.sub ?? ''}`,
-      MAX_RESULTS
-    );
-
-    return matched;
+    return fuzzyFilter(pool, q, (r) => `${r.label} ${r.sub ?? ''}`, MAX_RESULTS);
   }, [query, allIndex, recents]);
 
-  // Keep active index in range.
   useEffect(() => {
     if (active >= results.length) setActive(0);
   }, [results.length, active]);
 
-  // Scroll the active item into view.
   useEffect(() => {
     const el = listRef.current?.querySelector<HTMLElement>(
       `[data-idx="${active}"]`
@@ -286,7 +266,6 @@ export const CommandPalette: React.FC<Props> = ({
   }, [active]);
 
   const choose = (r: Result) => {
-    // Strip the "recent:" prefix before recording or navigating.
     const canonicalId = r.id.startsWith('recent:') ? r.id.slice(7) : r.id;
     pushRecent(canonicalId);
 
@@ -316,38 +295,46 @@ export const CommandPalette: React.FC<Props> = ({
 
   const palette = (
     <div
-      className={`fixed inset-0 ${Z.modal} flex items-start justify-center pt-24 px-4`}
+      className={`fixed inset-0 ${Z.modal} flex items-start justify-center pt-[14vh] px-4`}
       aria-modal="true"
       role="dialog"
     >
       <div
-        className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm"
+        className="fixed inset-0 bg-ink-0/60 backdrop-blur-sm"
         onClick={closePalette}
         aria-hidden="true"
       />
-      <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100 dark:border-slate-800">
-          <Search className="w-4 h-4 text-slate-400 shrink-0" />
+      <div className="relative w-full max-w-[560px] bg-[var(--uw-surface)] rounded-xl shadow-[var(--uw-shadow-panel)] border border-[var(--uw-border)] overflow-hidden animate-modal-in-desktop">
+        {/* Search input */}
+        <div className="flex items-center gap-2.5 px-3.5 h-11 border-b border-[var(--uw-border)]">
+          <Search
+            className="w-3.5 h-3.5 text-[var(--uw-text-subtle)] shrink-0"
+            strokeWidth={1.75}
+          />
           <input
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Search tenants, units, invoices, tickets, or type a page name…"
-            className="flex-1 bg-transparent text-sm focus:outline-none text-slate-900 dark:text-white placeholder:text-slate-400"
+            placeholder="Search or jump to…"
+            className="flex-1 bg-transparent text-[13px] focus:outline-none text-[var(--uw-text)] placeholder:text-[var(--uw-text-subtle)]"
           />
-          <kbd className="hidden sm:inline text-[10px] font-bold px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-500">
-            ESC
-          </kbd>
+          <kbd className="kbd shrink-0">ESC</kbd>
         </div>
 
+        {/* Results */}
         <div
           ref={listRef}
-          className="max-h-[420px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800"
+          className="max-h-[400px] overflow-y-auto scrollbar-thin py-1.5"
         >
           {results.length === 0 ? (
-            <div className="px-4 py-8 text-center text-xs text-slate-400">
-              No matches for "{query}"
+            <div className="px-4 py-10 text-center">
+              <div className="text-[12px] text-[var(--uw-text-subtle)]">
+                No results for
+              </div>
+              <div className="text-[13px] font-medium text-[var(--uw-text)] mt-0.5">
+                "{query}"
+              </div>
             </div>
           ) : (
             results.map((r, i) => {
@@ -360,31 +347,42 @@ export const CommandPalette: React.FC<Props> = ({
                   type="button"
                   onMouseEnter={() => setActive(i)}
                   onClick={() => choose(r)}
-                  className={`w-full text-left px-4 py-2.5 flex items-center gap-3 transition ${
+                  className={`w-full text-left mx-1.5 px-2.5 py-2 rounded-md flex items-center gap-2.5 transition-colors duration-fast ${
                     isActive
-                      ? 'bg-blue-50 dark:bg-blue-950/40'
-                      : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                      ? 'bg-[var(--uw-surface-raised)]'
+                      : ''
                   }`}
+                  style={{ width: 'calc(100% - 12px)' }}
                 >
-                  <span className="shrink-0">
+                  <span
+                    className={`shrink-0 w-6 h-6 rounded-md border flex items-center justify-center ${
+                      isActive
+                        ? 'border-accent-500/30 bg-accent-500/10 text-accent-500'
+                        : 'border-[var(--uw-border)] bg-[var(--uw-surface-raised)] text-[var(--uw-text-muted)]'
+                    }`}
+                  >
                     {isRecent ? (
-                      <History className="w-4 h-4 text-slate-400" />
+                      <History className="w-3 h-3" strokeWidth={1.75} />
                     ) : (
                       r.icon
                     )}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-xs font-semibold text-slate-900 dark:text-white truncate">
+                    <span className="block text-[12px] font-medium text-[var(--uw-text)] truncate leading-tight">
                       {r.label}
                     </span>
                     {r.sub && (
-                      <span className="block text-[11px] text-slate-500 truncate">
+                      <span className="block text-[11px] text-[var(--uw-text-muted)] truncate leading-tight mt-0.5">
+                        {isRecent ? 'Recent · ' : ''}
                         {r.sub}
                       </span>
                     )}
                   </span>
                   {isActive && (
-                    <CornerDownLeft className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <CornerDownLeft
+                      className="w-3 h-3 text-[var(--uw-text-subtle)] shrink-0"
+                      strokeWidth={1.75}
+                    />
                   )}
                 </button>
               );
@@ -392,24 +390,22 @@ export const CommandPalette: React.FC<Props> = ({
           )}
         </div>
 
-        <div className="flex items-center justify-between px-4 py-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60">
-          <div className="flex items-center gap-3 text-[10px] text-slate-500">
+        {/* Footer */}
+        <div className="flex items-center justify-between px-3.5 h-9 border-t border-[var(--uw-border)] bg-[var(--uw-surface-raised)]">
+          <div className="flex items-center gap-3 text-[10px] text-[var(--uw-text-subtle)]">
             <span className="flex items-center gap-1">
-              <kbd className="px-1 py-0.5 rounded border border-slate-200 dark:border-slate-700 font-mono">
-                ↑↓
-              </kbd>
-              navigate
+              <kbd className="kbd">↑</kbd>
+              <kbd className="kbd">↓</kbd>
+              <span className="ml-1">navigate</span>
             </span>
             <span className="flex items-center gap-1">
-              <kbd className="px-1 py-0.5 rounded border border-slate-200 dark:border-slate-700 font-mono">
-                ↵
-              </kbd>
-              select
+              <kbd className="kbd">↵</kbd>
+              <span className="ml-1">select</span>
             </span>
           </div>
-          <span className="text-[10px] text-slate-400 flex items-center gap-1">
-            <ArrowRight className="w-3 h-3" />
-            Umhlaba Wami Command
+          <span className="text-[10px] text-[var(--uw-text-subtle)] flex items-center gap-1">
+            <ArrowUpDown className="w-3 h-3" strokeWidth={1.75} />
+            Umhlaba Wami
           </span>
         </div>
       </div>

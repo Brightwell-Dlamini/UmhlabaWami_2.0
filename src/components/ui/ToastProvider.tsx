@@ -22,9 +22,7 @@ export interface ToastInput {
   title: string;
   message?: string;
   tone?: ToastTone;
-  /** Milliseconds before auto-dismiss. Set to 0 to require manual close. */
   durationMs?: number;
-  /** Optional action button (Undo, Retry, etc.). */
   action?: ToastAction;
 }
 
@@ -46,21 +44,28 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 
 const MAX_VISIBLE = 4;
 
-const TONE_STYLES: Record<ToastTone, { bar: string; icon: React.ReactNode }> = {
-  success: {
-    bar: 'bg-emerald-600',
-    icon: (
-      <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-    ),
-  },
-  error: {
-    bar: 'bg-red-600',
-    icon: <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400" />,
-  },
-  info: {
-    bar: 'bg-blue-600',
-    icon: <Info className="w-4 h-4 text-blue-600 dark:text-blue-400" />,
-  },
+const TONE_ICON: Record<ToastTone, React.ReactNode> = {
+  success: (
+    <CheckCircle2
+      className="w-4 h-4 text-success-500"
+      strokeWidth={2}
+    />
+  ),
+  error: (
+    <AlertTriangle
+      className="w-4 h-4 text-danger-500"
+      strokeWidth={2}
+    />
+  ),
+  info: (
+    <Info className="w-4 h-4 text-info-500" strokeWidth={2} />
+  ),
+};
+
+const TONE_BAR: Record<ToastTone, string> = {
+  success: 'bg-success-500',
+  error: 'bg-danger-500',
+  info: 'bg-info-500',
 };
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
@@ -130,56 +135,53 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
     <ToastContext.Provider value={value}>
       {children}
       <div
-        className={`fixed bottom-6 right-6 ${Z.toast} flex flex-col gap-2 max-w-sm w-[calc(100vw-3rem)] sm:w-auto pointer-events-none`}
+        className={`fixed bottom-4 right-4 ${Z.toast} flex flex-col gap-2 w-[calc(100vw-2rem)] sm:w-[360px] pointer-events-none`}
         role="region"
         aria-label="Notifications"
       >
-        {toasts.map((t) => {
-          const tone = TONE_STYLES[t.tone];
-          return (
-            <div
-              key={t.id}
-              role="status"
-              aria-live={t.tone === 'error' ? 'assertive' : 'polite'}
-              className="pointer-events-auto relative flex items-start gap-3 pl-4 pr-10 py-3 rounded-2xl bg-white dark:bg-slate-800 shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden animate-in"
-            >
-              <span
-                className={`absolute left-0 top-0 bottom-0 w-1 ${tone.bar}`}
-              />
-              <div className="shrink-0 mt-0.5">{tone.icon}</div>
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-bold text-slate-900 dark:text-white">
-                  {t.title}
-                </div>
-                {t.message && (
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
-                    {t.message}
-                  </div>
-                )}
-                {t.action && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      t.action!.onClick();
-                      dismiss(t.id);
-                    }}
-                    className="mt-2 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-700 text-[11px] font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600"
-                  >
-                    {t.action.label}
-                  </button>
-                )}
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            role="status"
+            aria-live={t.tone === 'error' ? 'assertive' : 'polite'}
+            className="pointer-events-auto relative flex items-start gap-3 pl-3.5 pr-9 py-3 rounded-lg bg-[var(--uw-surface)] border border-[var(--uw-border)] overflow-hidden animate-in shadow-[var(--uw-shadow-panel)]"
+          >
+            <span
+              className={`absolute left-0 top-0 bottom-0 w-0.5 ${TONE_BAR[t.tone]}`}
+            />
+            <div className="shrink-0 mt-0.5">{TONE_ICON[t.tone]}</div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-semibold text-[var(--uw-text)] leading-tight">
+                {t.title}
               </div>
-              <button
-                type="button"
-                onClick={() => dismiss(t.id)}
-                className="absolute right-2 top-2 p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                aria-label="Dismiss"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+              {t.message && (
+                <div className="text-[11px] text-[var(--uw-text-muted)] mt-1 leading-snug">
+                  {t.message}
+                </div>
+              )}
+              {t.action && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    t.action!.onClick();
+                    dismiss(t.id);
+                  }}
+                  className="mt-2 px-2.5 h-6 rounded-md bg-[var(--uw-surface-raised)] border border-[var(--uw-border-soft)] text-[11px] font-semibold text-[var(--uw-text)] hover:border-[var(--uw-border-strong)] transition-colors duration-fast"
+                >
+                  {t.action.label}
+                </button>
+              )}
             </div>
-          );
-        })}
+            <button
+              type="button"
+              onClick={() => dismiss(t.id)}
+              className="absolute right-2 top-2 w-6 h-6 rounded-md text-[var(--uw-text-subtle)] hover:text-[var(--uw-text)] hover:bg-[var(--uw-surface-raised)] flex items-center justify-center transition-colors duration-fast"
+              aria-label="Dismiss"
+            >
+              <X className="w-3 h-3" strokeWidth={2} />
+            </button>
+          </div>
+        ))}
       </div>
     </ToastContext.Provider>
   );

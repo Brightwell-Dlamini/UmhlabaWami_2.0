@@ -4,10 +4,9 @@ import React, {
   useCallback,
   useContext,
   useMemo,
-  useRef,
   useState,
 } from 'react';
-import { AlertTriangle, Trash2 } from 'lucide-react';
+import { AlertTriangle, Trash2, ShieldAlert } from 'lucide-react';
 import { Modal } from './Modal';
 
 export interface ConfirmOptions {
@@ -15,7 +14,7 @@ export interface ConfirmOptions {
   message?: string;
   confirmLabel?: string;
   cancelLabel?: string;
-  /** Visual tone. 'danger' gets a red confirm button and trash icon. */
+  /** Visual tone. */
   tone?: 'default' | 'danger' | 'warning';
   /** If set, user must type this exact string to enable the confirm button. */
   requireText?: string;
@@ -32,18 +31,6 @@ interface ConfirmContextValue {
 
 const ConfirmContext = createContext<ConfirmContextValue | null>(null);
 
-/**
- * Wraps children with a confirm-dialog host. Mount once, high in the tree.
- *
- *   <ConfirmProvider>
- *     <App />
- *   </ConfirmProvider>
- *
- * Then anywhere:
- *
- *   const { confirm } = useConfirm();
- *   if (await confirm({ title: 'Delete?', tone: 'danger' })) { … }
- */
 export const ConfirmProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
@@ -61,15 +48,12 @@ export const ConfirmProvider: React.FC<{ children: React.ReactNode }> = ({
     });
   }, []);
 
-  const close = useCallback(
-    (result: boolean) => {
-      setState((s) => {
-        s.resolve?.(result);
-        return { ...s, open: false, resolve: null };
-      });
-    },
-    []
-  );
+  const close = useCallback((result: boolean) => {
+    setState((s) => {
+      s.resolve?.(result);
+      return { ...s, open: false, resolve: null };
+    });
+  }, []);
 
   const value = useMemo(() => ({ confirm }), [confirm]);
 
@@ -80,10 +64,19 @@ export const ConfirmProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const confirmButtonClass =
     tone === 'danger'
-      ? 'bg-red-600 hover:bg-red-700'
+      ? 'bg-danger-500 hover:bg-danger-600 text-white'
       : tone === 'warning'
-        ? 'bg-amber-600 hover:bg-amber-700'
-        : 'bg-blue-600 hover:bg-blue-700';
+        ? 'bg-warning-500 hover:bg-warning-600 text-white'
+        : 'bg-accent-500 hover:bg-accent-600 text-white';
+
+  const iconWrapClass =
+    tone === 'danger'
+      ? 'bg-danger-500/12 text-danger-500 border-danger-500/25'
+      : tone === 'warning'
+        ? 'bg-warning-500/12 text-warning-500 border-warning-500/25'
+        : 'bg-accent-500/12 text-accent-500 border-accent-500/25';
+
+  const Icon = tone === 'danger' ? Trash2 : tone === 'warning' ? ShieldAlert : AlertTriangle;
 
   return (
     <ConfirmContext.Provider value={value}>
@@ -93,30 +86,20 @@ export const ConfirmProvider: React.FC<{ children: React.ReactNode }> = ({
         onClose={() => close(false)}
         size="sm"
         showCloseButton={false}
-        title={undefined}
+        ariaLabel={state.title}
       >
         <div className="flex items-start gap-3">
           <div
-            className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${
-              tone === 'danger'
-                ? 'bg-red-100 text-red-600 dark:bg-red-950/50 dark:text-red-400'
-                : tone === 'warning'
-                  ? 'bg-amber-100 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400'
-                  : 'bg-blue-100 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400'
-            }`}
+            className={`shrink-0 w-9 h-9 rounded-md border flex items-center justify-center ${iconWrapClass}`}
           >
-            {tone === 'danger' ? (
-              <Trash2 className="w-5 h-5" />
-            ) : (
-              <AlertTriangle className="w-5 h-5" />
-            )}
+            <Icon className="w-4 h-4" strokeWidth={2} />
           </div>
-          <div className="min-w-0">
-            <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-[13px] font-semibold text-[var(--uw-text)] leading-tight">
               {state.title}
             </h3>
             {state.message && (
-              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+              <p className="text-[12px] text-[var(--uw-text-muted)] mt-1.5 leading-relaxed">
                 {state.message}
               </p>
             )}
@@ -124,15 +107,19 @@ export const ConfirmProvider: React.FC<{ children: React.ReactNode }> = ({
         </div>
 
         {state.requireText && (
-          <div className="mt-3">
-            <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
-              Type <span className="font-mono">{state.requireText}</span> to confirm
+          <div className="mt-4">
+            <label className="block text-[11px] font-medium text-[var(--uw-text-muted)] mb-1.5">
+              Type{' '}
+              <span className="font-mono text-[var(--uw-text)] bg-[var(--uw-surface-raised)] px-1 py-0.5 rounded border border-[var(--uw-border)]">
+                {state.requireText}
+              </span>{' '}
+              to confirm
             </label>
             <input
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
               autoFocus
-              className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+              className="w-full h-control px-2.5 text-[13px] rounded-md bg-[var(--uw-surface)] border border-[var(--uw-border)] focus:border-accent-500 focus:shadow-[0_0_0_3px_rgba(124,92,255,0.15)] outline-none transition-[border-color,box-shadow] duration-fast"
             />
           </div>
         )}
@@ -141,7 +128,7 @@ export const ConfirmProvider: React.FC<{ children: React.ReactNode }> = ({
           <button
             type="button"
             onClick={() => close(false)}
-            className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="h-control px-3 rounded-md border border-[var(--uw-border-soft)] text-[12px] font-medium text-[var(--uw-text)] hover:bg-[var(--uw-surface-raised)] hover:border-[var(--uw-border-strong)] transition-colors duration-fast"
           >
             {state.cancelLabel ?? 'Cancel'}
           </button>
@@ -149,7 +136,7 @@ export const ConfirmProvider: React.FC<{ children: React.ReactNode }> = ({
             type="button"
             onClick={() => close(true)}
             disabled={!canConfirm}
-            className={`px-4 py-2 rounded-xl text-xs font-bold text-white disabled:opacity-60 ${confirmButtonClass}`}
+            className={`h-control px-3 rounded-md text-[12px] font-semibold transition-colors duration-fast disabled:opacity-50 disabled:cursor-not-allowed ${confirmButtonClass}`}
           >
             {state.confirmLabel ?? 'Confirm'}
           </button>

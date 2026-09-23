@@ -12,7 +12,7 @@ export const Skeleton: React.FC<SkeletonProps> = ({
   variant = 'block',
   lines = 1,
 }) => {
-  const base = 'bg-slate-200 dark:bg-slate-700 animate-pulse rounded-md';
+  const base = 'bg-[var(--uw-surface-raised)] animate-pulse rounded-md';
 
   if (variant === 'circle') {
     return <div className={`${base} rounded-full ${className}`} />;
@@ -38,7 +38,7 @@ export const SkeletonCard: React.FC<{ className?: string }> = ({
   className = '',
 }) => (
   <div
-    className={`p-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 space-y-3 ${className}`}
+    className={`p-3 rounded-lg border border-[var(--uw-border)] bg-[var(--uw-surface)] space-y-2.5 ${className}`}
   >
     <Skeleton className="h-3 w-1/3" />
     <Skeleton className="h-6 w-1/2" />
@@ -50,9 +50,9 @@ export const SkeletonTable: React.FC<{ rows?: number; cols?: number }> = ({
   rows = 6,
   cols = 4,
 }) => (
-  <div className="divide-y divide-slate-100 dark:divide-slate-700">
+  <div className="divide-y divide-[var(--uw-border)]">
     {Array.from({ length: rows }).map((_, r) => (
-      <div key={r} className="flex gap-3 p-4">
+      <div key={r} className="flex gap-3 px-3 py-2.5">
         {Array.from({ length: cols }).map((__, c) => (
           <Skeleton key={c} className="h-3 flex-1" />
         ))}

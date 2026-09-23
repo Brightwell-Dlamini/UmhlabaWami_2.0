@@ -10,7 +10,7 @@ export interface ModalProps {
   open: boolean;
   onClose: () => void;
   children: React.ReactNode;
-  /** Optional title shown in the header bar. If omitted, no header is rendered. */
+  /** Optional title shown in the header bar. */
   title?: React.ReactNode;
   /** Optional subtitle under the title. */
   subtitle?: React.ReactNode;
@@ -26,7 +26,7 @@ export interface ModalProps {
   showCloseButton?: boolean;
   /** Extra classes for the inner panel. */
   panelClassName?: string;
-  /** Hide the default padding around the body. Useful for tables. */
+  /** Hide the default padding around the body. */
   bareBody?: boolean;
   /** Optional ref that receives focus when the modal opens. */
   initialFocusRef?: React.RefObject<HTMLElement | null>;
@@ -35,11 +35,11 @@ export interface ModalProps {
 }
 
 const SIZE_CLASSES: Record<ModalSize, string> = {
-  sm: 'max-w-md',
-  md: 'max-w-lg',
-  lg: 'max-w-2xl',
-  xl: 'max-w-4xl',
-  full: 'max-w-[min(100vw-1rem,1400px)]',
+  sm: 'max-w-[420px]',
+  md: 'max-w-[560px]',
+  lg: 'max-w-[720px]',
+  xl: 'max-w-[960px]',
+  full: 'max-w-[min(100vw-16px,1400px)]',
 };
 
 const FOCUSABLE_SELECTOR = [
@@ -51,20 +51,6 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
-/**
- * Accessible modal. Drop-in for the current hand-rolled overlay.
- *
- *   <Modal open={open} onClose={close} title="New item" icon={<Package />}>
- *     …form…
- *   </Modal>
- *
- * - Portalled to <body>.
- * - Locks body scroll while open.
- * - Escape + backdrop dismissal (both configurable).
- * - Focus trap with Tab cycling.
- * - Restores focus on close.
- * - Mobile: panel slides up from bottom; desktop: centred.
- */
 export const Modal: React.FC<ModalProps> = ({
   open,
   onClose,
@@ -83,17 +69,13 @@ export const Modal: React.FC<ModalProps> = ({
 }) => {
   const panelRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
-  const openRef = useRef(open);
-  openRef.current = open;
 
-  // Remember who had focus so we can restore it on close.
   useEffect(() => {
     if (open) {
       previouslyFocused.current = document.activeElement as HTMLElement | null;
     }
   }, [open]);
 
-  // Lock body scroll while open.
   useEffect(() => {
     if (!open) return;
     const original = document.body.style.overflow;
@@ -103,7 +85,6 @@ export const Modal: React.FC<ModalProps> = ({
     };
   }, [open]);
 
-  // Escape to close.
   useEffect(() => {
     if (!open || !dismissOnEscape) return;
     const handler = (e: KeyboardEvent) => {
@@ -116,13 +97,11 @@ export const Modal: React.FC<ModalProps> = ({
     return () => document.removeEventListener('keydown', handler);
   }, [open, dismissOnEscape, onClose]);
 
-  // Autofocus: prefer initialFocusRef, then first input, then panel.
   useEffect(() => {
     if (!open) return;
     const id = window.setTimeout(() => {
       const panel = panelRef.current;
       if (!panel) return;
-      // Don't steal focus from an element that already owns it inside the panel.
       if (panel.contains(document.activeElement)) return;
 
       const externalTarget = initialFocusRef?.current;
@@ -140,7 +119,6 @@ export const Modal: React.FC<ModalProps> = ({
     return () => window.clearTimeout(id);
   }, [open, initialFocusRef]);
 
-  // Restore focus when the modal closes.
   useEffect(() => {
     if (open) return;
     const el = previouslyFocused.current;
@@ -150,7 +128,6 @@ export const Modal: React.FC<ModalProps> = ({
     previouslyFocused.current = null;
   }, [open]);
 
-  // Focus trap: cycle Tab within the panel.
   const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== 'Tab') return;
     const panel = panelRef.current;
@@ -186,47 +163,45 @@ export const Modal: React.FC<ModalProps> = ({
       role="dialog"
       aria-label={ariaLabel}
     >
-      {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm"
+        className="fixed inset-0 bg-ink-0/60 backdrop-blur-sm"
         aria-hidden="true"
         onClick={() => {
           if (dismissOnBackdrop) onClose();
         }}
       />
 
-      {/* Panel */}
       <div
         ref={panelRef}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className={`relative w-full ${SIZE_CLASSES[size]} bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-700 flex flex-col
-          rounded-t-2xl sm:rounded-2xl
+        className={`relative w-full ${SIZE_CLASSES[size]} bg-[var(--uw-surface)] border border-[var(--uw-border)] flex flex-col
+          rounded-t-xl sm:rounded-xl
           mt-auto sm:my-auto
-          max-h-[92vh] sm:max-h-[92vh]
+          max-h-[92vh]
+          shadow-[var(--uw-shadow-panel)]
           animate-modal-in sm:animate-modal-in-desktop
           ${panelClassName}`}
       >
         {(title || showCloseButton) && (
-          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
-            <div className="flex items-center gap-3 min-w-0">
-              {/* Mobile grabber hint */}
-              <span
-                aria-hidden="true"
-                className="sm:hidden absolute left-1/2 top-1.5 -translate-x-1/2 w-10 h-1 rounded-full bg-slate-200 dark:bg-slate-700"
-              />
+          <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-[var(--uw-border)] shrink-0">
+            <span
+              aria-hidden="true"
+              className="sm:hidden absolute left-1/2 top-1.5 -translate-x-1/2 w-9 h-1 rounded-full bg-[var(--uw-border-soft)]"
+            />
+            <div className="flex items-center gap-2.5 min-w-0">
               {icon && (
-                <div className="shrink-0 text-slate-600 dark:text-slate-300">
+                <div className="shrink-0 text-[var(--uw-text-muted)]">
                   {icon}
                 </div>
               )}
               {title && (
                 <div className="min-w-0">
-                  <h3 className="font-bold text-sm text-slate-900 dark:text-white truncate">
+                  <h3 className="text-[13px] font-semibold text-[var(--uw-text)] truncate leading-tight">
                     {title}
                   </h3>
                   {subtitle && (
-                    <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+                    <p className="text-[11px] text-[var(--uw-text-muted)] mt-0.5 truncate leading-tight">
                       {subtitle}
                     </p>
                   )}
@@ -237,10 +212,10 @@ export const Modal: React.FC<ModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
+                className="w-7 h-7 -mr-1 rounded-md text-[var(--uw-text-subtle)] hover:text-[var(--uw-text)] hover:bg-[var(--uw-surface-raised)] shrink-0 flex items-center justify-center transition-colors duration-fast"
                 aria-label="Close"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" strokeWidth={1.75} />
               </button>
             )}
           </div>
@@ -249,8 +224,8 @@ export const Modal: React.FC<ModalProps> = ({
         <div
           className={
             bareBody
-              ? 'flex-1 overflow-y-auto'
-              : 'p-5 sm:p-6 space-y-4 flex-1 overflow-y-auto'
+              ? 'flex-1 overflow-y-auto scrollbar-thin'
+              : 'p-4 sm:p-5 flex-1 overflow-y-auto scrollbar-thin'
           }
         >
           {children}
@@ -259,7 +234,6 @@ export const Modal: React.FC<ModalProps> = ({
     </div>
   );
 
-  // SSR-safe portal target.
   if (typeof document === 'undefined') return null;
   return createPortal(panel, document.body);
 };

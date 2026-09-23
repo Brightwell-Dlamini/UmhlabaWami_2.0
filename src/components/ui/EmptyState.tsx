@@ -11,11 +11,12 @@ export interface EmptyStateProps {
   variant?: 'padded' | 'compact';
 }
 
-const TONE_ICON_BG: Record<NonNullable<EmptyStateProps['tone']>, string> = {
-  default: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
-  success: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300',
-  warning: 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300',
-  error: 'bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-300',
+const TONE_WRAP: Record<NonNullable<EmptyStateProps['tone']>, string> = {
+  default:
+    'bg-[var(--uw-surface-raised)] text-[var(--uw-text-muted)] border-[var(--uw-border)]',
+  success: 'bg-success-500/10 text-success-500 border-success-500/25',
+  warning: 'bg-warning-500/10 text-warning-500 border-warning-500/25',
+  error: 'bg-danger-500/10 text-danger-500 border-danger-500/25',
 };
 
 export const EmptyState: React.FC<EmptyStateProps> = ({
@@ -26,53 +27,40 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   tone = 'default',
   variant = 'padded',
 }) => {
-  const iconWrap =
-    variant === 'compact'
-      ? 'flex items-center justify-center gap-2 text-xs text-slate-400'
-      : 'flex flex-col items-center justify-center text-center gap-3';
+  if (variant === 'compact') {
+    return (
+      <div className="py-6 flex items-center justify-center gap-2 text-[12px] text-[var(--uw-text-subtle)]">
+        {icon && <span className="shrink-0">{icon}</span>}
+        {title && <span className="font-medium">{title}</span>}
+        {message && <span className="text-[var(--uw-text-subtle)]">· {message}</span>}
+      </div>
+    );
+  }
 
   return (
-    <div className={variant === 'padded' ? 'p-10' : 'py-4'}>
-      <div className={iconWrap}>
-        {icon && (
-          <div
-            className={
-              variant === 'padded'
-                ? `w-10 h-10 rounded-full flex items-center justify-center ${TONE_ICON_BG[tone]}`
-                : ''
-            }
-          >
-            {icon}
-          </div>
-        )}
-        {(title || message) && (
-          <div className={variant === 'padded' ? 'space-y-1' : ''}>
-            {title && (
-              <div
-                className={
-                  variant === 'padded'
-                    ? 'text-sm font-bold text-slate-900 dark:text-white'
-                    : 'text-xs font-semibold text-slate-500'
-                }
-              >
-                {title}
-              </div>
-            )}
-            {message && (
-              <div
-                className={
-                  variant === 'padded'
-                    ? 'text-xs text-slate-500 max-w-sm'
-                    : 'text-xs text-slate-400'
-                }
-              >
-                {message}
-              </div>
-            )}
-          </div>
-        )}
-        {action && <div className="mt-1">{action}</div>}
-      </div>
+    <div className="p-10 flex flex-col items-center justify-center text-center gap-3">
+      {icon && (
+        <div
+          className={`w-10 h-10 rounded-md border flex items-center justify-center ${TONE_WRAP[tone]}`}
+        >
+          {icon}
+        </div>
+      )}
+      {(title || message) && (
+        <div className="space-y-1 max-w-sm">
+          {title && (
+            <div className="text-[13px] font-semibold text-[var(--uw-text)] leading-tight">
+              {title}
+            </div>
+          )}
+          {message && (
+            <div className="text-[12px] text-[var(--uw-text-muted)] leading-relaxed">
+              {message}
+            </div>
+          )}
+        </div>
+      )}
+      {action && <div className="mt-1">{action}</div>}
     </div>
   );
 };
