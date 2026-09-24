@@ -1,5 +1,6 @@
 import { sb, unwrap, requireOrgId, requireUser } from './_helpers';
 import type { FinancialRequest } from '../../types';
+import { notifications } from './notifications';
 
 export interface RequestInput {
   property_id?: string;
@@ -20,6 +21,7 @@ export const financialRequests = {
   },
 
   async create(input: RequestInput): Promise<FinancialRequest> {
+    const user = requireUser();
     const result = await sb()
       .from('financial_requests')
       .insert({
@@ -29,7 +31,23 @@ export const financialRequests = {
       })
       .select()
       .single();
-    return unwrap(result) as unknown as FinancialRequest;
+    const row = unwrap(result) as unknown as FinancialRequest;
+
+    try {
+      await notifications.notifyFinance(
+        {
+          title: 'New requisition',
+          message: `${input.requested_by_name || user.name} requested E${Number(input.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })} — ${input.purpose}`,
+          type: 'announcement',
+          link: row.id,
+        },
+        user.id
+      );
+    } catch (e) {
+      console.warn('[financialRequests] notify create failed', e);
+    }
+
+    return row;
   },
 
   async approve(id: string): Promise<FinancialRequest> {
@@ -39,7 +57,23 @@ export const financialRequests = {
       p_approver_name: user.name,
     });
     if (error) throw new Error(error.message);
-    return data as unknown as FinancialRequest;
+    const row = data as unknown as FinancialRequest;
+
+    try {
+      await notifications.notifyManagers(
+        {
+          title: 'Requisition approved',
+          message: `${user.name} approved a requisition of E${Number(row.amount ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+          type: 'announcement',
+          link: id,
+        },
+        user.id
+      );
+    } catch (e) {
+      console.warn('[financialRequests] notify approve failed', e);
+    }
+
+    return row;
   },
 
   async disburse(id: string): Promise<FinancialRequest> {
@@ -49,7 +83,23 @@ export const financialRequests = {
       p_actor_name: user.name,
     });
     if (error) throw new Error(error.message);
-    return data as unknown as FinancialRequest;
+    const row = data as unknown as FinancialRequest;
+
+    try {
+      await notifications.notifyFinance(
+        {
+          title: 'Requisition disbursed',
+          message: `${user.name} disbursed E${Number(row.amount ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+          type: 'announcement',
+          link: id,
+        },
+        user.id
+      );
+    } catch (e) {
+      console.warn('[financialRequests] notify disburse failed', e);
+    }
+
+    return row;
   },
 
   async remove(id: string): Promise<void> {
