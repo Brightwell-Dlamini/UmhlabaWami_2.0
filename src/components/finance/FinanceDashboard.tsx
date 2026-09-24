@@ -21,6 +21,7 @@ import {
   selectRecentTransactions,
   todayIsoLocal,
 } from './calculators';
+import { formatE } from '../../lib/money';
 
 export function FinanceDashboard() {
   const orgId = auth.getCurrentOrganization()?.id ?? '';
@@ -64,7 +65,6 @@ export function FinanceDashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Top KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Kpi
           label="Total invoiced"
@@ -104,7 +104,6 @@ export function FinanceDashboard() {
         />
       </div>
 
-      {/* Aging buckets */}
       <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-bold text-sm flex items-center gap-2">
@@ -118,41 +117,15 @@ export function FinanceDashboard() {
           )}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <AgingBucket
-            label="Current"
-            value={stats.buckets.current}
-            total={stats.totalOutstanding}
-            tone="emerald"
-          />
-          <AgingBucket
-            label="1–30 days"
-            value={stats.buckets.d30}
-            total={stats.totalOutstanding}
-            tone="amber"
-          />
-          <AgingBucket
-            label="31–60 days"
-            value={stats.buckets.d60}
-            total={stats.totalOutstanding}
-            tone="orange"
-          />
-          <AgingBucket
-            label="61–90 days"
-            value={stats.buckets.d90}
-            total={stats.totalOutstanding}
-            tone="red"
-          />
-          <AgingBucket
-            label="90+ days"
-            value={stats.buckets.older}
-            total={stats.totalOutstanding}
-            tone="red"
-          />
+          <AgingBucket label="Current" value={stats.buckets.current} total={stats.totalOutstanding} tone="emerald" />
+          <AgingBucket label="1–30 days" value={stats.buckets.d30} total={stats.totalOutstanding} tone="amber" />
+          <AgingBucket label="31–60 days" value={stats.buckets.d60} total={stats.totalOutstanding} tone="orange" />
+          <AgingBucket label="61–90 days" value={stats.buckets.d90} total={stats.totalOutstanding} tone="red" />
+          <AgingBucket label="90+ days" value={stats.buckets.older} total={stats.totalOutstanding} tone="red" />
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Recent transactions */}
         <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
           <h3 className="font-bold text-sm mb-3 flex items-center gap-2">
             <Receipt className="w-4 h-4 text-blue-600" />
@@ -166,10 +139,7 @@ export function FinanceDashboard() {
           ) : (
             <div className="divide-y divide-slate-100 dark:divide-slate-700">
               {recentTransactions.map((t) => (
-                <div
-                  key={t.id}
-                  className="py-2.5 flex items-center justify-between gap-3 text-xs"
-                >
+                <div key={t.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
                   <div className="min-w-0">
                     <div className="font-semibold text-slate-900 dark:text-white truncate">
                       {t.description}
@@ -193,7 +163,6 @@ export function FinanceDashboard() {
           )}
         </div>
 
-        {/* Top overdue */}
         <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
           <h3 className="font-bold text-sm mb-3 flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-red-500" />
@@ -210,10 +179,7 @@ export function FinanceDashboard() {
               {topOverdue.map((inv) => {
                 const days = daysBetween(inv.due_date, today);
                 return (
-                  <div
-                    key={inv.id}
-                    className="py-2.5 flex items-center justify-between gap-3 text-xs"
-                  >
+                  <div key={inv.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
                     <div className="min-w-0">
                       <div className="font-mono font-bold text-slate-900 dark:text-white">
                         {inv.invoice_number}
@@ -234,17 +200,6 @@ export function FinanceDashboard() {
       </div>
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Subcomponents
-// ---------------------------------------------------------------------------
-
-function formatE(n: number): string {
-  return `E ${n.toLocaleString(undefined, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
 }
 
 type Tone = 'blue' | 'emerald' | 'amber' | 'red' | 'orange';
