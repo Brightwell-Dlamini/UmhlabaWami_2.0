@@ -1,5 +1,7 @@
 import { sb, unwrap, requireOrgId, requireUser } from './_helpers';
 import type { Lease } from '../../types';
+import { notifications } from './notifications';
+import { tenants as tenantsApi } from './tenants';
 
 export interface LeaseInput {
   tenant_id: string;
@@ -14,7 +16,6 @@ export interface LeaseInput {
   terms_body?: string;
 }
 
-/** Fields allowed to PATCH — never send unknown keys to PostgREST. */
 const LEASE_PATCH_KEYS = [
   'tenant_id',
   'shop_id',
@@ -92,7 +93,31 @@ export const leases = {
       };
       result = await sb().from('leases').insert(fallback).select('*').single();
     }
-    return unwrap(result) as unknown as Lease;
+    const lease = unwrap(result) as unknown as Lease;
+
+    try {
+      const tenant = await tenantsApi.get(input.tenant_id);
+      const userId = (tenant as { user_id?: string | null }).user_id;
+      if (userId) {
+        await notifications.create({
+          user_id: userId,
+          title: 'Lease ready',
+          message: `A lease document "${input.document_title}" is ready for your review and signature.`,
+          type: 'lease_reminder',
+          link: lease.id,
+        });
+      }
+      await notifications.notifyManagers({
+        title: 'Lease created',
+        message: `Lease "${input.document_title}" created for tenant`,
+        type: 'lease_reminder',
+        link: lease.id,
+      });
+    } catch (e) {
+      console.warn('[leases] notify on create failed', e);
+    }
+
+    return lease;
   },
 
   async update(
@@ -133,10 +158,6 @@ export const leases = {
     if (error) throw new Error(error.message);
   },
 
-  /**
-   * Only the tenant linked to this lease may sign.
-   * Staff/admin cannot "Mark signed" on behalf of the tenant.
-   */
   async sign(id: string, signerName: string): Promise<Lease> {
     const user = requireUser();
     const lease = await this.get(id);
@@ -145,7 +166,6 @@ export const leases = {
       throw new Error('This lease is already signed.');
     }
 
-    // Resolve tenant row and verify the caller owns it.
     const { data: tenant, error: tErr } = await sb()
       .from('tenants')
       .select('id, user_id, email, contact_person')
@@ -174,13 +194,28 @@ export const leases = {
       p_lease_id: id,
       p_signer_name: name,
     });
+    let signed: Lease;
     if (!error && data) {
-      return data as unknown as Lease;
+      signed = data as unknown as Lease;
+    } else {
+      signed = await this.update(id, {
+        is_digitally_signed: true,
+        signed_at: new Date().toISOString(),
+        signer_name: name,
+      });
     }
-    return this.update(id, {
-      is_digitally_signed: true,
-      signed_at: new Date().toISOString(),
-      signer_name: name,
-    });
+
+    try {
+      await notifications.notifyManagers({
+        title: 'Lease signed',
+        message: `${name} digitally signed the lease`,
+        type: 'lease_reminder',
+        link: id,
+      });
+    } catch (e) {
+      console.warn('[leases] notify on sign failed', e);
+    }
+
+    return signed;
   },
 };
