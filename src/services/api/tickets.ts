@@ -6,6 +6,7 @@ import type {
   TicketStatus,
 } from '../../types';
 import { notifications } from './notifications';
+import { profiles } from './profiles';
 
 const TICKET_SELECT = `
   *,
@@ -90,7 +91,32 @@ export const tickets = {
       })
       .select(TICKET_SELECT)
       .single();
-    return unwrap(result) as unknown as Ticket;
+    const ticket = unwrap(result) as unknown as Ticket;
+
+    // Notify managers / admins about the new ticket
+    try {
+      const staff = await profiles.list();
+      const targets = staff
+        .filter(
+          (u) =>
+            u.status === 'Active' &&
+            (u.role === 'admin' ||
+              u.role === 'property_manager' ||
+              u.role === 'maintenance') &&
+            u.id !== user.id
+        )
+        .map((u) => u.id);
+      await notifications.createMany(targets, {
+        title: 'New ticket opened',
+        message: `${ticket.title} — raised by ${user.name}`,
+        type: 'ticket_new',
+        link: ticket.id,
+      });
+    } catch (e) {
+      console.warn('[tickets] notify managers of new ticket failed', e);
+    }
+
+    return ticket;
   },
 
   async assign(ticketId: string, technicianId: string, technicianName: string) {
@@ -152,6 +178,20 @@ export const tickets = {
       p_after_images: payload.after_images ?? [],
     });
     if (error) throw new Error(error.message);
+
+    try {
+      const ticket = await this.get(ticketId);
+      const targets: string[] = [];
+      if (ticket.created_by_user_id) targets.push(ticket.created_by_user_id);
+      await notifications.createMany(targets, {
+        title: 'Ticket resolved',
+        message: `${ticket.title} was marked completed by ${user.name}`,
+        type: 'ticket_resolved',
+        link: ticketId,
+      });
+    } catch (e) {
+      console.warn('[tickets] notify on resolve failed', e);
+    }
   },
 
   async confirm(ticketId: string, rating: number, feedback: string) {
@@ -177,6 +217,21 @@ export const tickets = {
       p_reason: reason,
     });
     if (error) throw new Error(error.message);
+
+    try {
+      const ticket = await this.get(ticketId);
+      if (ticket.assigned_to) {
+        await notifications.create({
+          user_id: ticket.assigned_to,
+          title: 'Ticket reopened',
+          message: `${ticket.title} was reopened: ${reason}`,
+          type: 'ticket_reopened',
+          link: ticketId,
+        });
+      }
+    } catch (e) {
+      console.warn('[tickets] notify on reopen failed', e);
+    }
   },
 
   async runEscalation(orgId = requireOrgId()): Promise<number> {
