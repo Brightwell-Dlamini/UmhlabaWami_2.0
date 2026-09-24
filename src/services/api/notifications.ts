@@ -1,5 +1,6 @@
 import { sb, unwrap, requireUser, requireOrgId } from './_helpers';
-import type { NotificationItem } from '../../types';
+import type { NotificationItem, UserRole } from '../../types';
+import { profiles } from './profiles';
 
 /** DB enum `notification_type` — must match supabase/migrations/002_enums.sql */
 export type NotificationType = NotificationItem['type'];
@@ -24,16 +25,39 @@ const UUID_RE =
 
 function normalizeType(raw?: string): NotificationType {
   if (raw && VALID_TYPES.has(raw)) return raw as NotificationType;
-  // Legacy / mistaken client values → safe enum member
-  if (raw === 'info' || raw === 'system' || raw === 'payment' || !raw) {
-    return 'announcement';
-  }
   return 'announcement';
 }
 
 function asUuidOrNull(value?: string | null): string | null {
   if (!value) return null;
   return UUID_RE.test(value) ? value : null;
+}
+
+export type NotifyPayload = {
+  title: string;
+  message: string;
+  type?: string;
+  link?: string | null;
+};
+
+async function activeUserIds(
+  predicate: (role: UserRole) => boolean,
+  excludeUserId?: string | null
+): Promise<string[]> {
+  try {
+    const staff = await profiles.list();
+    return staff
+      .filter(
+        (u) =>
+          u.status === 'Active' &&
+          predicate(u.role) &&
+          (!excludeUserId || u.id !== excludeUserId)
+      )
+      .map((u) => u.id);
+  } catch (e) {
+    console.warn('[notifications] list profiles failed', e);
+    return [];
+  }
 }
 
 export const notifications = {
@@ -79,10 +103,6 @@ export const notifications = {
     if (error) throw new Error(error.message);
   },
 
-  /**
-   * Create an in-app notification for a user.
-   * Never throws — failures are logged so business actions still succeed.
-   */
   async create(input: {
     user_id: string;
     title: string;
@@ -135,11 +155,7 @@ export const notifications = {
     }
   },
 
-  /** Notify several users (skips blanks / duplicates). */
-  async createMany(
-    userIds: string[],
-    payload: { title: string; message: string; type?: string; link?: string | null }
-  ): Promise<number> {
+  async createMany(userIds: string[], payload: NotifyPayload): Promise<number> {
     const unique = [...new Set(userIds.filter(Boolean))];
     let ok = 0;
     for (const uid of unique) {
@@ -147,6 +163,47 @@ export const notifications = {
       if (row) ok += 1;
     }
     return ok;
+  },
+
+  /** Notify all Active users with any of the given roles. */
+  async notifyRoles(
+    roles: UserRole[],
+    payload: NotifyPayload,
+    excludeUserId?: string | null
+  ): Promise<number> {
+    const set = new Set(roles);
+    const ids = await activeUserIds((r) => set.has(r), excludeUserId);
+    return this.createMany(ids, payload);
+  },
+
+  /** Property managers + admins (ops ownership). */
+  async notifyManagers(payload: NotifyPayload, excludeUserId?: string | null) {
+    return this.notifyRoles(['admin', 'property_manager'], payload, excludeUserId);
+  },
+
+  /** Maintenance staff + managers who oversee tickets. */
+  async notifyMaintenance(payload: NotifyPayload, excludeUserId?: string | null) {
+    return this.notifyRoles(
+      ['maintenance', 'admin', 'property_manager'],
+      payload,
+      excludeUserId
+    );
+  },
+
+  /** Finance + admin. */
+  async notifyFinance(payload: NotifyPayload, excludeUserId?: string | null) {
+    return this.notifyRoles(['finance', 'admin'], payload, excludeUserId);
+  },
+
+  /** All Active users in the current org (emergency / org-wide). */
+  async notifyOrg(payload: NotifyPayload, excludeUserId?: string | null) {
+    const ids = await activeUserIds(() => true, excludeUserId);
+    return this.createMany(ids, payload);
+  },
+
+  /** Active tenants only. */
+  async notifyTenants(payload: NotifyPayload, excludeUserId?: string | null) {
+    return this.notifyRoles(['tenant'], payload, excludeUserId);
   },
 
   async ensureWelcome(): Promise<void> {
