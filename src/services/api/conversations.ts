@@ -1,4 +1,5 @@
-import { sb, unwrap, requireOrgId } from './_helpers';
+import { sb, unwrap, requireOrgId, requireUser } from './_helpers';
+import { notifications } from './notifications';
 import type { Conversation, ChatMessage } from '../../types';
 
 export const conversations = {
@@ -21,12 +22,36 @@ export const conversations = {
   },
 
   async send(conversationId: string, message: string): Promise<ChatMessage> {
+    const user = requireUser();
     const { data, error } = await sb().rpc('send_chat_message', {
       p_conversation_id: conversationId,
       p_message: message,
     });
     if (error) throw new Error(error.message);
-    return data as unknown as ChatMessage;
+    const msg = data as unknown as ChatMessage;
+
+    // Notify other participants
+    try {
+      const convResult = await sb()
+        .from('conversations')
+        .select('participant_ids')
+        .eq('id', conversationId)
+        .single();
+      const ids =
+        (convResult.data as { participant_ids?: string[] } | null)?.participant_ids ?? [];
+      const others = ids.filter((id) => id && id !== user.id);
+      const preview = message.length > 120 ? `${message.slice(0, 117)}…` : message;
+      await notifications.createMany(others, {
+        title: 'New message',
+        message: `${user.name}: ${preview}`,
+        type: 'announcement',
+        link: conversationId,
+      });
+    } catch (e) {
+      console.warn('[conversations] notify participants failed', e);
+    }
+
+    return msg;
   },
 
   async create(input: {
