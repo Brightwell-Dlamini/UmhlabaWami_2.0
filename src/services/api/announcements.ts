@@ -1,5 +1,6 @@
-import { sb, unwrap, requireOrgId } from './_helpers';
+import { sb, unwrap, requireOrgId, requireUser } from './_helpers';
 import type { Announcement, EmergencyBroadcast } from '../../types';
+import { notifications } from './notifications';
 
 export const announcementsExtra = {
   async activeEmergencyList(orgId = requireOrgId()) {
@@ -43,7 +44,35 @@ export const announcements = {
       p_target_audience: input.target_audience ?? 'All Tenants',
     });
     if (error) throw new Error(error.message);
-    return data as unknown as Announcement;
+    const row = data as unknown as Announcement;
+
+    try {
+      const actor = requireUser();
+      const priority = input.priority ?? 'General';
+      const type = priority === 'Emergency' ? 'emergency' : 'announcement';
+      await notifications.notifyTenants(
+        {
+          title: input.title,
+          message: input.message,
+          type,
+          link: row.id,
+        },
+        actor.id
+      );
+      await notifications.notifyManagers(
+        {
+          title: `Announcement posted: ${input.title}`,
+          message: input.message,
+          type,
+          link: row.id,
+        },
+        actor.id
+      );
+    } catch (e) {
+      console.warn('[announcements] notify failed', e);
+    }
+
+    return row;
   },
 
   async update(id: string, patch: Partial<Announcement>): Promise<Announcement> {
@@ -91,7 +120,24 @@ export const emergencyBroadcasts = {
       p_instructions: input.instructions,
     });
     if (error) throw new Error(error.message);
-    return data as unknown as EmergencyBroadcast;
+    const row = data as unknown as EmergencyBroadcast;
+
+    try {
+      const actor = requireUser();
+      await notifications.notifyOrg(
+        {
+          title: `EMERGENCY: ${input.headline}`,
+          message: `${input.type} — ${input.instructions}`,
+          type: 'emergency',
+          link: row.id,
+        },
+        actor.id
+      );
+    } catch (e) {
+      console.warn('[emergency] notify failed', e);
+    }
+
+    return row;
   },
 
   async deactivate(id: string): Promise<void> {
