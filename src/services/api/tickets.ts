@@ -6,7 +6,6 @@ import type {
   TicketStatus,
 } from '../../types';
 import { notifications } from './notifications';
-import { profiles } from './profiles';
 
 const TICKET_SELECT = `
   *,
@@ -93,27 +92,18 @@ export const tickets = {
       .single();
     const ticket = unwrap(result) as unknown as Ticket;
 
-    // Notify managers / admins about the new ticket
     try {
-      const staff = await profiles.list();
-      const targets = staff
-        .filter(
-          (u) =>
-            u.status === 'Active' &&
-            (u.role === 'admin' ||
-              u.role === 'property_manager' ||
-              u.role === 'maintenance') &&
-            u.id !== user.id
-        )
-        .map((u) => u.id);
-      await notifications.createMany(targets, {
-        title: 'New ticket opened',
-        message: `${ticket.title} — raised by ${user.name}`,
-        type: 'ticket_new',
-        link: ticket.id,
-      });
+      await notifications.notifyMaintenance(
+        {
+          title: 'New ticket opened',
+          message: `${ticket.title} — raised by ${user.name}`,
+          type: 'ticket_new',
+          link: ticket.id,
+        },
+        user.id
+      );
     } catch (e) {
-      console.warn('[tickets] notify managers of new ticket failed', e);
+      console.warn('[tickets] notify new ticket failed', e);
     }
 
     return ticket;
@@ -134,7 +124,6 @@ export const tickets = {
     });
     if (error) throw new Error(error.message);
 
-    // Backup notification in case DB notify_user did not fire (RLS / missing migration).
     await notifications.create({
       user_id: technicianId,
       title: 'New job assigned',
@@ -142,6 +131,16 @@ export const tickets = {
       type: 'ticket_assigned',
       link: ticketId,
     });
+
+    if (ticket.created_by_user_id && ticket.created_by_user_id !== technicianId) {
+      await notifications.create({
+        user_id: ticket.created_by_user_id,
+        title: 'Ticket assigned',
+        message: `${ticket.title} was assigned to ${technicianName}`,
+        type: 'ticket_status',
+        link: ticketId,
+      });
+    }
   },
 
   async accept(ticketId: string) {
@@ -153,6 +152,21 @@ export const tickets = {
       p_actor_name: user.name,
     });
     if (error) throw new Error(error.message);
+
+    try {
+      const ticket = await this.get(ticketId);
+      if (ticket.created_by_user_id && ticket.created_by_user_id !== user.id) {
+        await notifications.create({
+          user_id: ticket.created_by_user_id,
+          title: 'Ticket accepted',
+          message: `${ticket.title} is now in progress (${user.name})`,
+          type: 'ticket_status',
+          link: ticketId,
+        });
+      }
+    } catch (e) {
+      console.warn('[tickets] notify on accept failed', e);
+    }
   },
 
   async resolve(
@@ -185,10 +199,19 @@ export const tickets = {
       if (ticket.created_by_user_id) targets.push(ticket.created_by_user_id);
       await notifications.createMany(targets, {
         title: 'Ticket resolved',
-        message: `${ticket.title} was marked completed by ${user.name}`,
+        message: `${ticket.title} was marked completed by ${user.name}. Please confirm if the issue is fixed.`,
         type: 'ticket_resolved',
         link: ticketId,
       });
+      await notifications.notifyManagers(
+        {
+          title: 'Ticket resolved',
+          message: `${ticket.title} completed by ${user.name}`,
+          type: 'ticket_resolved',
+          link: ticketId,
+        },
+        user.id
+      );
     } catch (e) {
       console.warn('[tickets] notify on resolve failed', e);
     }
@@ -205,6 +228,30 @@ export const tickets = {
       p_feedback: feedback,
     });
     if (error) throw new Error(error.message);
+
+    try {
+      const ticket = await this.get(ticketId);
+      if (ticket.assigned_to && ticket.assigned_to !== user.id) {
+        await notifications.create({
+          user_id: ticket.assigned_to,
+          title: 'Resolution confirmed',
+          message: `${ticket.title} confirmed by ${user.name} (rating ${rating}/5)`,
+          type: 'ticket_status',
+          link: ticketId,
+        });
+      }
+      await notifications.notifyManagers(
+        {
+          title: 'Ticket closed',
+          message: `${ticket.title} confirmed by ${user.name}`,
+          type: 'ticket_status',
+          link: ticketId,
+        },
+        user.id
+      );
+    } catch (e) {
+      console.warn('[tickets] notify on confirm failed', e);
+    }
   },
 
   async reopen(ticketId: string, reason: string) {
@@ -229,6 +276,15 @@ export const tickets = {
           link: ticketId,
         });
       }
+      await notifications.notifyManagers(
+        {
+          title: 'Ticket reopened',
+          message: `${ticket.title}: ${reason}`,
+          type: 'ticket_reopened',
+          link: ticketId,
+        },
+        user.id
+      );
     } catch (e) {
       console.warn('[tickets] notify on reopen failed', e);
     }
