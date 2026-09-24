@@ -11,7 +11,6 @@ import {
 import type { InvoiceItem } from '../../services/api/accounting';
 import { tenants as tenantsApi } from '../../services/api/tenants';
 import { shops as shopsApi } from '../../services/api/shops';
-import { generateQuotePdf } from '../../services/pdf';
 import { useSupabaseQuery } from '../../hooks/useSupabaseQuery';
 import { useSupabaseMutation } from '../../hooks/useSupabaseMutation';
 import { useRealtime } from '../../hooks/useRealtime';
@@ -132,9 +131,9 @@ export function QuotesOrdersTab() {
   });
 
   const convertQuote = useSupabaseMutation({
-    mutationFn: (id: string) => quotesApi.convertToOrder(id),
-    invalidateKeys: ['quotes', 'sales_orders'],
-    onSuccess: () => toast.success('Quote converted to order'),
+    mutationFn: (id: string) => quotesApi.convertToInvoice(id),
+    invalidateKeys: ['quotes', 'invoices'],
+    onSuccess: () => toast.success('Quote converted to invoice'),
     onError: (e) => toast.error('Convert failed', e.message),
   });
 
@@ -153,9 +152,9 @@ export function QuotesOrdersTab() {
     const q = search.toLowerCase();
     return quotes.filter(
       (x) =>
-        (x.quote_number ?? '').toLowerCase().includes(q) ||
-        (x.client_name ?? '').toLowerCase().includes(q) ||
-        (x.prospect_company ?? '').toLowerCase().includes(q)
+        String((x as { quote_number?: string }).quote_number ?? '').toLowerCase().includes(q) ||
+        String((x as { prospect_company?: string }).prospect_company ?? '').toLowerCase().includes(q) ||
+        String((x as { prospect_name?: string }).prospect_name ?? '').toLowerCase().includes(q)
     );
   }, [quotes, search]);
 
@@ -164,8 +163,8 @@ export function QuotesOrdersTab() {
     const q = search.toLowerCase();
     return orders.filter(
       (x) =>
-        (x.order_number ?? '').toLowerCase().includes(q) ||
-        (x.client_name ?? '').toLowerCase().includes(q)
+        String((x as { order_number?: string }).order_number ?? '').toLowerCase().includes(q) ||
+        String((x as { salesperson_name?: string }).salesperson_name ?? '').toLowerCase().includes(q)
     );
   }, [orders, search]);
 
@@ -267,9 +266,16 @@ export function QuotesOrdersTab() {
           {filteredQuotes.length === 0 ? (
             <EmptyState
               title="No quotes yet"
-              description="Create a quote for a tenant or prospect."
-              actionLabel="New quote"
-              onAction={() => setShowQuoteModal(true)}
+              message="Create a quote for a tenant or prospect."
+              action={
+                <button
+                  type="button"
+                  onClick={() => setShowQuoteModal(true)}
+                  className="px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-bold"
+                >
+                  New quote
+                </button>
+              }
             />
           ) : (
             <div className="overflow-x-auto">
@@ -284,44 +290,60 @@ export function QuotesOrdersTab() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {filteredQuotes.map((q) => (
-                    <tr key={q.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30">
-                      <td className="px-4 py-3 font-mono font-bold">{q.quote_number}</td>
-                      <td className="px-4 py-3">{q.client_name || q.prospect_company || '—'}</td>
-                      <td className="px-4 py-3">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700">
-                          {q.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right font-bold">
-                        E{Number(q.total).toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex justify-end gap-1.5">
-                          {q.status !== 'Converted' && (
+                  {filteredQuotes.map((q) => {
+                    const qq = q as {
+                      id: string;
+                      quote_number?: string;
+                      prospect_company?: string;
+                      prospect_name?: string;
+                      status?: string;
+                      total?: number;
+                      tenant_id?: string;
+                    };
+                    const client =
+                      qq.prospect_company ||
+                      qq.prospect_name ||
+                      tenants.find((t) => t.id === qq.tenant_id)?.business_name ||
+                      '—';
+                    return (
+                      <tr key={qq.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30">
+                        <td className="px-4 py-3 font-mono font-bold">{qq.quote_number}</td>
+                        <td className="px-4 py-3">{client}</td>
+                        <td className="px-4 py-3">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700">
+                            {qq.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold">
+                          E{Number(qq.total ?? 0).toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex justify-end gap-1.5">
+                            {qq.status !== 'Converted' && (
+                              <button
+                                type="button"
+                                onClick={() => convertQuote.mutate(qq.id)}
+                                className="px-2 py-1 rounded-lg border text-[11px] font-semibold text-blue-600"
+                                title="Convert to invoice"
+                              >
+                                <ArrowRight className="w-3.5 h-3.5 inline" /> Invoice
+                              </button>
+                            )}
                             <button
                               type="button"
-                              onClick={() => convertQuote.mutate(q.id)}
-                              className="px-2 py-1 rounded-lg border text-[11px] font-semibold text-blue-600"
-                              title="Convert to order"
+                              onClick={() => void handleDeleteQuote(qq.id, qq.quote_number ?? 'quote')}
+                              className="p-1.5 rounded-lg border text-red-500"
                             >
-                              <ArrowRight className="w-3.5 h-3.5 inline" /> Order
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteQuote(q.id, q.quote_number)}
-                            className="p-1.5 rounded-lg border text-red-500"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -334,9 +356,16 @@ export function QuotesOrdersTab() {
           {filteredOrders.length === 0 ? (
             <EmptyState
               title="No orders yet"
-              description="Create a sales order for a tenant."
-              actionLabel="New order"
-              onAction={() => setShowOrderModal(true)}
+              message="Create a sales order for a tenant."
+              action={
+                <button
+                  type="button"
+                  onClick={() => setShowOrderModal(true)}
+                  className="px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-bold"
+                >
+                  New order
+                </button>
+              }
             />
           ) : (
             <div className="overflow-x-auto">
@@ -344,39 +373,50 @@ export function QuotesOrdersTab() {
                 <thead className="bg-slate-50 dark:bg-slate-900/60 text-[10px] uppercase text-slate-500">
                   <tr>
                     <th className="px-4 py-3">Number</th>
-                    <th className="px-4 py-3">Client</th>
+                    <th className="px-4 py-3">Tenant</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3 text-right">Total</th>
                     <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {filteredOrders.map((o) => (
-                    <tr key={o.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30">
-                      <td className="px-4 py-3 font-mono font-bold">{o.order_number}</td>
-                      <td className="px-4 py-3">{o.client_name || '—'}</td>
-                      <td className="px-4 py-3">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700">
-                          {o.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right font-bold">
-                        E{Number(o.total).toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() => void handleDeleteOrder(o.id, o.order_number)}
-                          className="p-1.5 rounded-lg border text-red-500"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredOrders.map((o) => {
+                    const oo = o as {
+                      id: string;
+                      order_number?: string;
+                      tenant_id?: string;
+                      status?: string;
+                      total?: number;
+                    };
+                    const tenantName =
+                      tenants.find((t) => t.id === oo.tenant_id)?.business_name || '—';
+                    return (
+                      <tr key={oo.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/30">
+                        <td className="px-4 py-3 font-mono font-bold">{oo.order_number}</td>
+                        <td className="px-4 py-3">{tenantName}</td>
+                        <td className="px-4 py-3">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700">
+                            {oo.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold">
+                          E{Number(oo.total ?? 0).toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteOrder(oo.id, oo.order_number ?? 'order')}
+                            className="p-1.5 rounded-lg border text-red-500"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -435,7 +475,6 @@ function QuoteForm({
   const [prospectName, setProspectName] = useState('');
   const [prospectEmail, setProspectEmail] = useState('');
   const [prospectPhone, setProspectPhone] = useState('');
-  const [shopId, setShopId] = useState('');
   const [issueDate, setIssueDate] = useState(new Date().toISOString().slice(0, 10));
   const [validUntil, setValidUntil] = useState(() => {
     const d = new Date();
@@ -443,9 +482,6 @@ function QuoteForm({
     return d.toISOString().slice(0, 10);
   });
   const [notes, setNotes] = useState('');
-  const [terms, setTerms] = useState(
-    'This quotation is valid for 30 days from the issue date. Acceptance is confirmed by signature and payment of the deposit.'
-  );
   const [lines, setLines] = useState<LineDraft[]>([
     { description: '', quantity: 1, unit_amount: 0, tax_rate: 0 },
   ]);
@@ -460,15 +496,11 @@ function QuoteForm({
     setProspectName('');
     setProspectEmail('');
     setProspectPhone('');
-    setShopId('');
     setIssueDate(new Date().toISOString().slice(0, 10));
     const d = new Date();
     d.setDate(d.getDate() + 30);
     setValidUntil(d.toISOString().slice(0, 10));
     setNotes('');
-    setTerms(
-      'This quotation is valid for 30 days from the issue date. Acceptance is confirmed by signature and payment of the deposit.'
-    );
     setLines([{ description: '', quantity: 1, unit_amount: 0, tax_rate: 0 }]);
     setTemplateId('blank');
   }, [open, tenants]);
@@ -515,11 +547,9 @@ function QuoteForm({
       prospect_name: clientMode === 'prospect' ? prospectName.trim() || null : null,
       prospect_email: clientMode === 'prospect' ? prospectEmail.trim() || null : null,
       prospect_phone: clientMode === 'prospect' ? prospectPhone.trim() || null : null,
-      shop_id: shopId || null,
       issue_date: issueDate,
       valid_until: validUntil,
       notes: notes.trim() || null,
-      terms: terms.trim() || null,
       lines: validLines.map((l) => {
         const unit = Math.round(Number(l.unit_amount) * 100) / 100;
         const qty = Math.round(Number(l.quantity) * 100) / 100;
@@ -529,7 +559,6 @@ function QuoteForm({
           quantity: qty,
           unit_amount: unit,
           tax_rate: tax,
-          amount: Math.round(qty * unit * (1 + tax) * 100) / 100,
         };
       }),
     });
