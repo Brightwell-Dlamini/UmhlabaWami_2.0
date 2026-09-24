@@ -36,6 +36,15 @@ function startOfDayUtc(iso: string): string {
 
 const POP_CLAIM_MARKER = 'POP_CLAIM:';
 
+async function tenantUserId(tenantId: string): Promise<string | null> {
+  try {
+    const tenant = await tenantsApi.get(tenantId);
+    return (tenant as { user_id?: string | null }).user_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export const invoices = {
   async list(orgId = requireOrgId()): Promise<Invoice[]> {
     const result = await sb()
@@ -75,8 +84,7 @@ export const invoices = {
     const inv = data as unknown as Invoice;
 
     try {
-      const tenant = await tenantsApi.get(input.tenant_id);
-      const userId = (tenant as { user_id?: string | null }).user_id;
+      const userId = await tenantUserId(input.tenant_id);
       if (userId) {
         await notifications.create({
           user_id: userId,
@@ -98,7 +106,24 @@ export const invoices = {
       p_invoice_id: id,
       p_reason: reason ?? null,
     });
-    if (!error && data) return data as unknown as Invoice;
+    if (!error && data) {
+      const inv = data as unknown as Invoice;
+      try {
+        const uid = await tenantUserId(inv.tenant_id);
+        if (uid) {
+          await notifications.create({
+            user_id: uid,
+            title: `Invoice cancelled — ${inv.invoice_number ?? ''}`,
+            message: reason || 'Your invoice was cancelled by finance.',
+            type: 'lease_reminder',
+            link: inv.id,
+          });
+        }
+      } catch (e) {
+        console.warn('[invoices] notify cancel failed', e);
+      }
+      return inv;
+    }
     if (error && !/could not find the function|function.*does not exist/i.test(error.message)) {
       throwFriendly(error);
     }
@@ -108,7 +133,22 @@ export const invoices = {
       .eq('id', id)
       .select()
       .single();
-    return unwrap(result) as unknown as Invoice;
+    const inv = unwrap(result) as unknown as Invoice;
+    try {
+      const uid = await tenantUserId(inv.tenant_id);
+      if (uid) {
+        await notifications.create({
+          user_id: uid,
+          title: `Invoice cancelled — ${inv.invoice_number ?? ''}`,
+          message: reason || 'Your invoice was cancelled by finance.',
+          type: 'lease_reminder',
+          link: inv.id,
+        });
+      }
+    } catch (e) {
+      console.warn('[invoices] notify cancel failed', e);
+    }
+    return inv;
   },
 
   async issueCreditNote(invoiceId: string, amount: number, reason: string): Promise<void> {
@@ -121,6 +161,28 @@ export const invoices = {
       p_notes: `Credit note: ${reason}`,
     });
     if (error) throwFriendly(error);
+
+    try {
+      const inv = await this.get(invoiceId);
+      const uid = await tenantUserId(inv.tenant_id);
+      if (uid) {
+        await notifications.create({
+          user_id: uid,
+          title: `Credit note — ${inv.invoice_number ?? ''}`,
+          message: `E${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2 })} credit applied. ${reason}`,
+          type: 'lease_reminder',
+          link: invoiceId,
+        });
+      }
+      await notifications.notifyFinance({
+        title: `Credit note issued — ${inv.invoice_number ?? ''}`,
+        message: `E${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2 })} — ${reason}`,
+        type: 'lease_reminder',
+        link: invoiceId,
+      });
+    } catch (e) {
+      console.warn('[invoices] notify credit failed', e);
+    }
   },
 
   async recordPayment(
@@ -139,6 +201,22 @@ export const invoices = {
       p_notes: proofUrl ? `POP: ${proofUrl}` : null,
     });
     if (error) throwFriendly(error);
+
+    try {
+      const inv = await this.get(invoiceId);
+      const uid = await tenantUserId(inv.tenant_id);
+      if (uid) {
+        await notifications.create({
+          user_id: uid,
+          title: `Payment recorded — ${inv.invoice_number ?? ''}`,
+          message: `E${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2 })} received via ${method}${reference ? ` (ref ${reference})` : ''}.`,
+          type: 'lease_reminder',
+          link: invoiceId,
+        });
+      }
+    } catch (e) {
+      console.warn('[invoices] notify payment failed', e);
+    }
   },
 
   async submitPaymentClaim(
@@ -184,21 +262,12 @@ export const invoices = {
     }
 
     try {
-      const staff = await profiles.list();
-      const targets = staff.filter(
-        (u) =>
-          u.status === 'Active' &&
-          (u.role === 'finance' || u.role === 'admin' || u.role === 'property_manager')
-      );
-      for (const u of targets) {
-        await notifications.create({
-          user_id: u.id,
-          title: `Payment claim — ${inv.invoice_number}`,
-          message: `${actor.name} reported E${args.amount.toLocaleString()} paid (${args.method}${args.reference ? `, ref ${args.reference}` : ''}). Review and record payment.`,
-          type: 'lease_reminder',
-          link: inv.id,
-        });
-      }
+      await notifications.notifyFinance({
+        title: `Payment claim — ${inv.invoice_number}`,
+        message: `${actor.name} reported E${args.amount.toLocaleString()} paid (${args.method}${args.reference ? `, ref ${args.reference}` : ''}). Review and record payment.`,
+        type: 'lease_reminder',
+        link: inv.id,
+      });
     } catch (e) {
       console.warn('[invoices] notify staff of POP claim failed', e);
     }
@@ -231,13 +300,7 @@ export const invoices = {
       if (!isPayableStatus(inv.status)) continue;
       const balance = Number(inv.total) - Number(inv.amount_paid ?? 0);
       if (balance <= 0) continue;
-      let userId: string | null = null;
-      try {
-        const tenant = await tenantsApi.get(inv.tenant_id);
-        userId = (tenant as { user_id?: string | null }).user_id ?? null;
-      } catch {
-        /* ignore */
-      }
+      const userId = await tenantUserId(inv.tenant_id);
       if (!userId) continue;
       const due = inv.due_date ? String(inv.due_date) : 'soon';
       await notifications.create({
