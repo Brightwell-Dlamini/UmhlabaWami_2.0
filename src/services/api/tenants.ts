@@ -2,6 +2,7 @@ import { sb, unwrap, requireOrgId, requireUser } from './_helpers';
 import { profiles } from './profiles';
 import { shops } from './shops';
 import type { Tenant, Shop } from '../../types';
+import { notifications } from './notifications';
 
 export interface TenantInput {
   property_id: string;
@@ -118,6 +119,26 @@ export const tenants = {
       await shops.update(input.shop.id, { status: 'Occupied' });
     } catch (e) {
       console.warn('[tenants.assignToUnit] unit status update failed', e);
+    }
+
+    try {
+      await notifications.notifyManagers({
+        title: 'Tenant assigned to unit',
+        message: `${tenant.business_name || tenant.contact_person || 'Tenant'} assigned to unit ${input.shop.shop_number || input.shop.id}`,
+        type: 'announcement',
+        link: tenant.id,
+      });
+      if (tenant.user_id) {
+        await notifications.create({
+          user_id: tenant.user_id,
+          title: 'Welcome — unit assigned',
+          message: `You have been assigned unit ${input.shop.shop_number || ''}. You can now manage tickets and invoices for this unit.`,
+          type: 'announcement',
+          link: tenant.id,
+        });
+      }
+    } catch (e) {
+      console.warn('[tenants.assignToUnit] notify failed', e);
     }
 
     return tenant;
