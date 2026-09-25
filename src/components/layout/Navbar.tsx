@@ -68,9 +68,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     void notifApi
       .ensureWelcome()
       .then(() => refetchCount())
-      .catch(() => {
-        /* non-fatal */
-      });
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id]);
 
@@ -126,9 +124,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       await notifApi.markAllRead();
       refetchCount();
       refetchList();
-    } catch {
-      /* ignore */
-    }
+    } catch {}
   };
 
   const handleMarkRead = async (id: string) => {
@@ -136,9 +132,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       await notifApi.markRead(id);
       refetchCount();
       refetchList();
-    } catch {
-      /* ignore */
-    }
+    } catch {}
   };
 
   const count = typeof unreadCount === 'number' ? unreadCount : 0;
@@ -154,18 +148,9 @@ export const Navbar: React.FC<NavbarProps> = ({
           type="button"
         >
           {!logoError ? (
-            <img
-              src={LOGO_SRC}
-              alt="Umhlaba Wami"
-              className="h-7 w-auto object-contain"
-              onError={() => setLogoError(true)}
-            />
+            <img src={LOGO_SRC} alt="Umhlaba Wami" className="h-7 w-auto object-contain" onError={() => setLogoError(true)} />
           ) : (
-            <img
-              src={LOGO_FALLBACK}
-              alt="Umhlaba Wami"
-              className="h-7 w-auto object-contain"
-            />
+            <img src={LOGO_FALLBACK} alt="Umhlaba Wami" className="h-7 w-auto object-contain" />
           )}
           {currentOrg?.name && (
             <span className="hidden sm:inline text-xs font-semibold text-[var(--uw-text)] truncate max-w-[160px]">
@@ -207,7 +192,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 <Bell className="w-3.5 h-3.5" strokeWidth={1.75} />
                 {count > 0 && (
-                  <span className="absolute top-1 right-1 min-w-[12px] h-[12px] px-1 rounded-full bg-danger-500 text-white text-[8px] font-bold flex items-center justify-center ring-2 ring-[var(--uw-surface)]">
+                  <span className="absolute top-1 right-1 min-w-[12px] h-[12px] px-1 rounded-full bg-red-500 text-white text-[8px] font-bold flex items-center justify-center ring-2 ring-[var(--uw-surface)]">
                     {count > 9 ? '9+' : count}
                   </span>
                 )}
@@ -216,51 +201,33 @@ export const Navbar: React.FC<NavbarProps> = ({
               {showNotifs && (
                 <div className="absolute right-0 mt-1.5 w-80 max-h-96 overflow-y-auto rounded-xl border border-[var(--uw-border)] bg-[var(--uw-surface)] shadow-lg z-50">
                   <div className="flex items-center justify-between px-3 py-2.5 border-b border-[var(--uw-border)]">
-                    <span className="text-xs font-semibold text-[var(--uw-text)]">
-                      Notifications
-                    </span>
+                    <span className="text-xs font-semibold text-[var(--uw-text)]">Notifications</span>
                     {count > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => void handleMarkAllRead()}
-                        className="text-[11px] font-semibold text-accent-500 hover:underline"
-                      >
+                      <button type="button" onClick={() => void handleMarkAllRead()} className="text-[11px] font-semibold text-[var(--uw-accent)] hover:underline">
                         Mark all read
                       </button>
                     )}
                   </div>
                   <div>
                     {notifList.length === 0 ? (
-                      <div className="px-3 py-8 text-center text-xs text-[var(--uw-text-muted)]">
-                        No notifications yet
-                      </div>
+                      <div className="px-3 py-8 text-center text-xs text-[var(--uw-text-muted)]">No notifications yet</div>
                     ) : (
                       notifList.map((n: NotificationItem) => (
                         <button
                           key={n.id}
                           type="button"
                           onClick={() => !n.read && handleMarkRead(n.id)}
-                          className={`w-full text-left px-3 py-2.5 hover:bg-[var(--uw-surface-raised)] transition-colors duration-fast border-b border-[var(--uw-border)] last:border-0 ${
-                            !n.read ? 'bg-accent-500/6' : ''
-                          }`}
+                          className={`w-full text-left px-3 py-2.5 hover:bg-[var(--uw-surface-raised)] transition-colors duration-fast border-b border-[var(--uw-border)] last:border-0 ${!n.read ? 'bg-[var(--uw-accent)]/10' : ''}`}
                         >
                           <div className="flex items-start gap-2">
-                            {!n.read && (
-                              <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-accent-500 shrink-0" />
-                            )}
+                            {!n.read && <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[var(--uw-accent)] shrink-0" />}
                             <div className={!n.read ? 'min-w-0' : 'pl-3.5 min-w-0'}>
-                              <div className="text-xs font-medium text-[var(--uw-text)] leading-snug">
-                                {n.title}
-                              </div>
+                              <div className="text-xs font-medium text-[var(--uw-text)] leading-snug">{n.title}</div>
                               {n.message && (
-                                <div className="text-[11px] text-[var(--uw-text-muted)] mt-0.5 line-clamp-2 leading-snug">
-                                  {n.message}
-                                </div>
+                                <div className="text-[11px] text-[var(--uw-text-muted)] mt-0.5 line-clamp-2 leading-snug">{n.message}</div>
                               )}
                               <div className="text-[10px] text-[var(--uw-text-subtle)] mt-1">
-                                {n.created_at
-                                  ? new Date(n.created_at).toLocaleString()
-                                  : ''}
+                                {n.created_at ? new Date(n.created_at).toLocaleString() : ''}
                               </div>
                             </div>
                           </div>
@@ -279,11 +246,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             className="hidden md:flex w-7 h-7 rounded-md text-[var(--uw-text-muted)] hover:text-[var(--uw-text)] hover:bg-[var(--uw-surface-raised)] items-center justify-center"
             title="Toggle theme"
           >
-            {isDarkMode ? (
-              <Sun className="w-3.5 h-3.5" strokeWidth={1.75} />
-            ) : (
-              <Moon className="w-3.5 h-3.5" strokeWidth={1.75} />
-            )}
+            {isDarkMode ? <Sun className="w-3.5 h-3.5" strokeWidth={1.75} /> : <Moon className="w-3.5 h-3.5" strokeWidth={1.75} />}
           </button>
 
           {currentUser ? (
@@ -296,12 +259,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }}
                 className="flex items-center gap-1.5 h-7 pl-1 pr-2 rounded-md hover:bg-[var(--uw-surface-raised)]"
               >
-                <span className="w-6 h-6 rounded-full bg-accent-500/15 text-accent-500 text-[11px] font-bold flex items-center justify-center">
+                <span className="w-6 h-6 rounded-full bg-[var(--uw-accent)]/15 text-[var(--uw-accent)] text-[11px] font-bold flex items-center justify-center">
                   {userInitial}
                 </span>
-                <span className="text-xs font-medium text-[var(--uw-text)] max-w-[100px] truncate">
-                  {currentUser.name}
-                </span>
+                <span className="text-xs font-medium text-[var(--uw-text)] max-w-[100px] truncate">{currentUser.name}</span>
                 <ChevronDown className="w-3 h-3 text-[var(--uw-text-muted)]" />
               </button>
               {showRoleMenu && (
@@ -332,7 +293,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={openRegister}
-                className="px-3 h-7 rounded-md text-xs font-bold bg-accent-500 text-white hover:bg-accent-600"
+                className="px-3 h-7 rounded-md text-xs font-bold uw-btn-primary"
               >
                 Register org
               </button>
@@ -344,80 +305,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             onClick={() => setIsMenuOpen((v) => !v)}
             className="md:hidden w-7 h-7 rounded-md text-[var(--uw-text)] flex items-center justify-center"
           >
-            {isMenuOpen ? (
-              <X className="w-4 h-4" strokeWidth={1.75} />
-            ) : (
-              <Menu className="w-4 h-4" strokeWidth={1.75} />
-            )}
+            {isMenuOpen ? <X className="w-4 h-4" strokeWidth={1.75} /> : <Menu className="w-4 h-4" strokeWidth={1.75} />}
           </button>
         </div>
       </div>
-
-      {currentUser && showNotifs && (
-        <div className="md:hidden border-t border-[var(--uw-border)] bg-[var(--uw-surface)] max-h-72 overflow-y-auto scrollbar-thin">
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--uw-border)]">
-            <span className="text-xs font-semibold">Notifications</span>
-            {count > 0 && (
-              <button
-                type="button"
-                onClick={() => void handleMarkAllRead()}
-                className="text-[11px] font-semibold text-accent-500"
-              >
-                Mark all read
-              </button>
-            )}
-          </div>
-          {notifList.length === 0 ? (
-            <div className="px-4 py-6 text-center text-xs text-[var(--uw-text-muted)]">
-              No notifications yet
-            </div>
-          ) : (
-            notifList.map((n) => (
-              <button
-                key={n.id}
-                type="button"
-                onClick={() => !n.read && handleMarkRead(n.id)}
-                className={`w-full text-left px-4 py-2.5 border-b border-[var(--uw-border)] ${
-                  !n.read ? 'bg-accent-500/6' : ''
-                }`}
-              >
-                <div className="text-xs font-medium">{n.title}</div>
-                {n.message && (
-                  <div className="text-[11px] text-[var(--uw-text-muted)] mt-0.5 line-clamp-2">
-                    {n.message}
-                  </div>
-                )}
-              </button>
-            ))
-          )}
-        </div>
-      )}
 
       {isMenuOpen && (
         <div className="md:hidden border-t border-[var(--uw-border)] bg-[var(--uw-surface)] px-4 py-3 space-y-2">
           {currentUser ? (
             <>
               <div className="text-xs font-semibold">{currentUser.name}</div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowNotifs((v) => !v);
-                  setIsMenuOpen(false);
-                }}
-                className="flex items-center gap-2 text-xs w-full py-2"
-              >
-                <Bell className="w-3.5 h-3.5" /> Notifications
-                {count > 0 && (
-                  <span className="ml-auto text-[10px] font-bold bg-danger-500 text-white rounded-full px-1.5">
-                    {count}
-                  </span>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleLogout()}
-                className="flex items-center gap-2 text-xs text-red-600 w-full py-2"
-              >
+              <button type="button" onClick={() => void handleLogout()} className="flex items-center gap-2 text-xs text-red-600 w-full py-2">
                 <LogOut className="w-3.5 h-3.5" /> Sign out
               </button>
             </>
@@ -426,7 +324,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button type="button" onClick={openLogin} className="text-xs font-semibold w-full py-2 text-left">
                 Sign in
               </button>
-              <button type="button" onClick={openRegister} className="text-xs font-bold w-full py-2 text-left text-accent-500">
+              <button type="button" onClick={openRegister} className="text-xs font-bold w-full py-2 text-left uw-btn-primary rounded-md px-3">
                 Register organisation
               </button>
             </>
