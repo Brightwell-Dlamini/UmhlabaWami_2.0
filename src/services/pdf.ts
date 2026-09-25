@@ -255,7 +255,9 @@ function drawTotals({
   y += 6;
 
   doc.setDrawColor(226, 232, 240);
-  doc.line(labelX, y - 3, valueX, y - 3);
+  doc.setLineWidth(0.4);
+  doc.line(labelX, y - 2, valueX, y - 2);
+  y += 7;
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
@@ -726,14 +728,12 @@ export async function generateLeaseCertificatePdf(
     doc,
     org,
     documentTitle: 'LEASE CERTIFICATE',
-    documentNumber:
-      lease.document_title || lease.id.slice(0, 8).toUpperCase(),
+    documentNumber: `LC-${lease.id.slice(0, 8).toUpperCase()}`,
     issueDate: lease.start_date,
     dueDate: lease.end_date,
   });
 
-  const startY = y;
-  const leftY = drawPartyBlock({
+  y = drawPartyBlock({
     doc,
     x: 20,
     y,
@@ -744,79 +744,25 @@ export async function generateLeaseCertificatePdf(
       tenant?.phone,
       tenant?.email,
     ],
-  });
+  }) + 6;
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(100, 116, 139);
-  doc.text('STATUS', pageWidth - 20, startY, { align: 'right' });
-  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
   doc.setTextColor(15, 23, 42);
-  doc.text(
-    lease.is_digitally_signed ? 'SIGNED' : 'PENDING SIGNATURE',
-    pageWidth - 20,
-    startY + 6,
-    { align: 'right' }
-  );
-
-  y = leftY + 8;
-
-  const terms: [string, string][] = [
-    ['Lease reference', lease.document_title || '—'],
-    ['Start date', lease.start_date],
-    ['End date', lease.end_date],
-    ['Renewal status', lease.renewal_status],
-    ['Monthly rental', `E${lease.rental_amount.toLocaleString()}`],
-    ['Deposit held', `E${(lease.deposit ?? 0).toLocaleString()}`],
+  const body = [
+    `This certifies that a lease is ${lease.renewal_status} between the parties.`,
+    `Lease period: ${lease.start_date} to ${lease.end_date}`,
+    `Monthly rent: ${formatMoney(lease.rental_amount)}`,
+    `Deposit: ${formatMoney(lease.deposit)}`,
   ];
-  if (lease.is_digitally_signed && lease.signer_name) {
-    terms.push(['Signed by', lease.signer_name]);
-    if (lease.signed_at) {
-      terms.push([
-        'Signed on',
-        new Date(lease.signed_at).toLocaleDateString(),
-      ]);
-    }
-  }
-
-  autoTable(doc, {
-    startY: y,
-    head: [['Term', 'Value']],
-    body: terms,
-    theme: 'grid',
-    headStyles: {
-      fillColor: hexToRgb(org.custom_branding_color || BRAND_FALLBACK),
-      textColor: [255, 255, 255],
-      fontStyle: 'bold',
-      fontSize: 10,
-    },
-    bodyStyles: { fontSize: 10, textColor: [15, 23, 42] },
-    columnStyles: {
-      0: { cellWidth: 55, fontStyle: 'bold' },
-      1: { cellWidth: 'auto' },
-    },
-    margin: { left: 20, right: 20 },
-  });
-
-  // @ts-expect-error
-  y = (doc.lastAutoTable?.finalY ?? y) + 10;
-
-  const termsBody = (lease as Lease & { terms_body?: string }).terms_body;
-  if (termsBody) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(100, 116, 139);
-    doc.text('Lease terms', 20, y);
-    y += 4;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor(51, 65, 85);
-    const wrapped = doc.splitTextToSize(termsBody, pageWidth - 40);
-    doc.text(wrapped, 20, y);
+  for (const line of body) {
+    doc.text(line, 20, y);
+    y += 6;
   }
 
   drawFooter(doc, [orgBankLine(org)]);
-  const leaseName = `Lease-${(lease.document_title || lease.id).replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+
+  const leaseName = `Lease-${(tenant?.business_name ?? lease.id).replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
   if (opts?.open) openPdfInNewTab(doc);
   else download(doc, leaseName);
 }
