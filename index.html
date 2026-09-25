@@ -2,14 +2,33 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/Umhlaba Wami logo p.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
-    <meta name="theme-color" content="#08080a" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#fafafb" media="(prefers-color-scheme: light)" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
+
+    <!-- Primary -->
+    <title>Umhlaba Wami — Commercial Property Management</title>
     <meta
       name="description"
       content="Umhlaba Wami — commercial property management for the Kingdom of Eswatini."
     />
+    <meta name="application-name" content="Umhlaba Wami" />
+
+    <!-- Theme (browser chrome + PWA splash) -->
+    <meta name="theme-color" content="#08080a" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#fafafb" media="(prefers-color-scheme: light)" />
+    <meta name="color-scheme" content="light dark" />
+
+    <!-- PWA: installable web app -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- iOS / Safari “Add to Home Screen” -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Umhlaba Wami" />
+    <link rel="apple-touch-icon" href="/Umhlaba%20Wami%20logo%20p.png" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/Umhlaba%20Wami%20logo%20p.png" />
 
     <!-- Inter Variable + Inter Display -->
     <link rel="preconnect" href="https://rsms.me/" />
@@ -22,8 +41,6 @@
       href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-
-    <title>Umhlaba Wami — Commercial Property Management</title>
   </head>
   <body>
     <div id="root"></div>

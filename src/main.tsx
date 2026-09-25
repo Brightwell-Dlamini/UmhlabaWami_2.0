@@ -18,10 +18,21 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>
 );
 
+// PWA — register service worker (disable with VITE_ENABLE_PWA=false)
 if (import.meta.env.VITE_ENABLE_PWA !== 'false' && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
-      console.warn('Service worker registration failed', err);
-    });
+    navigator.serviceWorker
+      .register('/sw.js', { scope: '/', updateViaCache: 'none' })
+      .then((reg) => {
+        // Check for a newer SW after each load (helps after deploys)
+        try {
+          reg.update();
+        } catch {
+          /* ignore */
+        }
+      })
+      .catch((err) => {
+        console.warn('Service worker registration failed', err);
+      });
   });
 }

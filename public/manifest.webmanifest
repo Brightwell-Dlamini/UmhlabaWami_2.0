@@ -1,11 +1,17 @@
 {
+  "id": "/",
   "name": "Umhlaba Wami",
-  "short_name": "UmhlabaWami",
-  "description": "Commercial property management system for property owners",
+  "short_name": "Umhlaba Wami",
+  "description": "Commercial property management for the Kingdom of Eswatini — tickets, tenants, units, leases, and finance.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#2563eb",
+  "orientation": "any",
+  "background_color": "#08080a",
+  "theme_color": "#7c5cff",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["business", "productivity", "finance"],
   "icons": [
     {
       "src": "/Umhlaba%20Wami%20logo%20p.png",
@@ -17,7 +23,13 @@
       "src": "/Umhlaba%20Wami%20logo%20p.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/Umhlaba%20Wami%20logo%20p.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
