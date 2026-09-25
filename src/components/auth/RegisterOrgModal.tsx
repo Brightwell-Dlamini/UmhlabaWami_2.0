@@ -2,59 +2,42 @@
 import React, { useMemo, useState } from 'react';
 import {
   Building2,
-  User,
-  Mail,
-  Phone,
-  MapPin,
+  ShieldAlert,
+  Users,
   ArrowRight,
   ArrowLeft,
+  Calculator,
   CheckCircle2,
-  AlertCircle,
+  Copy,
+  LogIn,
 } from 'lucide-react';
-import { auth } from '../../services/auth';
-import { subscriptionPlans } from '../../services/api/subscriptionPlans';
+import { organizations } from '../../services/api/organizations';
+import { subscriptionPlans } from '../../services/subscriptionPlans';
 import type { SubscriptionTier } from '../../types';
 import { Modal } from '../ui/Modal';
+import { useToast } from '../ui/ToastProvider';
 import { PasswordInput } from '../ui/PasswordInput';
 
-interface RegisterOrgModalProps {
+interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess?: () => void;
+  onSuccess: (orgName: string) => void;
+  /** Called when the user clicks "Back to sign in" from the success screen. */
+  onGoToSignIn?: () => void;
 }
 
-const plans = [
-  {
-    tier: 'Starter' as SubscriptionTier,
-    name: 'Starter',
-    blurb: 'Small portfolios getting started',
-  },
-  {
-    tier: 'Growth' as SubscriptionTier,
-    name: 'Growth',
-    blurb: 'Growing centres with more staff',
-  },
-  {
-    tier: 'Scale' as SubscriptionTier,
-    name: 'Scale',
-    blurb: 'Multi-centre operators',
-  },
-  {
-    tier: 'Enterprise' as SubscriptionTier,
-    name: 'Enterprise',
-    blurb: 'Large portfolios & custom needs',
-  },
-];
-
-export const RegisterOrgModal: React.FC<RegisterOrgModalProps> = ({
+export const RegisterOrgModal: React.FC<Props> = ({
   isOpen,
   onClose,
   onSuccess,
+  onGoToSignIn,
 }) => {
+  const toast = useToast();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [done, setDone] = useState(false);
+  const [orgCode, setOrgCode] = useState('');
 
   // Step 1 — organisation
   const [companyName, setCompanyName] = useState('');
@@ -78,7 +61,8 @@ export const RegisterOrgModal: React.FC<RegisterOrgModalProps> = ({
   const [estimatedMonthlyRental, setEstimatedMonthlyRental] = useState(350000);
   const [tier, setTier] = useState<SubscriptionTier>('Starter');
 
-  const estimatedFee = useMemo(
+  const plans = useMemo(() => subscriptionPlans.list(), []);
+  const fee = useMemo(
     () => subscriptionPlans.estimateMonthlyFee(tier, estimatedMonthlyRental),
     [tier, estimatedMonthlyRental]
   );
@@ -88,6 +72,7 @@ export const RegisterOrgModal: React.FC<RegisterOrgModalProps> = ({
     setErrorMsg('');
     setDone(false);
     setLoading(false);
+    setOrgCode('');
     setCompanyName('');
     setOwnerName('');
     setEmail('');
@@ -146,7 +131,7 @@ export const RegisterOrgModal: React.FC<RegisterOrgModalProps> = ({
     }
     setLoading(true);
     try {
-      const res = await auth.registerOrganisation({
+      const res = await organizations.register({
         company_name: companyName.trim(),
         owner_name: ownerName.trim(),
         email: email.trim(),
@@ -168,8 +153,10 @@ export const RegisterOrgModal: React.FC<RegisterOrgModalProps> = ({
         setLoading(false);
         return;
       }
+      setOrgCode(res.organization_code || '');
       setDone(true);
-      onSuccess?.();
+      onSuccess(companyName.trim());
+      toast.success('Application submitted', 'Awaiting platform approval.');
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : 'Registration failed');
     } finally {
@@ -192,19 +179,50 @@ export const RegisterOrgModal: React.FC<RegisterOrgModalProps> = ({
           <p className="text-sm text-slate-600 dark:text-slate-300">
             Your organisation application has been submitted. You will be notified once it is reviewed.
           </p>
-          <button
-            type="button"
-            onClick={handleClose}
-            className="px-5 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold"
-          >
-            Close
-          </button>
+          {orgCode && (
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border text-xs">
+              <div className="text-slate-500 mb-1">Organisation code</div>
+              <div className="font-mono font-bold text-sm flex items-center justify-center gap-2">
+                {orgCode}
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(orgCode);
+                    toast.success('Copied', 'Organisation code copied.');
+                  }}
+                  className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700"
+                  title="Copy"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="flex flex-col sm:flex-row gap-2 justify-center">
+            <button
+              type="button"
+              onClick={() => {
+                handleClose();
+                onGoToSignIn?.();
+              }}
+              className="px-5 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5"
+            >
+              <LogIn className="w-3.5 h-3.5" /> Back to sign in
+            </button>
+            <button
+              type="button"
+              onClick={handleClose}
+              className="px-5 py-2 rounded-xl border text-xs font-bold"
+            >
+              Close
+            </button>
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
           {errorMsg && (
             <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
               <span>{errorMsg}</span>
             </div>
           )}
@@ -331,16 +349,16 @@ export const RegisterOrgModal: React.FC<RegisterOrgModalProps> = ({
                       tier === p.tier ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/30' : 'border-slate-200 dark:border-slate-700'
                     }`}>
                       <div className="font-bold">{p.name}</div>
-                      <div className="text-slate-500">{p.blurb}</div>
+                      <div className="text-slate-500">{p.blurb || p.priceLabel}</div>
                     </button>
                   ))}
                 </div>
               </div>
-              {estimatedFee != null && (
-                <p className="text-[11px] text-slate-500">
-                  Estimated platform fee: <strong>E{Number(estimatedFee).toLocaleString()}/mo</strong>
-                </p>
-              )}
+              <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                <Calculator className="w-3.5 h-3.5" />
+                Estimated platform fee:{' '}
+                <strong>E{Number(fee.total).toLocaleString()}/mo</strong>
+              </p>
             </div>
           )}
 
