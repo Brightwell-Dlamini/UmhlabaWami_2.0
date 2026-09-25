@@ -315,6 +315,17 @@ export const invoices = {
     return sent;
   },
 
+  /** Generate Draft rent invoices for all active tenants for the period (YYYY-MM-DD). Tax defaults to 0. */
+  async bulkGenerateRent(periodDate: string, taxRate = 0): Promise<number> {
+    const { data, error } = await sb().rpc('bulk_generate_rent_invoices', {
+      p_organization_id: requireOrgId(),
+      p_period_date: periodDate,
+      p_tax_rate: taxRate,
+    });
+    if (error) throwFriendly(error);
+    return (data as number) ?? 0;
+  },
+
   async remove(id: string): Promise<void> {
     const { error } = await sb().from('invoices').delete().eq('id', id);
     if (error) throwFriendly(error);
