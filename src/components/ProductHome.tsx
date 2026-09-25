@@ -18,11 +18,6 @@ interface Props {
   onRegisterOrganisation: () => void;
 }
 
-/**
- * Unauthenticated entry for Umhlaba Wami — Commercial Property Management System.
- * This is NOT a property listing or discovery marketplace.
- * It is the product gateway for commercial property owners and their teams.
- */
 export function ProductHome({ onSignIn, onRegisterOrganisation }: Props) {
   const capabilities = [
     {
@@ -59,9 +54,7 @@ export function ProductHome({ onSignIn, onRegisterOrganisation }: Props) {
 
   return (
     <div className="flex-1 bg-[var(--uw-bg)]">
-      {/* HERO */}
       <section className="relative overflow-hidden border-b border-[var(--uw-border)]">
-        {/* Accent wash — subtle, not garish */}
         <div
           aria-hidden="true"
           className="absolute inset-0 pointer-events-none opacity-[0.55] dark:opacity-[0.7]"
@@ -70,24 +63,9 @@ export function ProductHome({ onSignIn, onRegisterOrganisation }: Props) {
               'radial-gradient(ellipse 60% 50% at 50% 0%, rgba(124,92,255,0.18), transparent 70%)',
           }}
         />
-        {/* Hairline grid */}
-        <div
-          aria-hidden="true"
-          className="absolute inset-0 pointer-events-none opacity-[0.4] dark:opacity-[0.25]"
-          style={{
-            backgroundImage:
-              'linear-gradient(to right, var(--uw-border) 1px, transparent 1px), linear-gradient(to bottom, var(--uw-border) 1px, transparent 1px)',
-            backgroundSize: '48px 48px',
-            maskImage:
-              'radial-gradient(ellipse 70% 60% at 50% 0%, black, transparent 75%)',
-            WebkitMaskImage:
-              'radial-gradient(ellipse 70% 60% at 50% 0%, black, transparent 75%)',
-          }}
-        />
 
         <div className="relative max-w-[1100px] mx-auto px-5 sm:px-6 py-20 md:py-28">
-          {/* Eyebrow */}
-          <div className="inline-flex items-center gap-2 px-2.5 h-6 rounded-full border border-accent-500/25 bg-accent-500/8 text-accent-500 text-[11px] font-medium mb-6">
+          <div className="inline-flex items-center gap-2 px-2.5 h-6 rounded-full border border-[var(--uw-accent)]/25 bg-[var(--uw-accent)]/10 text-[var(--uw-accent)] text-[11px] font-medium mb-6">
             <Sparkles className="w-3 h-3" strokeWidth={2} />
             <span>Commercial property management</span>
           </div>
@@ -107,7 +85,7 @@ export function ProductHome({ onSignIn, onRegisterOrganisation }: Props) {
             <button
               type="button"
               onClick={onSignIn}
-              className="inline-flex items-center justify-center gap-2 h-control-lg rounded-lg bg-accent-500 px-5 text-sm font-semibold text-white hover:bg-accent-600 transition-colors duration-fast"
+              className="inline-flex items-center justify-center gap-2 h-control-lg rounded-lg px-5 text-sm font-semibold uw-btn-primary transition-colors duration-fast"
             >
               Sign in to your organisation
               <ArrowRight className="w-4 h-4" strokeWidth={2} />
@@ -121,7 +99,6 @@ export function ProductHome({ onSignIn, onRegisterOrganisation }: Props) {
             </button>
           </div>
 
-          {/* Command hint */}
           <div className="mt-8 flex items-center gap-2 text-xs text-[var(--uw-text-subtle)]">
             <CommandIcon className="w-3.5 h-3.5" strokeWidth={1.75} />
             <span>Once signed in, press</span>
@@ -129,7 +106,6 @@ export function ProductHome({ onSignIn, onRegisterOrganisation }: Props) {
             <span>to jump anywhere.</span>
           </div>
 
-          {/* Trust strip */}
           <ul className="mt-10 flex flex-col sm:flex-row flex-wrap gap-x-6 gap-y-2 text-xs text-[var(--uw-text-muted)]">
             {[
               'Organisation-scoped multi-tenant security',
@@ -138,7 +114,7 @@ export function ProductHome({ onSignIn, onRegisterOrganisation }: Props) {
             ].map((item) => (
               <li key={item} className="inline-flex items-center gap-2">
                 <CheckCircle2
-                  className="w-3.5 h-3.5 text-success-500 shrink-0"
+                  className="w-3.5 h-3.5 text-emerald-600 shrink-0"
                   strokeWidth={2}
                 />
                 {item}
@@ -148,7 +124,6 @@ export function ProductHome({ onSignIn, onRegisterOrganisation }: Props) {
         </div>
       </section>
 
-      {/* CAPABILITIES */}
       <section className="max-w-[1100px] mx-auto px-5 sm:px-6 py-16 md:py-20">
         <div className="max-w-2xl">
           <h2 className="font-display text-2xl md:text-3xl font-semibold text-[var(--uw-text)] tracking-tight">
@@ -168,7 +143,7 @@ export function ProductHome({ onSignIn, onRegisterOrganisation }: Props) {
                 key={c.title}
                 className="group relative rounded-lg border border-[var(--uw-border)] bg-[var(--uw-surface)] p-4 transition-[border-color,background-color] duration-fast hover:border-[var(--uw-border-strong)] hover:bg-[var(--uw-surface-raised)]"
               >
-                <div className="inline-flex rounded-md bg-accent-500/10 border border-accent-500/20 p-1.5 text-accent-500">
+                <div className="inline-flex rounded-md bg-[var(--uw-accent)]/10 border border-[var(--uw-accent)]/20 p-1.5 text-[var(--uw-accent)]">
                   <Icon className="w-4 h-4" strokeWidth={1.75} />
                 </div>
                 <h3 className="mt-3 text-sm font-semibold text-[var(--uw-text)]">
@@ -183,7 +158,6 @@ export function ProductHome({ onSignIn, onRegisterOrganisation }: Props) {
         </div>
       </section>
 
-      {/* CTA */}
       <section className="border-t border-[var(--uw-border)] bg-[var(--uw-surface)]">
         <div className="max-w-[1100px] mx-auto px-5 sm:px-6 py-14 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
           <div>
@@ -199,7 +173,7 @@ export function ProductHome({ onSignIn, onRegisterOrganisation }: Props) {
             <button
               type="button"
               onClick={onSignIn}
-              className="inline-flex items-center justify-center h-control rounded-lg bg-accent-500 px-4 text-sm font-semibold text-white hover:bg-accent-600 transition-colors duration-fast"
+              className="inline-flex items-center justify-center h-control rounded-lg px-4 text-sm font-semibold uw-btn-primary transition-colors duration-fast"
             >
               Sign in
             </button>
