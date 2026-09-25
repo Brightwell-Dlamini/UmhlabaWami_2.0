@@ -537,20 +537,18 @@ function LeaseForm({
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block font-semibold mb-1">Start *</label>
+            <label className="block font-semibold mb-1">Start date</label>
             <input
               type="date"
-              required
               value={form.start_date}
               onChange={(e) => setForm({ ...form, start_date: e.target.value })}
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
             />
           </div>
           <div>
-            <label className="block font-semibold mb-1">End *</label>
+            <label className="block font-semibold mb-1">End date</label>
             <input
               type="date"
-              required
               value={form.end_date}
               onChange={(e) => setForm({ ...form, end_date: e.target.value })}
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
@@ -564,6 +562,8 @@ function LeaseForm({
               type="number"
               required
               min={0}
+              step="0.01"
+              inputMode="decimal"
               value={form.rental_amount}
               onChange={(e) =>
                 setForm({ ...form, rental_amount: Number(e.target.value) })
@@ -577,6 +577,8 @@ function LeaseForm({
               type="number"
               required
               min={0}
+              step="0.01"
+              inputMode="decimal"
               value={form.deposit}
               onChange={(e) =>
                 setForm({ ...form, deposit: Number(e.target.value) })
@@ -608,31 +610,24 @@ function LeaseForm({
           <label className="block font-semibold mb-1">Document title</label>
           <input
             value={form.document_title}
-            onChange={(e) =>
-              setForm({ ...form, document_title: e.target.value })
-            }
+            onChange={(e) => setForm({ ...form, document_title: e.target.value })}
             className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
-            placeholder="Lease Agreement — Unit G-12"
           />
         </div>
         <div>
           <label className="block font-semibold mb-1">Terms</label>
           <textarea
-            rows={6}
+            rows={5}
             value={form.terms_body}
             onChange={(e) => setForm({ ...form, terms_body: e.target.value })}
             className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border"
-            placeholder="Full lease wording the tenant will read before signing…"
           />
         </div>
         <div className="pt-3 flex justify-end gap-2 border-t">
           <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl border">
             Cancel
           </button>
-          <button
-            type="submit"
-            className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold"
-          >
+          <button type="submit" className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">
             {initial ? 'Save changes' : 'Create lease'}
           </button>
         </div>
