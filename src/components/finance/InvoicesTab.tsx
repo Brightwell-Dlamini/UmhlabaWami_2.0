@@ -25,6 +25,7 @@ import { Modal } from '../ui/Modal';
 import { useConfirm } from '../ui/ConfirmDialog';
 import { useToast } from '../ui/ToastProvider';
 import { EmptyState } from '../ui/EmptyState';
+import { formatMoney, parseMoney, MONEY_INPUT_PROPS } from '../../lib/money';
 
 const STATUS_FILTERS = [
   'All', 'Draft', 'Sent', 'Partially Paid', 'Paid', 'Overdue', 'Cancelled',
@@ -60,6 +61,12 @@ export function InvoicesTab() {
   const [creditAmount, setCreditAmount] = useState('');
   const [creditReason, setCreditReason] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showCreate, setShowCreate] = useState(false);
+  const [createTenantId, setCreateTenantId] = useState('');
+  const [createDesc, setCreateDesc] = useState('');
+  const [createAmount, setCreateAmount] = useState('');
+  const [createTax, setCreateTax] = useState('0');
+  const [createDueDays, setCreateDueDays] = useState('7');
 
   useInvoiceStatusSync({ orgId });
 
@@ -87,6 +94,11 @@ export function InvoicesTab() {
       period.setDate(1);
       return invoiceApi.bulkGenerateRent(period.toISOString().slice(0, 10));
     },
+    invalidateKeys: ['invoices', 'finance_transactions'],
+  });
+
+  const createInvoice = useSupabaseMutation({
+    mutationFn: (input: Parameters<typeof invoiceApi.create>[0]) => invoiceApi.create(input),
     invalidateKeys: ['invoices', 'finance_transactions'],
   });
 
@@ -139,6 +151,45 @@ export function InvoicesTab() {
     }
   };
 
+  const handleCreateInvoice = async () => {
+    if (!createTenantId) {
+      toast.error('Tenant required', 'Select a tenant for this invoice.');
+      return;
+    }
+    const amount = parseMoney(createAmount);
+    if (amount <= 0) {
+      toast.error('Amount required', 'Enter an amount greater than zero (cents allowed, e.g. 10.50).');
+      return;
+    }
+    const desc = createDesc.trim() || 'Invoice';
+    const taxRate = parseMoney(createTax) / 100;
+    const dueDays = Math.max(0, Math.floor(Number(createDueDays) || 0));
+    const issue = new Date();
+    const due = new Date(issue);
+    due.setDate(due.getDate() + dueDays);
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    try {
+      const inv = await createInvoice.mutate({
+        tenant_id: createTenantId,
+        type: 'Other',
+        issue_date: iso(issue),
+        due_date: iso(due),
+        tax_rate: taxRate,
+        lines: [{ description: desc, quantity: 1, unit_amount: amount }],
+      });
+      toast.success('Invoice created', inv.invoice_number);
+      setShowCreate(false);
+      setCreateTenantId('');
+      setCreateDesc('');
+      setCreateAmount('');
+      setCreateTax('0');
+      setCreateDueDays('7');
+      void refetch();
+    } catch (e) {
+      toast.error('Create failed', e instanceof Error ? e.message : 'Could not create invoice.');
+    }
+  };
+
   const openPayModal = (invoice: Invoice) => {
     const remaining = Math.max(0, invoice.total - invoice.amount_paid);
     const claim = invoiceApi.parseLatestClaim(invoice.notes);
@@ -156,7 +207,7 @@ export function InvoicesTab() {
     try {
       let proof_url: string | undefined;
       if (payFile) {
-        proof_url = await invoiceApi.uploadProof(payModal.id, payFile);
+        proof_url = await invoiceApi.uploadProof(payFile, payModal.id);
       }
       await invoiceApi.recordPayment(payModal.id, {
         amount,
@@ -273,13 +324,21 @@ export function InvoicesTab() {
             <Download className="w-3.5 h-3.5" /> Export
           </button>
           <button
+            onClick={() => setShowCreate(true)}
+            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5"
+            type="button"
+          >
+            <PlusCircle className="w-4 h-4" />
+            New invoice
+          </button>
+          <button
             onClick={handleBulkGenerate}
             disabled={bulkGenerate.loading}
             className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl flex items-center gap-1.5"
             type="button"
+            title="Draft rent invoices for all active tenants this month"
           >
-            <PlusCircle className="w-4 h-4" />
-            {bulkGenerate.loading ? 'Generating…' : 'Generate rent invoices'}
+            {bulkGenerate.loading ? 'Generating…' : 'Bulk rent (month)'}
           </button>
         </div>
       </div>
@@ -378,7 +437,7 @@ export function InvoicesTab() {
                         {inv.status}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-right font-bold">E{inv.total.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right font-bold">{formatMoney(inv.total)}</td>
                     <td className="px-3 py-2 text-right">
                       <div className="flex items-center justify-end gap-2 flex-wrap">
                         <button type="button" onClick={() => handlePdf(inv, true)} className="text-blue-600 font-semibold hover:underline">
@@ -443,7 +502,7 @@ export function InvoicesTab() {
             })()}
             <div>
               <label className="block font-semibold mb-1">Amount (E)</label>
-              <input type="number" min={0} step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)}
+              <input type="number" min={0} step="0.01" inputMode="decimal" value={payAmount} onChange={(e) => setPayAmount(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" />
             </div>
             <div>
@@ -489,7 +548,7 @@ export function InvoicesTab() {
             <p className="text-slate-500">Reduces the outstanding balance (applied as a credit payment on the invoice).</p>
             <div>
               <label className="block font-semibold mb-1">Amount (E)</label>
-              <input type="number" min={0} step="0.01" value={creditAmount} onChange={(e) => setCreditAmount(e.target.value)}
+              <input type="number" min={0} step="0.01" inputMode="decimal" value={creditAmount} onChange={(e) => setCreditAmount(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900" />
             </div>
             <div>
@@ -507,13 +566,95 @@ export function InvoicesTab() {
         </Modal>
       )}
 
+      {showCreate && (
+        <Modal open onClose={() => setShowCreate(false)} title="New invoice" size="md">
+          <div className="space-y-3 text-xs">
+            <div>
+              <label className="block font-semibold mb-1">Tenant *</label>
+              <select
+                value={createTenantId}
+                onChange={(e) => setCreateTenantId(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+              >
+                <option value="">Select tenant…</option>
+                {tenants
+                  .filter((t) => t.status === 'Active')
+                  .map((ten) => (
+                    <option key={ten.id} value={ten.id}>
+                      {ten.business_name || ten.contact_person} ({ten.email})
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Description</label>
+              <input
+                value={createDesc}
+                onChange={(e) => setCreateDesc(e.target.value)}
+                placeholder="e.g. Monthly rent — September 2026"
+                className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold mb-1">Amount (E) *</label>
+                <input
+                  {...MONEY_INPUT_PROPS}
+                  value={createAmount}
+                  onChange={(e) => setCreateAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Tax % (default 0)</label>
+                <input
+                  {...MONEY_INPUT_PROPS}
+                  value={createTax}
+                  onChange={(e) => setCreateTax(e.target.value)}
+                  placeholder="0"
+                  className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Due in (days)</label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={createDueDays}
+                onChange={(e) => setCreateDueDays(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-900"
+              />
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Creates one draft invoice for the selected tenant. Use “Bulk rent” only when you want every active tenant invoiced for the month.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 rounded-xl border">
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={createInvoice.loading}
+                onClick={() => void handleCreateInvoice()}
+                className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold disabled:opacity-60"
+              >
+                {createInvoice.loading ? 'Creating…' : 'Create invoice'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {viewingInvoice && (
         <Modal open onClose={() => setViewingInvoice(null)} title={viewingInvoice.invoice_number} size="md">
           <div className="space-y-3 text-xs">
             <p><strong>Tenant:</strong> {viewingInvoice.tenant_name}</p>
             <p><strong>Status:</strong> {viewingInvoice.status}</p>
-            <p><strong>Total:</strong> E{viewingInvoice.total.toLocaleString()}</p>
-            <p><strong>Paid:</strong> E{viewingInvoice.amount_paid.toLocaleString()}</p>
+            <p><strong>Total:</strong> {formatMoney(viewingInvoice.total)}</p>
+            <p><strong>Paid:</strong> {formatMoney(viewingInvoice.amount_paid)}</p>
             {viewingInvoice.notes && (
               <div className="p-2 rounded-lg bg-slate-50 dark:bg-slate-900 border whitespace-pre-wrap max-h-40 overflow-y-auto">
                 {viewingInvoice.notes}
