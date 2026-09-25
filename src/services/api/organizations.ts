@@ -15,7 +15,7 @@ export interface RegisterOrgInput {
   estimatedMonthlyRent?: number;
   propertyCount?: number;
   tenantCount?: number;
-  staffBreakdown?: Record<string, number>;
+  staffBreakdown?: Record<string, number | string>;
 }
 
 async function writeAudit(action: string, entityId: string, details: string, orgId?: string) {
@@ -81,15 +81,15 @@ export const organizations = {
 
     const { data, error } = await supabase.rpc('register_organization', {
       p_owner_auth_user_id: userId,
-      p_company_name: input.companyName,
-      p_owner_name: input.ownerName,
-      p_email: input.email,
-      p_phone: input.phone,
-      p_address: input.address,
-      p_subscription_tier: input.tier,
-      p_estimated_monthly_rent: input.estimatedMonthlyRent ?? 0,
-      p_property_count: input.propertyCount ?? 1,
-      p_tenant_count: input.tenantCount ?? 0,
+      p_company_name: String(input.companyName ?? '').trim(),
+      p_owner_name: String(input.ownerName ?? '').trim(),
+      p_email: String(input.email ?? '').trim().toLowerCase(),
+      p_phone: String(input.phone ?? '').trim(),
+      p_address: String(input.address ?? '').trim(),
+      p_subscription_tier: input.tier || 'Starter',
+      p_estimated_monthly_rent: Number(input.estimatedMonthlyRent) || 0,
+      p_property_count: Math.max(1, Number(input.propertyCount) || 1),
+      p_tenant_count: Math.max(0, Number(input.tenantCount) || 0),
       p_staff_breakdown: input.staffBreakdown ?? {},
     });
     if (error) throw new Error(error.message);
@@ -120,179 +120,50 @@ export const organizations = {
       >
     >
   ): Promise<Organization> {
+    const result = await sb().from('organizations').update(patch).eq('id', id).select('*').single();
+    const org = unwrap(result) as unknown as Organization;
+    await writeAudit('update', id, `Updated organisation ${org.company_name}`, id);
+    return org;
+  },
+
+  async approve(id: string): Promise<Organization> {
     const result = await sb()
       .from('organizations')
-      .update(patch)
+      .update({ status: 'Active' })
       .eq('id', id)
-      .select()
+      .select('*')
+      .single();
+    const org = unwrap(result) as unknown as Organization;
+    await writeAudit('approve', id, `Approved organisation ${org.company_name}`, id);
+    return org;
+  },
+
+  async reject(id: string, reason?: string): Promise<Organization> {
+    const result = await sb()
+      .from('organizations')
+      .update({ status: 'Rejected' })
+      .eq('id', id)
+      .select('*')
       .single();
     const org = unwrap(result) as unknown as Organization;
     await writeAudit(
-      'ORG_UPDATE',
+      'reject',
       id,
-      `Updated organisation ${org.company_name}: ${Object.keys(patch).join(', ')}`,
+      `Rejected organisation ${org.company_name}${reason ? `: ${reason}` : ''}`,
       id
     );
     return org;
   },
 
-  async approve(args: {
-    organizationId: string;
-    approverName: string;
-    customCode?: string;
-  }): Promise<{
-    organizationId: string;
-    organizationCode: string;
-    adminUserId: string;
-  }> {
-    const rpcResult = await sb().rpc('approve_organization', {
-      p_org_id: args.organizationId,
-      p_approver_name: args.approverName || 'Super Admin',
-      p_custom_code: args.customCode ?? null,
-    });
-
-    let out: {
-      organizationId: string;
-      organizationCode: string;
-      adminUserId: string;
-    };
-
-    if (!rpcResult.error && rpcResult.data) {
-      const raw = Array.isArray(rpcResult.data) ? rpcResult.data[0] : rpcResult.data;
-      // RPC may return jsonb with organizationId/organizationCode or full org row
-      if (raw && typeof raw === 'object' && 'organizationCode' in (raw as object)) {
-        const r = raw as {
-          organizationId: string;
-          organizationCode: string;
-          adminUserId?: string;
-        };
-        out = {
-          organizationId: r.organizationId,
-          organizationCode: r.organizationCode,
-          adminUserId: r.adminUserId || '',
-        };
-      } else {
-        const org = raw as Organization & { owner_auth_user_id?: string };
-        out = {
-          organizationId: org.id,
-          organizationCode: org.organization_code,
-          adminUserId: org.owner_auth_user_id || '',
-        };
-      }
-    } else {
-      // Fallback path: RPC missing or failed.
-      const { data: org, error: loadErr } = await sb()
-        .from('organizations')
-        .select('*')
-        .eq('id', args.organizationId)
-        .single();
-      if (loadErr || !org) {
-        throw new Error(
-          rpcResult.error?.message ||
-            loadErr?.message ||
-            'Org not found during approval.'
-        );
-      }
-      if (org.status === 'Active') {
-        throw new Error('Organisation already active.');
-      }
-
-      const code =
-        (args.customCode || '').trim().toUpperCase() ||
-        generateOrgCode(org.company_name);
-
-      const { data: patched, error: patchErr } = await sb()
-        .from('organizations')
-        .update({
-          status: 'Active',
-          organization_code: code,
-          approved_at: new Date().toISOString(),
-          approved_by: args.approverName,
-        })
-        .eq('id', args.organizationId)
-        .select('*')
-        .single();
-
-      if (patchErr || !patched) {
-        throw new Error(
-          patchErr?.message ||
-            rpcResult.error?.message ||
-            'Approval failed. Run migration 006_simple_approval.sql in Supabase.'
-        );
-      }
-
-      const ownerId =
-        (org as { owner_auth_user_id?: string }).owner_auth_user_id ||
-        (
-          await sb()
-            .from('profiles')
-            .select('id')
-            .eq('email', String(org.email).toLowerCase())
-            .maybeSingle()
-        ).data?.id;
-
-      if (ownerId) {
-        await sb()
-          .from('profiles')
-          .update({
-            organization_id: patched.id,
-            role: 'admin',
-            status: 'Active',
-          })
-          .eq('id', ownerId);
-      }
-
-      out = {
-        organizationId: patched.id,
-        organizationCode: patched.organization_code,
-        adminUserId: ownerId || '',
-      };
-    }
-
-    await writeAudit(
-      'ORG_APPROVE',
-      out.organizationId,
-      `Approved organisation — code ${out.organizationCode}`,
-      out.organizationId
-    );
-    return out;
+  async suspend(id: string): Promise<Organization> {
+    const result = await sb()
+      .from('organizations')
+      .update({ status: 'Suspended' })
+      .eq('id', id)
+      .select('*')
+      .single();
+    const org = unwrap(result) as unknown as Organization;
+    await writeAudit('suspend', id, `Suspended organisation ${org.company_name}`, id);
+    return org;
   },
-
-  async reject(args: {
-    organizationId: string;
-    approverName: string;
-    reason: string;
-  }): Promise<void> {
-    const result = await sb().rpc('reject_organization', {
-      p_org_id: args.organizationId,
-      p_approver_name: args.approverName,
-      p_reason: args.reason,
-    });
-    if (result.error) {
-      const { error } = await sb()
-        .from('organizations')
-        .update({ status: 'Rejected' })
-        .eq('id', args.organizationId);
-      if (error) throw new Error(result.error.message || error.message);
-    }
-    await writeAudit(
-      'ORG_REJECT',
-      args.organizationId,
-      args.reason || 'Application not approved.',
-      args.organizationId
-    );
-  },
-};
-
-export function generateOrgCode(companyName: string): string {
-  const prefix =
-    (companyName || 'ORG').replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() ||
-    'ORG';
-  const d = new Date();
-  const date =
-    String(d.getDate()).padStart(2, '0') +
-    String(d.getMonth() + 1).padStart(2, '0') +
-    String(d.getFullYear()).slice(-2);
-  const rand = String(Math.floor(Math.random() * 9000) + 1000);
-  return `${prefix}-${date}-${rand}`;
 }
