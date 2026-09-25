@@ -3,17 +3,6 @@
 /* Class-based dark mode (toggle adds .dark on <html>) */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ------------------------------------------------------------------ */
-/* FONT FACES                                                          */
-/* ------------------------------------------------------------------ */
-/* Loaded via <link> in index.html (Inter Variable + Geist Mono).      */
-/* Fallbacks declared in designTokens.ts so nothing breaks if the CDN  */
-/* is unavailable.                                                     */
-
-/* ------------------------------------------------------------------ */
-/* BASE                                                                */
-/* ------------------------------------------------------------------ */
-
 @layer base {
   :root {
     color-scheme: light;
@@ -24,8 +13,8 @@
     --uw-border-soft: #e3e3e8;
     --uw-border-strong: #cfcfd6;
     --uw-text: #0d0d10;
-    --uw-text-muted: #5c5c68;
-    --uw-text-subtle: #8a8a95;
+    --uw-text-muted: #3f3f4a;
+    --uw-text-subtle: #6b6b76;
     --uw-accent: #7c5cff;
     --uw-accent-hover: #6a45f5;
     --uw-focus-ring: 0 0 0 1px #7c5cff, 0 0 0 3px rgba(124, 92, 255, 0.25);
@@ -291,6 +280,11 @@ textarea::placeholder {
 .dark textarea::placeholder {
   color: #8b8b98 !important;
 }
+
+/* Light mode: keep slate utility classes readable */
+.text-slate-400 { color: #64748b !important; }
+.text-slate-500 { color: #475569 !important; }
+.text-slate-600 { color: #334155 !important; }
 
 .dark .text-slate-400 { color: #9ca3af !important; }
 .dark .text-slate-500 { color: #a1a1aa !important; }
